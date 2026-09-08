@@ -28,7 +28,7 @@ img, svg { display: block; }
 .brandmark { flex: none; }
 
 /* ---------- shell ---------- */
-.screen { min-height: 100dvh; background: var(--bg); position: relative; padding-bottom: calc(112px + env(safe-area-inset-bottom)); }
+.screen { min-height: 100dvh; background: var(--bg); position: relative; padding-bottom: calc(108px + env(safe-area-inset-bottom)); }
 .bar {
   position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 6px;
   padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
@@ -148,14 +148,21 @@ small { font-size: .8125rem; color: var(--muted); }
 .row > * { flex: 1; }
 
 /* floating add */
+.dock {
+  position: fixed; z-index: 6; left: 0; right: 0; bottom: 0;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; justify-items: center;
+  padding: 10px 24px calc(10px + env(safe-area-inset-bottom));
+  background: var(--bg); box-shadow: 0 -1px 0 var(--line);
+}
+.dock-item { display: grid; justify-items: center; gap: 2px; min-width: 64px; min-height: 48px; padding-top: 4px; font-size: .75rem; font-weight: 600; color: var(--muted); }
+.dock-item:hover { color: var(--ink); }
 .fab {
-  position: fixed; z-index: 6; left: 50%; translate: -50% 0; bottom: calc(20px + env(safe-area-inset-bottom));
-  width: 64px; height: 64px; display: grid; place-items: center; border-radius: 50%;
+  width: 60px; height: 60px; display: grid; place-items: center; border-radius: 50%;
   background: var(--accent); color: var(--on-accent);
   box-shadow: 0 10px 24px -6px color-mix(in srgb, var(--accent) 60%, transparent), 0 2px 6px rgb(0 0 0 / .18);
   transition: transform var(--dur) var(--ease);
 }
-.fab:hover { transform: translateY(-2px); }
+.fab:hover { transform: translateY(-1px); }
 .fab:active { transform: scale(.94); }
 
 /* ---------- the settle seal ---------- */
@@ -248,6 +255,7 @@ small { font-size: .8125rem; color: var(--muted); }
 [data-theme=mono] .slip:hover { transform: none; }
 [data-theme=mono] .ornament { opacity: .14; color: var(--ink); }
 [data-theme=mono] .fab { border-radius: 0; box-shadow: none; }
+[data-theme=mono] .dock { box-shadow: 0 -2px 0 var(--ink); }
 @media (prefers-reduced-motion: no-preference) {
   [data-theme=mono] .seal { animation: invert 700ms steps(2, jump-none) both; }
 }
@@ -287,11 +295,13 @@ small { font-size: .8125rem; color: var(--muted); }
 /* Pixel: sixteen colours, dialog boxes, 1-UP */
 [data-theme=pixel] { --elev: 0 0 0 3px var(--line), 6px 6px 0 3px #000000; --elev-hi: 0 0 0 3px var(--accent), 6px 6px 0 3px #000000; --pill: 0; }
 [data-theme=pixel] .icon-svg { stroke-linecap: square; stroke-linejoin: miter; shape-rendering: crispEdges; }
-[data-theme=pixel] .hero-num { font-family: var(--ui); font-weight: 700; --hero-max: 3.6rem; --fit: 135; letter-spacing: 0; text-shadow: 3px 3px 0 #000000; }
-[data-theme=pixel] .pay-amt .money { font-family: var(--ui); font-weight: 700; }
+/* Silkscreen digits, no shadow: every 0-9 stays distinct (Pixelify's 2/5 read as 8/S) */
+[data-theme=pixel] .hero-num { font-weight: 400; --hero-max: 2.6rem; --fit: 88; letter-spacing: 0; }
+[data-theme=pixel] .money, [data-theme=pixel] .btn, [data-theme=pixel] .btn-sm { font-family: var(--num); font-weight: 400; }
 [data-theme=pixel] .section-head h2, [data-theme=pixel] .serial, [data-theme=pixel] .wordmark { font-family: var(--num); text-transform: uppercase; }
 [data-theme=pixel] .slip:hover { transform: translate(-2px, -2px); }
-[data-theme=pixel] .fab { border-radius: 0; box-shadow: 0 0 0 3px #000000, 6px 6px 0 3px #000000; }
+[data-theme=pixel] .fab { border-radius: 0; box-shadow: 0 0 0 3px #000000, 4px 4px 0 3px #000000; }
+[data-theme=pixel] .dock { box-shadow: 0 -3px 0 var(--line); }
 [data-theme=pixel] .qr-plate { border-radius: 0; }
 @media (prefers-reduced-motion: no-preference) {
   [data-theme=pixel] .seal-svg { animation: coin 600ms steps(6, end) both; }
@@ -322,7 +332,8 @@ small { font-size: .8125rem; color: var(--muted); }
 [data-theme=auto] .section-head h2 { font-family: var(--num); font-size: 1.5rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 [data-theme=auto] .ornament { color: #111111; opacity: .16; }
 [data-theme=auto] .slip:hover { transform: translateY(-4px); }
-[data-theme=auto] .fab { box-shadow: 0 0 0 2px #111111, 0 6px 0 0 #111111; }
+[data-theme=auto] .fab { box-shadow: 0 0 0 2px #111111, 0 4px 0 0 #111111; }
+[data-theme=auto] .dock { box-shadow: 0 -2px 0 #111111; }
 @media (prefers-reduced-motion: no-preference) {
   [data-theme=auto] .seal-svg { animation: flag 700ms cubic-bezier(.22, 1, .36, 1) both; }
 }

@@ -101,7 +101,13 @@ export function Screen({ t, title, back, action, fab, children }: {
         <span className="bar-end">{action}</span>
       </header>
       <main className="main">{children}</main>
-      {fab && <button className="fab" onClick={() => go(fab)} aria-label="Add expense"><Icon n="plus" size={28} /></button>}
+      {fab && (
+        <nav className="dock" aria-label="Main">
+          <button className="dock-item" onClick={() => go('/')}><Icon n="home" />Home</button>
+          <button className="fab" onClick={() => go(fab)} aria-label="Add expense"><Icon n="plus" size={28} /></button>
+          <button className="dock-item" onClick={() => go('/me')}><Icon n="user" />You</button>
+        </nav>
+      )}
     </div>
   )
 }
