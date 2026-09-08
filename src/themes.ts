@@ -71,14 +71,14 @@ export const THEMES: ThemeDef[] = [
   },
   {
     id: 'goa', name: 'Goa', line: 'Sand, turquoise water, coral sunset. Stickers on a trip notebook.',
-    dark: false, radius: 24, stroke: 2.2, ornament: 'none', celebrate: 'Sorted!', motion: 'bouncy',
+    dark: false, radius: 24, stroke: 2.2, ornament: 'guilloche', celebrate: 'Sorted!', motion: 'bouncy',
     ui: "'Baloo 2'", num: "'Baloo 2'", fonts: [f.baloo],
     c: { bg: '#FFF2D8', surface: '#FFFAEE', surface2: '#FFE6BD', ink: '#2A1F14', muted: '#6A5641', line: '#F0D9AE',
       accent: '#0A7A70', onAccent: '#FFFFFF', link: '#0A6F66', pos: '#107A45', neg: '#C1304A', settled: '#8C5E0E' },
   },
   {
     id: 'mono', name: 'Mono', line: 'Graphite and white only. Type does all the work.',
-    dark: false, radius: 0, stroke: 1.5, ornament: 'none', celebrate: 'SETTLED', motion: 'snappy',
+    dark: false, radius: 0, stroke: 1.5, ornament: 'guilloche', celebrate: 'SETTLED', motion: 'snappy',
     ui: "'Archivo'", num: "'Archivo'", fonts: [f.archivo],
     c: { bg: '#FFFFFF', surface: '#FFFFFF', surface2: '#F1F1F1', ink: '#111111', muted: '#545454', line: '#111111',
       accent: '#25252A', onAccent: '#FFFFFF', link: '#111111', pos: '#0E7443', neg: '#B0202D', settled: '#111111' },
@@ -99,7 +99,7 @@ export const THEMES: ThemeDef[] = [
   },
   {
     id: 'cyber', name: 'Cyber', line: 'Acid lime on near-black. Loud, condensed, experimental.',
-    dark: true, radius: 6, stroke: 1.8, ornament: 'none', celebrate: 'SETTLED', motion: 'snappy',
+    dark: true, radius: 6, stroke: 1.8, ornament: 'guilloche', celebrate: 'SETTLED', motion: 'snappy',
     ui: "'Anek Latin'", num: "'Khand'", fonts: [f.anek, f.khand],
     c: { bg: '#11120F', surface: '#1A1C17', surface2: '#252820', ink: '#F2F5EA', muted: '#A7AE9A', line: '#343929',
       accent: '#B8F34A', onAccent: '#11120F', link: '#B8F34A', pos: '#4BE3A0', neg: '#FF6B80', settled: '#F5D64C' },
@@ -120,14 +120,14 @@ export const THEMES: ThemeDef[] = [
   },
   {
     id: 'chai', name: 'Chai', line: 'A tapri: blue tarp, steel tumblers, chai amber, hand-painted board.',
-    dark: false, radius: 12, stroke: 1.8, ornament: 'none', celebrate: 'Cutting clear', motion: 'fluid',
+    dark: false, radius: 12, stroke: 1.8, ornament: 'ripple', celebrate: 'Cutting clear', motion: 'fluid',
     ui: "'Mukta'", num: "'Yatra One'", fonts: [f.mukta, f.yatra],
     c: { bg: '#E9EDEF', surface: '#F7F8F8', surface2: '#DDE3E6', ink: '#1C2226', muted: '#505C64', line: '#C8D0D5',
       accent: '#1F5FA8', onAccent: '#FFFFFF', link: '#1B5596', pos: '#12713F', neg: '#B92D3D', settled: '#8F5E0E' },
   },
   {
     id: 'auto', name: 'Auto', line: 'Canary canopy, CNG green, a fare meter that reads your balance.',
-    dark: false, radius: 10, stroke: 2.4, ornament: 'meter', celebrate: 'Meter down', motion: 'snappy',
+    dark: false, radius: 10, stroke: 2.4, ornament: 'guilloche', celebrate: 'Meter down', motion: 'snappy',
     ui: "'Rajdhani'", num: "'Teko'", fonts: [f.rajdhani, f.teko],
     c: { bg: '#FFD60A', surface: '#FFFBEA', surface2: '#FFEE99', ink: '#111111', muted: '#3F3A1E', line: '#111111',
       accent: '#0B6B3A', onAccent: '#FFFFFF', link: '#0B5E33', pos: '#0A6634', neg: '#B0141F', settled: '#111111' },

@@ -112,6 +112,7 @@ export function Denomination({ t, amount, line, caption }: { t: ThemeId; amount:
     <section className="hero" aria-label={`${line}: ${inr(amount)}`}>
       <Ornament t={t} />
       <p className={`hero-num ${tone(amount)}`} aria-hidden style={{ '--chars': digits.length } as CSSProperties}><span className="cur">₹</span>{digits}</p>
+      <p className="microprint" aria-hidden>{'SPLITTR · SETTLE · '.repeat(8)}</p>
       <p className="hero-verb" aria-hidden>{line}</p>
       {caption && <p className="hero-cap">{caption}</p>}
     </section>
@@ -131,8 +132,8 @@ export function Seal({ t, replay = 0, caption = 'Everyone is square in this grou
       <svg className="seal-svg" viewBox="-60 -60 120 120" aria-hidden>
         <defs><path id={id} d="M-44 0a44 44 0 1 1 88 0a44 44 0 1 1-88 0" /></defs>
         {(th.ornament === 'ripple' || t === 'midnight') && <g className="seal-ripples">{[20, 20, 20].map((r, i) => <circle key={i} r={r} style={{ animationDelay: `${i * 180}ms` }} />)}</g>}
-        <circle className="seal-outer" r="56" />
-        <circle className="seal-inner" r="36" />
+        {th.radius === 0 ? <><rect className="seal-outer" x="-54" y="-54" width="108" height="108" /><rect className="seal-inner" x="-34" y="-34" width="68" height="68" /></>
+          : <><circle className="seal-outer" r="56" /><circle className="seal-inner" r="36" /></>}
         <g className="seal-rosette" transform="scale(.3)"><path d={ROSETTE[2]} /></g>
         <text className="seal-text"><textPath href={`#${id}`} textLength="272">{ring}</textPath></text>
         <path className="seal-check" d="M-13 1l8 8 18-18" />
@@ -286,9 +287,9 @@ export function Settle({ s, g, from, to, amount, t = g.theme, onRecord }: {
         <p className="pay-for">For {note}</p>
         {qr && <div className="qr-plate"><img src={qr} alt={`UPI QR code to pay ${payee} ${inr(amount)}`} /></div>}
       </section>
-      {link && <a className="btn primary" href={link} onClick={() => setAsked(true)}><Icon n="send" />Pay {inr(amount)} with a UPI app</a>}
+      {link && <a className="btn primary" href={link} onClick={() => setAsked(true)}><Icon n="send" />Pay {inr(amount)} via UPI</a>}
       {from !== ME && <a className="btn secondary" href={wa(reminder(s, g, { from, to, amount }))} target="_blank" rel="noopener"><Icon n="bell" />Send on WhatsApp</a>}
-      <p className="note"><Icon n="check" size={18} />Check that your UPI app shows <strong>{payee}</strong> before you pay.</p>
+      <p className="note"><Icon n="check" size={18} /><span>Check that your UPI app shows <strong>{payee}</strong> before you pay.</span></p>
       {asked ? (
         <div className="confirm" role="group" aria-label="Payment result">
           <p>Did your {inr(amount)} payment to {payee} go through?</p>
