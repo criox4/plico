@@ -4,7 +4,7 @@ import { runRecurring, type Group, type Theme, type Tone } from './logic'
 export type State = { me: { name: string; upi: string }; theme: Theme; tone: Tone; groups: Group[] }
 
 const KEY = 'splittr'
-const blank: State = { me: { name: '', upi: '' }, theme: 'clean', tone: 'gentle', groups: [] }
+const blank: State = { me: { name: '', upi: '' }, theme: 'classic', tone: 'gentle', groups: [] }
 
 // ponytail: whole state in one localStorage key (~5MB ceiling); move to IndexedDB + sync when a backend lands.
 function load(): State {

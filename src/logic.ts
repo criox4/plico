@@ -1,8 +1,9 @@
 // All money is integer paise. Never floats past the input box.
+import type { ThemeId as Theme } from './themes'
+export type { Theme }
 export type Id = string
 export type SplitMode = 'equal' | 'exact' | 'percent' | 'shares'
 export type Kind = 'trip' | 'home' | 'couple' | 'friends' | 'family' | 'office'
-export type Theme = 'clean' | 'midnight' | 'khata' | 'goa' | 'neon' | 'mono'
 export type Tone = 'gentle' | 'normal' | 'shameless'
 
 export type Member = { id: Id; name: string; upi?: string }
