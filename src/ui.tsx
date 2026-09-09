@@ -31,6 +31,7 @@ export const PUBLIC = import.meta.env.VITE_PUBLIC_URL || location.origin
 export const who = (g: Group, id: Id) => (id === ME ? 'You' : g.members.find(m => m.id === id)?.name ?? 'Someone')
 export const realName = (s: State, g: Group, id: Id) => (id === ME ? s.me.name || 'Me' : who(g, id))
 export const upiOf = (s: State, g: Group, id: Id) => (id === ME ? s.me.upi : g.members.find(m => m.id === id)?.upi) ?? ''
+const lower = (name: string) => (name === 'You' ? 'you' : name)
 const tone = (p: number) => (p > 0 ? 'pos' : p < 0 ? 'neg' : '')
 
 export function verb(g: Group | null, net: number, overall = false) {
@@ -90,12 +91,12 @@ export function Money({ p, sign, className = '' }: { p: number; sign?: boolean; 
 }
 
 export function Screen({ t, title, back, action, fab, children }: {
-  t: ThemeId; title?: ReactNode; back?: boolean; action?: ReactNode; fab?: string; children: ReactNode
+  t: ThemeId; title?: ReactNode; back?: boolean | (() => void); action?: ReactNode; fab?: string; children: ReactNode
 }) {
   return (
     <div className="screen" data-theme={t} style={themeVars(t)}>
       <header className="bar">
-        {back ? <button className="iconbtn" onClick={goBack} aria-label="Back"><Icon n="back" /></button>
+        {back ? <button className="iconbtn" onClick={typeof back === 'function' ? back : goBack} aria-label="Back"><Icon n="back" /></button>
           : <span className="wordmark"><BrandMark />Splittr</span>}
         {title && <h1 className="bar-title">{title}</h1>}
         <span className="bar-end">{action}</span>
@@ -125,7 +126,7 @@ export function Denomination({ t, amount, line, caption }: { t: ThemeId; amount:
   )
 }
 
-const SectionHead = ({ title, action }: { title: string; action?: ReactNode }) => (
+export const SectionHead = ({ title, action }: { title: string; action?: ReactNode }) => (
   <div className="section-head"><h2>{title}</h2>{action}</div>
 )
 
@@ -150,6 +151,18 @@ export function Seal({ t, replay = 0, caption = 'Everyone is square in this grou
   )
 }
 
+/** UPI QR as a data URL, always dark-on-white for scanner reliability. */
+export function useQr(link: string) {
+  const [qr, setQr] = useState('')
+  useEffect(() => {
+    if (!link) return setQr('')
+    let live = true
+    QRCode.toDataURL(link, { margin: 1, width: 480, color: { dark: '#000000', light: '#ffffff' } }).then(u => live && setQr(u))
+    return () => { live = false }
+  }, [link])
+  return qr
+}
+
 // ---------- screens ----------
 export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['expenses'][number]; serial: number; showGroup?: boolean }) {
   const mine = (e.paid[ME] ?? 0) - (e.owed[ME] ?? 0)
@@ -161,8 +174,8 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
       <button onClick={() => go(`/g/${g.id}/e/${e.id}`)}>
         <span className={`cat ${e.settle ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
         <span className="lr-body">
-          <strong>{e.settle ? `${by} paid ${who(g, Object.keys(e.owed)[0])}` : e.title}</strong>
-          <small><span className="serial">{no}</span> · {e.settle ? 'settlement' : `${inr(e.amount)}, ${by} paid`}{showGroup ? ` · ${g.name}` : ''}</small>
+          <strong>{e.settle ? `${by} paid ${lower(who(g, Object.keys(e.owed)[0]))}` : e.title}</strong>
+          <small><span className="serial">{no}</span> · {e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${g.name}` : ''}</small>
         </span>
         {e.settle ? <span className="lr-amt"><span className="money settled-ink">{inr(e.amount)}</span></span>
           : <span className="lr-amt"><Money p={mine} sign /><small>{mine > 0 ? 'you lent' : mine < 0 ? 'your share' : 'not in it'}</small></span>}
@@ -276,13 +289,10 @@ export function Settle({ s, g, from, to, amount, t = g.theme, onRecord }: {
 }) {
   const payee = realName(s, g, to)
   const vpa = upiOf(s, g, to)
-  const [qr, setQr] = useState('')
   const [asked, setAsked] = useState(false)
   const note = `${g.name} settlement`
   const link = isVpa(vpa) ? upiLink(vpa, payee, amount, note) : ''
-  useEffect(() => {
-    if (link) QRCode.toDataURL(link, { margin: 1, width: 480, color: { dark: '#000000', light: '#ffffff' } }).then(setQr)
-  }, [link])
+  const qr = useQr(link)
   return (
     <Screen t={t} back title="Settle up">
       <section className="pay" aria-label="Payment details">
