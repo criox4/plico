@@ -298,6 +298,7 @@ small { font-size: .8125rem; color: var(--muted); }
 /* Silkscreen digits, no shadow: every 0-9 stays distinct (Pixelify's 2/5 read as 8/S) */
 [data-theme=pixel] .hero-num { font-weight: 400; --hero-max: 2.6rem; --fit: 88; letter-spacing: 0; }
 [data-theme=pixel] .money, [data-theme=pixel] .btn, [data-theme=pixel] .btn-sm { font-family: var(--num); font-weight: 400; }
+[data-theme=pixel] .spend-legend, [data-theme=pixel] .hero-cap, [data-theme=pixel] .lr-body small { font-family: var(--num); font-size: .75rem; }
 [data-theme=pixel] .section-head h2, [data-theme=pixel] .serial, [data-theme=pixel] .wordmark { font-family: var(--num); text-transform: uppercase; }
 [data-theme=pixel] .slip:hover { transform: translate(-2px, -2px); }
 [data-theme=pixel] .fab { border-radius: 0; box-shadow: 0 0 0 3px #000000, 4px 4px 0 3px #000000; }
