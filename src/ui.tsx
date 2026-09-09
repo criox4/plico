@@ -289,7 +289,7 @@ export function Settle({ s, g, from, to, amount, t = g.theme, onRecord }: {
         <p className="pay-who">{who(g, from) === 'You' ? 'You are paying' : `${who(g, from)} is paying`}</p>
         <p className="payee">{payee}</p>
         {vpa ? <code className="vpa">{vpa}</code> : <p className="pay-who">No UPI ID yet. Add one in group settings.</p>}
-        <p className="pay-amt"><Money p={amount} /></p>
+        <p className="pay-amt"><span className={`money ${to === ME ? 'pos' : from === ME ? 'neg' : ''}`}>{inr(amount)}</span></p>
         <p className="pay-for">For {note}</p>
         {qr && <div className="qr-plate"><img src={qr} alt={`UPI QR code to pay ${payee} ${inr(amount)}`} /></div>}
       </section>

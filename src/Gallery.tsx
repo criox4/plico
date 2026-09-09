@@ -65,7 +65,7 @@ export default function Gallery() {
         <h1>Twelve themes, one ledger.</h1>
         <p>
           Each theme changes type, shape, texture, icon stroke, motion and the moment a group settles. What money means never changes:
-          green is owed to you, red is what you owe, and the settled seal is the only place the settled colour appears.
+          green is owed to you, red is what you owe, and the settled colour marks only things that are settled.
           Every pair passes WCAG AA. Screens are real components running on sample data.
         </p>
         <nav className="g-index" aria-label="Jump to theme">
