@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { allocate, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, type Group } from './logic.ts'
+import { allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -34,4 +34,10 @@ assert.equal(g.expenses[2].repeat!.next, '2026-04-30')
 const sh = { g: "Goa '26 🌴", f: 'Karan', t: 'Arjun', v: 'arjun@okhdfc', a: 184200 }
 assert.deepEqual(decodeShare(encodeShare(sh)), sh)
 assert.equal(decodeShare('garbage'), null)
+const m = new Set(['a', 'b'])
+assert.equal(sharesError(1000, { a: 1000 }, { a: 500, b: 500 }, m), null)
+assert.ok(sharesError(1000, { a: 900 }, { a: 500, b: 500 }, m))
+assert.ok(sharesError(1000, { a: 1000 }, { a: 500, x: 500 }, m))
+assert.ok(sharesError(1000, { a: 1000.5 }, { a: 1000.5 }, m))
+assert.ok(sharesError(0, {}, {}, m))
 console.log('ok')

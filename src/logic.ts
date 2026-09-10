@@ -109,7 +109,7 @@ export function runRecurring(g: Group, now = today()): boolean {
   let changed = false
   for (const e of [...g.expenses]) {
     while (e.repeat && e.repeat.next <= now) {
-      g.expenses.push({ ...e, id: uid(), date: e.repeat.next, repeat: undefined })
+      g.expenses.push({ ...e, id: `${e.id}:${e.repeat.next}`, date: e.repeat.next, repeat: undefined })
       e.repeat.next = addMonth(e.repeat.next, e.repeat.day)
       changed = true
     }
@@ -134,4 +134,16 @@ export function decodeShare(p: string): Share | null {
   } catch {
     return null
   }
+}
+
+/** Server-side guard: an expense is valid only if paid and owed both sum to the amount, over known members. */
+export function sharesError(amount: number, paid: Record<Id, number>, owed: Record<Id, number>, members: Set<Id>): string | null {
+  const sum = (o: Record<Id, number>) => Object.values(o).reduce((a, b) => a + b, 0)
+  const all = [...Object.entries(paid), ...Object.entries(owed)]
+  if (!Number.isInteger(amount) || amount <= 0) return 'Amount must be a positive number of paise'
+  if (all.some(([, v]) => !Number.isInteger(v) || v < 0)) return 'Shares must be whole, non-negative paise'
+  if (all.some(([k]) => !members.has(k))) return 'Every person must belong to the group'
+  if (sum(paid) !== amount) return 'What was paid must add up to the amount'
+  if (sum(owed) !== amount) return 'What is owed must add up to the amount'
+  return null
 }

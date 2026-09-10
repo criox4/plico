@@ -1,0 +1,159 @@
+// Splittr data model. Money is integer paise. Everything lives in the "splittr"
+// Postgres schema so nothing touches other apps' tables in public.
+// Auth models (User, Session, Account, Verification) come from `npx auth generate`.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../server/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["splittr"]
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  upi           String?
+  theme         String?   @default("classic")
+  tone          String?   @default("gentle")
+  sessions      Session[]
+  accounts      Account[]
+  members       Member[]
+  groupsCreated Group[]
+
+  @@unique([email])
+  @@map("user")
+  @@schema("splittr")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+  @@schema("splittr")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+  @@schema("splittr")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+  @@schema("splittr")
+}
+
+model Group {
+  id          String    @id
+  name        String
+  kind        String
+  theme       String
+  track       Boolean   @default(false)
+  inviteCode  String    @unique
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  members     Member[]
+  expenses    Expense[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("group")
+  @@schema("splittr")
+}
+
+/// A person in a group. Guests have no userId until someone claims them via an invite.
+model Member {
+  id        String         @id
+  groupId   String
+  group     Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name      String
+  upi       String?
+  userId    String?
+  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shares    ExpenseShare[]
+  createdAt DateTime       @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("member")
+  @@schema("splittr")
+}
+
+model Expense {
+  id          String         @id
+  groupId     String
+  group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  title       String
+  cat         String
+  date        String /// YYYY-MM-DD, the day it happened in the group's local time
+  amount      Int /// paise
+  mode        String?
+  input       Json?
+  settle      Boolean        @default(false)
+  repeatNext  String?
+  repeatDay   Int?
+  createdById String?
+  shares      ExpenseShare[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([groupId])
+  @@map("expense")
+  @@schema("splittr")
+}
+
+/// Who paid and who owes, per member, in paise. Per expense: sum(paid) == sum(owed) == amount.
+model ExpenseShare {
+  expenseId String
+  expense   Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  memberId  String
+  member    Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  paid      Int     @default(0)
+  owed      Int     @default(0)
+
+  @@id([expenseId, memberId])
+  @@index([memberId])
+  @@map("expense_share")
+  @@schema("splittr")
+}
