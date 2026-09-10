@@ -164,7 +164,7 @@ api.post('/invites/:code/join', async c => {
     const { count } = await db.member.updateMany({ where: { id: memberId, groupId: g.id, userId: null }, data: { userId: uid } })
     if (!count) return c.json({ error: 'Someone already claimed that name' }, 409)
   } else {
-    await db.member.create({ data: { id: crypto.randomUUID().slice(0, 8), groupId: g.id, name: c.get('userName'), userId: uid } })
+    await db.member.create({ data: { id: crypto.randomUUID(), groupId: g.id, name: c.get('userName'), userId: uid } })
   }
   return c.json({ id: g.id })
 })

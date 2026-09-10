@@ -26,13 +26,15 @@ export type Group = {
   kind: Kind
   theme: Theme
   track?: boolean // family-style: show balances, never nag
+  selfId?: Id // my member id on the server; the UI always calls me ME
+  mine?: boolean // I created it (only the creator can delete)
   members: Member[]
   expenses: Expense[]
 }
 export type Transfer = { from: Id; to: Id; amount: number }
 
 export const ME = 'me'
-export const uid = () => crypto.randomUUID().slice(0, 8)
+export const uid = () => crypto.randomUUID()
 export const today = () => new Date().toLocaleDateString('en-CA')
 
 const fmt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2, minimumFractionDigits: 0 })

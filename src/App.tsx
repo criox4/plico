@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ME, addMonth, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
-import { replaceAll, update, useStore, type State } from './store'
+import { update, useStore, type State } from './store'
+import { authClient } from './auth-client'
+import { api, pull, signOut, signedIn, useSync } from './sync'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Denomination, GroupView, Home, KINDS, PUBLIC, Screen, Settle, TONES, go, useQr, useRoute, who } from './ui'
+import { BrandMark, Denomination, GroupView, Home, KINDS, PUBLIC, Screen, Settle, TONES, go, useQr, useRoute, wa, who } from './ui'
 import Gallery from './Gallery'
 
 const back = () => (history.length > 1 ? history.back() : go('/'))
@@ -15,6 +17,7 @@ const num = (v?: string) => parseFloat((v ?? '').replace(/,/g, '')) || 0
 export default function App() {
   const s = useStore()
   const r = useRoute()
+  const sync = useSync()
   useEffect(() => {
     ensureFonts([s.theme, ...s.groups.map(g => g.theme)])
     document.body.style.background = theme(s.theme).c.bg
@@ -22,6 +25,8 @@ export default function App() {
 
   if (r[0] === 'themes') return <Gallery />
   if (r[0] === 's') return <SharedPay p={r[1] ?? ''} />
+  if (!sync.authed) return <AuthScreen s={s} />
+  if (r[0] === 'join' && r[1]) return <JoinGroup s={s} code={r[1]} />
   if (r[0] === 'me') return <Profile s={s} />
   if (r[0] === 'new' || !s.groups.length) return <NewGroup s={s} />
   if (r[0] === 'add') return <ExpenseForm s={s} />
@@ -333,15 +338,18 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
           })}
         </ul>
         <small>People with expenses can’t be removed.</small>
+        <Invite g={g} />
         <div className="add-person">
           <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder="Add a person" aria-label="New person’s name" maxLength={40} />
           <button type="button" className="btn-sm" onClick={add}>Add</button>
         </div>
-        <button type="button" className="link danger" onClick={() => {
-          if (!confirm(`Delete ${g.name} and all its expenses? This can’t be undone.`)) return
-          location.replace('#/')
-          update(d => { d.groups = d.groups.filter(x => x.id !== g.id) })
-        }}>Delete group</button>
+        {g.mine !== false && (
+          <button type="button" className="link danger" onClick={() => {
+            if (!confirm(`Delete ${g.name} and all its expenses for everyone in it? This can’t be undone.`)) return
+            location.replace('#/')
+            update(d => { d.groups = d.groups.filter(x => x.id !== g.id) })
+          }}>Delete group</button>
+        )}
       </div>
     </Screen>
   )
@@ -349,28 +357,10 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
 
 // ---------- you ----------
 function Profile({ s }: { s: State }) {
-  const [backup, setBackup] = useState('')
-  const [msg, setMsg] = useState('')
-  const copy = async () => {
-    const j = JSON.stringify(s)
-    setBackup(j)
-    try {
-      await navigator.clipboard.writeText(j)
-      setMsg('Backup copied. Paste it somewhere safe, like a note to yourself.')
-    } catch {
-      setMsg('Select the text below and copy it somewhere safe.')
-    }
-  }
-  const restore = () => {
-    try {
-      const x = JSON.parse(backup)
-      const ok = x && x.me && Array.isArray(x.groups) &&
-        x.groups.every((g: Group) => g && typeof g.id === 'string' && Array.isArray(g.members) && Array.isArray(g.expenses))
-      if (!ok) throw new Error()
-      if (confirm('Replace everything on this device with this backup?')) { replaceAll(x); setMsg('Backup restored.') }
-    } catch {
-      setMsg('That doesn’t look like a Splittr backup. Nothing was changed.')
-    }
+  const sync = useSync()
+  const out = () => {
+    if (sync.pending && !confirm(`${sync.pending} change${sync.pending > 1 ? 's haven’t' : ' hasn’t'} synced yet and will be lost. Sign out anyway?`)) return
+    void signOut()
   }
   return (
     <Screen t={s.theme} back title="You">
@@ -392,16 +382,124 @@ function Profile({ s }: { s: State }) {
           ))}
         </div>
         <p className="preview-msg">{TONES[s.tone]('₹840', 'Arjun', "Goa '26")}</p>
-        <h2 className="form-h">Backup</h2>
-        <small>Everything lives on this device until sync arrives. Keep a copy somewhere safe.</small>
-        <div className="row">
-          <button type="button" className="btn secondary" onClick={copy}><Icon n="copy" />Copy backup</button>
-          <button type="button" className="btn secondary" onClick={restore} disabled={!backup.trim()}>Restore</button>
-        </div>
-        <textarea value={backup} onChange={e => setBackup(e.target.value)} rows={4} placeholder="Paste a backup here, then tap Restore" aria-label="Backup data" />
-        {msg && <p className="note" role="status">{msg}</p>}
+        <h2 className="form-h">Account</h2>
+        <p>{s.user?.email}</p>
+        <SyncLine />
+        <button type="button" className="btn secondary" onClick={out}>Sign out</button>
         <a className="link" href="#/themes">See all 12 themes</a>
       </div>
+    </Screen>
+  )
+}
+
+function SyncLine() {
+  const { pending, offline, error } = useSync()
+  const text = error || (offline ? `Offline. ${pending ? `${pending} change${pending > 1 ? 's' : ''} will sync when you’re back.` : 'Everything is saved on this phone.'}`
+    : pending ? `Syncing ${pending} change${pending > 1 ? 's' : ''}…` : 'All changes synced.')
+  return <p className="sync-line" role="status">{text}</p>
+}
+
+// ---------- sign in (required) ----------
+function AuthScreen({ s }: { s: State }) {
+  const [mode, setMode] = useState<'up' | 'in'>(s.user ? 'in' : 'up')
+  const [name, setName] = useState(s.me.name)
+  const [email, setEmail] = useState(s.user?.email ?? '')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(useSync().error)
+  const submit = async () => {
+    setBusy(true)
+    setErr('')
+    try {
+      const res = mode === 'up'
+        ? await authClient.signUp.email({ name: name.trim(), email: email.trim(), password })
+        : await authClient.signIn.email({ email: email.trim(), password })
+      if (res.error) return setErr(res.error.message || 'That didn’t work. Check your details and try again.')
+      await signedIn(res.data.user)
+    } catch {
+      setErr('Can’t reach Splittr. Check your connection and try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Screen t={s.theme}>
+      <div className="auth">
+        <BrandMark size={56} />
+        <h1 className="q">{mode === 'up' ? 'Money together, your way.' : 'Welcome back.'}</h1>
+        <p className="lede-sm">{mode === 'up' ? 'Create an account so your groups stay in sync with everyone in them.' : 'Sign in to see your groups.'}</p>
+        <form className="form" onSubmit={e => { e.preventDefault(); void submit() }}>
+          {mode === 'up' && (
+            <label className="field"><span>Your name</span><input value={name} onChange={e => setName(e.target.value)} autoComplete="name" required maxLength={40} /></label>
+          )}
+          <label className="field"><span>Email</span>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" autoCapitalize="none" required />
+          </label>
+          <label className="field"><span>Password</span>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === 'up' ? 'new-password' : 'current-password'} minLength={8} required />
+            {mode === 'up' && <small>At least 8 characters.</small>}
+          </label>
+          {err && <p className="error" role="alert">{err}</p>}
+          <button className="btn primary" disabled={busy}>{busy ? 'One moment…' : mode === 'up' ? 'Create account' : 'Sign in'}</button>
+        </form>
+        <button type="button" className="link center-link" onClick={() => { setMode(mode === 'up' ? 'in' : 'up'); setErr('') }}>
+          {mode === 'up' ? 'I already have an account' : 'I’m new here: create an account'}
+        </button>
+      </div>
+    </Screen>
+  )
+}
+
+// ---------- invites ----------
+function Invite({ g }: { g: Group }) {
+  const [code, setCode] = useState('')
+  const [err, setErr] = useState('')
+  useEffect(() => { api<{ code: string }>(`/api/groups/${g.id}/invite`).then(r => setCode(r.code), () => setErr('The invite link appears once this group has synced. Check your connection.')) }, [g.id])
+  const link = code ? `${PUBLIC}/#/join/${code}` : ''
+  const qr = useQr(link)
+  return <>
+    <h2 className="form-h">Invite people</h2>
+    {link ? <>
+      <p className="muted-p">Friends open this link, sign in, and pick which name in the group is theirs.</p>
+      {qr && <div className="qr-plate qr-sm"><img src={qr} alt={`QR code to join ${g.name}`} /></div>}
+      <a className="btn secondary" href={wa(`Join “${g.name}” on Splittr so we can split and settle up: ${link}`)} target="_blank" rel="noopener"><Icon n="send" />Share invite on WhatsApp</a>
+      <button type="button" className="link center-link" onClick={() => navigator.clipboard?.writeText(link)}><Icon n="copy" size={18} />Copy invite link</button>
+    </> : <p className="muted-p">{err || 'Loading invite link…'}</p>}
+  </>
+}
+
+function JoinGroup({ s, code }: { s: State; code: string }) {
+  type Inv = { id: string; name: string; kind: Kind; theme: ThemeId; joined: boolean; guests: { id: string; name: string }[] }
+  const [inv, setInv] = useState<Inv | null>(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api<Inv>(`/api/invites/${code}`).then(setInv, e => setErr(e.message)) }, [code])
+  const join = async (memberId?: string) => {
+    setBusy(true)
+    try {
+      const r = await api<{ id: string }>(`/api/invites/${code}/join`, { method: 'POST', body: JSON.stringify({ memberId }) })
+      await pull()
+      location.replace('#/g/' + r.id)
+    } catch (e) {
+      setErr((e as Error).message)
+      setBusy(false)
+    }
+  }
+  useEffect(() => { if (inv?.joined) location.replace('#/g/' + inv.id) }, [inv])
+  const t = inv?.theme ?? s.theme
+  return (
+    <Screen t={t} back title="Join group">
+      {!inv ? <p className="empty">{err || 'Opening invite…'}</p> : (
+        <div className="form">
+          <h1 className="q">{inv.name}</h1>
+          <p className="muted-p">Which one is you? Your balances in this group come with the name.</p>
+          <div className="kinds">
+            {inv.guests.map(m => <button key={m.id} className="kind" disabled={busy} onClick={() => void join(m.id)}><Icon n="user" size={24} /><span>{m.name}</span></button>)}
+          </div>
+          <button className="btn secondary" disabled={busy} onClick={() => void join()}>I’m not listed. Join as {s.me.name || 'me'}</button>
+          {err && <p className="error" role="alert">{err}</p>}
+        </div>
+      )}
     </Screen>
   )
 }

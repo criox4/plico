@@ -450,3 +450,12 @@ small { font-size: .8125rem; color: var(--muted); }
 .cta { display: grid; gap: 6px; margin-top: 28px; padding: 20px; text-align: center; background: var(--surface); border-radius: var(--radius); box-shadow: var(--elev); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 360px) { .themes { grid-template-columns: repeat(2, 1fr); } }
+
+/* ============ account + sync ============ */
+.auth { display: grid; gap: 8px; padding-top: 40px; }
+.auth .brandmark { margin-bottom: 8px; }
+.auth .q { margin-bottom: 0; }
+.lede-sm, .muted-p { color: var(--muted); }
+.sync-line { color: var(--muted); font-size: .9375rem; }
+.qr-sm { width: min(180px, 52vw); margin: 4px auto; }
+.kind:disabled { opacity: .5; }

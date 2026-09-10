@@ -1,12 +1,19 @@
 import { useSyncExternalStore } from 'react'
-import { runRecurring, type Group, type Theme, type Tone } from './logic'
+import { uid, type Group, type Theme, type Tone } from './logic'
 
-export type State = { me: { name: string; upi: string }; theme: Theme; tone: Tone; groups: Group[] }
+export type State = {
+  user?: { id: string; email: string }
+  me: { name: string; upi: string }
+  theme: Theme
+  tone: Tone
+  groups: Group[]
+}
 
 const KEY = 'splittr'
-const blank: State = { me: { name: '', upi: '' }, theme: 'classic', tone: 'gentle', groups: [] }
+export const blank: State = { me: { name: '', upi: '' }, theme: 'classic', tone: 'gentle', groups: [] }
 
-// ponytail: whole state in one localStorage key (~5MB ceiling); move to IndexedDB + sync when a backend lands.
+// Local cache of the server state; the sync outbox (sync.ts) carries edits up.
+// ponytail: whole state in one localStorage key (~5MB ceiling); move to IndexedDB if groups get huge.
 function load(): State {
   try {
     return { ...blank, ...JSON.parse(localStorage.getItem(KEY) || '{}') }
@@ -17,17 +24,32 @@ function load(): State {
 
 let state = load()
 const subs = new Set<() => void>()
+let listener: ((prev: State, next: State) => void) | undefined
 
-export function update(fn: (s: State) => void) {
-  const next = structuredClone(state)
-  fn(next)
+function commit(next: State) {
   state = next
   localStorage.setItem(KEY, JSON.stringify(state))
   subs.forEach(f => f())
 }
 
-export function replaceAll(s: State) {
-  update(d => Object.assign(d, blank, s))
+export const getState = () => state
+export const onLocalChange = (f: typeof listener) => { listener = f }
+
+/** A user edit: saved locally at once, then queued for the server. */
+export function update(fn: (s: State) => void) {
+  const prev = state
+  const next = structuredClone(state)
+  fn(next)
+  for (const g of next.groups) g.selfId ||= uid()
+  commit(next)
+  listener?.(prev, next)
+}
+
+/** Apply state that came from the server (or sign-in/out). Never queued back up. */
+export function setRemote(fn: (s: State) => void) {
+  const next = structuredClone(state)
+  fn(next)
+  commit(next)
 }
 
 export const useStore = () =>
@@ -35,6 +57,3 @@ export const useStore = () =>
     f => (subs.add(f), () => subs.delete(f)),
     () => state,
   )
-
-// Catch up monthly repeats on launch.
-if (state.groups.some(g => g.expenses.some(e => e.repeat))) update(s => s.groups.forEach(g => runRecurring(g)))
