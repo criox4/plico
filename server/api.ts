@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
+import { mail } from './email.ts'
 import { Prisma } from './generated/prisma/client.ts'
 import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
@@ -17,7 +18,11 @@ const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const Paise = z.number().int().min(0).max(2_000_000_000)
 
 const GroupIn = z.object({ name: z.string().trim().min(1).max(60), kind: Kind, theme: Theme, track: z.boolean().optional(), selfId: Id })
-const MemberIn = z.object({ name: z.string().trim().min(1).max(60), upi: Upi })
+const Email = z.string().trim().toLowerCase().max(254).refine(v => !v || z.email().safeParse(v).success, 'Not a valid email').nullish()
+const Phone = z.string().trim().max(20).refine(v => !v || /^\+?[0-9 ()-]{7,20}$/.test(v), 'Not a valid phone number').nullish()
+const MemberIn = z.object({ name: z.string().trim().min(1).max(60), upi: Upi, email: Email, phone: Phone })
+const APP = process.env.PUBLIC_URL || 'http://localhost:5173'
+const claimUrl = (token: string) => `${APP}/#/claim/${token}`
 const ExpenseIn = z.object({
   title: z.string().trim().min(1).max(120), cat: z.string().max(20), date: Day, amount: Paise.min(1),
   paid: z.record(Id, Paise), owed: z.record(Id, Paise),
@@ -50,7 +55,7 @@ const membership = (groupId: string, userId: string) => db.member.findFirst({ wh
 api.get('/groups', async c => {
   const groups = await db.group.findMany({
     where: { members: { some: { userId: c.get('userId') } } },
-    include: { members: { orderBy: { createdAt: 'asc' } }, expenses: { include: { shares: true }, orderBy: { createdAt: 'asc' } } },
+    include: { members: { orderBy: { createdAt: 'asc' }, omit: { inviteToken: true } }, expenses: { include: { shares: true }, orderBy: { createdAt: 'asc' } } },
     orderBy: { createdAt: 'desc' },
   })
   return c.json(groups)
@@ -94,10 +99,50 @@ api.put('/groups/:gid/members/:mid', async c => {
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
   const m = await db.member.findUnique({ where: { id: mid } })
   if (m && m.groupId !== gid) return c.json(notFound, 404)
-  const data = { name: b.name, upi: b.upi || null }
+  const data = { name: b.name, upi: b.upi || null, email: b.email || null, phone: b.phone || null }
   if (m) await db.member.update({ where: { id: mid }, data })
   else await db.member.create({ data: { id: mid, groupId: gid, ...data } })
+  // A new email on a guest: link now if that person already has a verified account, otherwise email an invite.
+  if (data.email && data.email !== m?.email && !m?.userId) await inviteByEmail(gid, mid, data.email, c.get('userName'))
   return c.json({ ok: true })
+})
+
+async function inviteByEmail(gid: string, mid: string, email: string, inviter: string) {
+  const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { name: true } })
+  const user = await db.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, emailVerified: true } })
+  if (user) {
+    const { count } = await db.member.updateMany({
+      where: { id: mid, userId: null, group: { members: { none: { userId: user.id } } } }, data: { userId: user.id, inviteToken: null },
+    })
+    if (count) void mail.added(user.email, inviter, g.name).catch(console.error)
+    return
+  }
+  const token = await ensureToken(mid)
+  await db.member.update({ where: { id: mid }, data: { invitedAt: new Date() } })
+  void mail.invite(email, inviter, g.name, claimUrl(token)).catch(console.error)
+}
+
+async function ensureToken(mid: string) {
+  const m = await db.member.findUniqueOrThrow({ where: { id: mid }, select: { inviteToken: true } })
+  if (m.inviteToken) return m.inviteToken
+  const token = crypto.randomUUID().replace(/-/g, '')
+  await db.member.update({ where: { id: mid }, data: { inviteToken: token } })
+  return token
+}
+
+// Invite link for one person (WhatsApp for phones), and a throttled email resend.
+api.post('/groups/:gid/members/:mid/invite', async c => {
+  const [gid, mid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('mid'))]
+  if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
+  const m = await db.member.findUnique({ where: { id: mid } })
+  if (!m || m.groupId !== gid) return c.json(notFound, 404)
+  if (m.userId) return c.json({ error: 'Already joined' }, 409)
+  const { email } = z.object({ email: z.boolean().optional() }).parse(await c.req.json().catch(() => ({})))
+  if (email && m.email) {
+    if (m.invitedAt && Date.now() - m.invitedAt.getTime() < 60_000) return c.json({ error: 'Invite just sent. Try again in a minute.' }, 429)
+    await inviteByEmail(gid, mid, m.email, c.get('userName'))
+  }
+  return c.json({ link: claimUrl(await ensureToken(mid)) })
 })
 
 api.delete('/groups/:gid/members/:mid', async c => {
@@ -142,7 +187,26 @@ api.delete('/groups/:gid/expenses/:eid', async c => {
   return c.json({ ok: true })
 })
 
-// ---------- invites: a friend signs in and claims their guest profile ----------
+// ---------- personal claim links: whoever holds the token takes that guest spot ----------
+const Token = z.string().regex(/^[a-f0-9]{32}$/)
+
+api.get('/claim/:token', async c => {
+  const m = await db.member.findUnique({ where: { inviteToken: Token.parse(c.req.param('token')) }, include: { group: true } })
+  if (!m || m.userId) return c.json({ error: 'This invite was already used or is no longer valid' }, 404)
+  return c.json({ group: { id: m.group.id, name: m.group.name, kind: m.group.kind, theme: m.group.theme }, name: m.name })
+})
+
+api.post('/claim/:token', async c => {
+  const uid = c.get('userId')
+  const m = await db.member.findUnique({ where: { inviteToken: Token.parse(c.req.param('token')) } })
+  if (!m || m.userId) return c.json({ error: 'This invite was already used or is no longer valid' }, 404)
+  if (await membership(m.groupId, uid)) return c.json({ id: m.groupId }) // already in via another spot
+  const { count } = await db.member.updateMany({ where: { id: m.id, userId: null }, data: { userId: uid, inviteToken: null } })
+  if (!count) return c.json({ error: 'Someone already claimed this invite' }, 409)
+  return c.json({ id: m.groupId })
+})
+
+// ---------- group invite links: a friend signs in and picks their guest profile ----------
 api.get('/invites/:code', async c => {
   const g = await db.group.findUnique({ where: { inviteCode: z.string().max(40).parse(c.req.param('code')) }, include: { members: true } })
   if (!g) return c.json({ error: 'This invite link is no longer valid' }, 404)

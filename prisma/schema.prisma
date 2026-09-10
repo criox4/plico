@@ -21,6 +21,7 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   upi           String?
+  phone         String?
   theme         String?   @default("classic")
   tone          String?   @default("gentle")
   sessions      Session[]
@@ -91,8 +92,8 @@ model Group {
   theme       String
   track       Boolean   @default(false)
   inviteCode  String    @unique
-  createdById String
-  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdById String? /// null once the creator deletes their account; the group lives on for everyone else
+  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
   members     Member[]
   expenses    Expense[]
   createdAt   DateTime  @default(now())
@@ -104,18 +105,23 @@ model Group {
 
 /// A person in a group. Guests have no userId until someone claims them via an invite.
 model Member {
-  id        String         @id
-  groupId   String
-  group     Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  name      String
-  upi       String?
-  userId    String?
-  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-  shares    ExpenseShare[]
-  createdAt DateTime       @default(now())
+  id          String         @id
+  groupId     String
+  group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name        String
+  upi         String?
+  email       String? /// invite target; auto-links when a user with this verified email exists or signs up
+  phone       String? /// invite target via WhatsApp link (never auto-linked: phones aren't verified)
+  inviteToken String?        @unique /// one-time claim link sent to this person
+  invitedAt   DateTime?
+  userId      String?
+  user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shares      ExpenseShare[]
+  createdAt   DateTime       @default(now())
 
   @@unique([groupId, userId])
   @@index([userId])
+  @@index([email])
   @@map("member")
   @@schema("splittr")
 }
