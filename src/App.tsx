@@ -1,12 +1,13 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { ME, addMonth, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { update, useStore, type State } from './store'
-import { authClient } from './auth-client'
-import { api, pull, signOut, signedIn, useSync } from './sync'
-import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
+import { api, pull, useSync } from './sync'
+import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { BrandMark, Denomination, GroupView, Home, KINDS, PUBLIC, Screen, Settle, TONES, go, useQr, useRoute, wa, who } from './ui'
+import { Denomination, ThemePicker, GroupView, Home, KINDS, PUBLIC, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
+import { AccountHub, AppearancePage, AuthFlow, Avatar, Claim, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
+  RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
 
 const back = () => (history.length > 1 ? history.back() : go('/'))
@@ -25,9 +26,17 @@ export default function App() {
 
   if (r[0] === 'themes') return <Gallery />
   if (r[0] === 's') return <SharedPay p={r[1] ?? ''} />
-  if (!sync.authed) return <AuthScreen s={s} />
+  if (r[0] === 'reset') return <ResetPassword />
+  if (sync.booting) return <Splash />
+  if (!sync.authed) return <AuthFlow s={s} notice={r[0] === 'verified' ? 'Email verified. Sign in to continue.' : undefined} />
+  if (r[0] === 'verified') return <Verified />
+  if (r[0] === 'claim' && r[1]) return <Claim s={s} token={r[1]} />
+  if (r[0] === 'delete' && r[1]) return <DeleteConfirm s={s} token={r[1]} />
   if (r[0] === 'join' && r[1]) return <JoinGroup s={s} code={r[1]} />
-  if (r[0] === 'me') return <Profile s={s} />
+  if (r[0] === 'me') {
+    const Page = { profile: ProfilePage, theme: AppearancePage, tone: RemindersPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage }[r[1] ?? '']
+    return Page ? <Page key={r[1]} s={s} /> : <AccountHub s={s} />
+  }
   if (r[0] === 'new' || !s.groups.length) return <NewGroup s={s} />
   if (r[0] === 'add') return <ExpenseForm s={s} />
   const g = r[0] === 'g' ? s.groups.find(x => x.id === r[1]) : undefined
@@ -45,25 +54,11 @@ export default function App() {
     }
     return <GroupView s={s} g={g} />
   }
-  return <Home s={s} t={s.theme} />
+  return <Home s={s} t={s.theme} banner={<VerifyBanner s={s} />} />
 }
 
 // ---------- shared form bits ----------
-function ThemePicker({ value, onChange }: { value: ThemeId; onChange: (t: ThemeId) => void }) {
-  useEffect(() => ensureFonts(THEMES.map(t => t.id)), [])
-  return (
-    <div className="themes" role="radiogroup" aria-label="Theme">
-      {THEMES.map(t => (
-        <button type="button" key={t.id} role="radio" aria-checked={t.id === value} className="swatch" data-theme={t.id} style={themeVars(t.id)} onClick={() => onChange(t.id)}>
-          <span className="swatch-num">₹840</span>
-          <span className="swatch-name">{t.name}</span>
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
+export function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
   return <button type="button" role="radio" aria-checked={on} className={`chip${on ? ' on' : ''}`} onClick={onClick}>{children}</button>
 }
 
@@ -80,6 +75,7 @@ function NewGroup({ s }: { s: State }) {
   if (!kind)
     return (
       <Screen t={s.theme} back={!first}>
+        {first && <VerifyBanner s={s} />}
         {first && <p className="lede">Money together, your way.</p>}
         <h1 className="q">What are we splitting?</h1>
         <div className="kinds">
@@ -292,16 +288,8 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
 
 // ---------- group settings ----------
 function GroupSettings({ s, g }: { s: State; g: Group }) {
-  const [newName, setNewName] = useState('')
   const used = new Set(g.expenses.flatMap(e => [...Object.keys(e.paid), ...Object.keys(e.owed)]))
   const set = (fn: (x: Group) => void) => edit(g.id, fn)
-  const setMember = (id: Id, fn: (m: Group['members'][number]) => void) => set(x => { const m = x.members.find(y => y.id === id); if (m) fn(m) })
-  const add = () => {
-    const n = newName.trim()
-    if (!n) return
-    set(x => { x.members.push({ id: uid(), name: n }) })
-    setNewName('')
-  }
   return (
     <Screen t={g.theme} back title="Group settings">
       <div className="form">
@@ -315,34 +303,10 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
         <ThemePicker value={g.theme} onChange={t => set(x => { x.theme = t })} />
         <h2 className="form-h">People</h2>
         <ul className="people">
-          {g.members.map(m => {
-            const upi = m.id === ME ? s.me.upi : m.upi ?? ''
-            return (
-              <li key={m.id} className="person">
-                <div className="person-fields">
-                  <input aria-label="Name" value={m.id === ME ? `${s.me.name || 'You'} (you)` : m.name} disabled={m.id === ME}
-                    maxLength={40} onChange={e => setMember(m.id, y => { y.name = e.target.value })} />
-                  <input aria-label={`${m.id === ME ? 'Your' : m.name + '’s'} UPI ID`} placeholder="UPI ID, e.g. name@okaxis" value={upi}
-                    inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-invalid={!!upi && !isVpa(upi)}
-                    onChange={e => {
-                      const v = e.target.value.trim()
-                      if (m.id === ME) update(d => { d.me.upi = v })
-                      else setMember(m.id, y => { y.upi = v || undefined })
-                    }} />
-                </div>
-                {m.id !== ME && !used.has(m.id) && (
-                  <button type="button" className="iconbtn" aria-label={`Remove ${m.name}`} onClick={() => set(x => { x.members = x.members.filter(y => y.id !== m.id) })}><Icon n="close" /></button>
-                )}
-              </li>
-            )
-          })}
+          {g.members.map(m => <Person key={m.id} s={s} g={g} m={m} used={used.has(m.id)} />)}
         </ul>
-        <small>People with expenses can’t be removed.</small>
+        <AddPerson g={g} />
         <Invite g={g} />
-        <div className="add-person">
-          <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder="Add a person" aria-label="New person’s name" maxLength={40} />
-          <button type="button" className="btn-sm" onClick={add}>Add</button>
-        </div>
         {g.mine !== false && (
           <button type="button" className="link danger" onClick={() => {
             if (!confirm(`Delete ${g.name} and all its expenses for everyone in it? This can’t be undone.`)) return
@@ -355,102 +319,109 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
   )
 }
 
-// ---------- you ----------
-function Profile({ s }: { s: State }) {
-  const sync = useSync()
-  const out = () => {
-    if (sync.pending && !confirm(`${sync.pending} change${sync.pending > 1 ? 's haven’t' : ' hasn’t'} synced yet and will be lost. Sign out anyway?`)) return
-    void signOut()
-  }
-  return (
-    <Screen t={s.theme} back title="You">
-      <div className="form">
-        <label className="field"><span>Your name</span><input value={s.me.name} maxLength={40} autoComplete="name" onChange={e => update(d => { d.me.name = e.target.value })} /></label>
-        <label className="field"><span>Your UPI ID</span>
-          <input value={s.me.upi} placeholder="name@okhdfcbank" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-            aria-invalid={!!s.me.upi && !isVpa(s.me.upi)} onChange={e => update(d => { d.me.upi = e.target.value.trim() })} />
-          <small>Friends pay you here. It appears on your pay links and QR codes.</small>
-        </label>
-        <h2 className="form-h">App theme</h2>
-        <ThemePicker value={s.theme} onChange={t => update(d => { d.theme = t })} />
-        <h2 className="form-h">Reminder tone</h2>
-        <div className="seg" role="radiogroup" aria-label="Reminder tone">
-          {(['gentle', 'normal', 'shameless'] as Tone[]).map(t => (
-            <button type="button" key={t} role="radio" aria-checked={s.tone === t} className={s.tone === t ? 'on' : ''} onClick={() => update(d => { d.tone = t })}>
-              {t[0].toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-        <p className="preview-msg">{TONES[s.tone]('₹840', 'Arjun', "Goa '26")}</p>
-        <h2 className="form-h">Account</h2>
-        <p>{s.user?.email}</p>
-        <SyncLine />
-        <button type="button" className="btn secondary" onClick={out}>Sign out</button>
-        <a className="link" href="#/themes">See all 12 themes</a>
-      </div>
-    </Screen>
-  )
+// ---------- people + invites ----------
+type M = Group['members'][number]
+const setMember = (g: Group, id: Id, fn: (m: M) => void) => edit(g.id, x => { const m = x.members.find(y => y.id === id); if (m) fn(m) })
+const emailOk = (v = '') => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
+const phoneOk = (v = '') => /^\+?[0-9 ()-]{7,20}$/.test(v.trim())
+const waNumber = (p: string) => { const d = p.replace(/\D/g, ''); return d.length === 10 ? '91' + d : d }
+
+/** Text input that commits on blur/Enter, so half-typed emails never trigger an invite. */
+function CommitInput({ value, onCommit, ...rest }: { value: string; onCommit: (v: string) => void } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>) {
+  const [v, setV] = useState(value)
+  useEffect(() => setV(value), [value])
+  return <input {...rest} value={v} onChange={e => setV(e.target.value)} onBlur={() => v.trim() !== value && onCommit(v.trim())}
+    onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()} />
 }
 
-function SyncLine() {
-  const { pending, offline, error } = useSync()
-  const text = error || (offline ? `Offline. ${pending ? `${pending} change${pending > 1 ? 's' : ''} will sync when you’re back.` : 'Everything is saved on this phone.'}`
-    : pending ? `Syncing ${pending} change${pending > 1 ? 's' : ''}…` : 'All changes synced.')
-  return <p className="sync-line" role="status">{text}</p>
-}
-
-// ---------- sign in (required) ----------
-function AuthScreen({ s }: { s: State }) {
-  const [mode, setMode] = useState<'up' | 'in'>(s.user ? 'in' : 'up')
-  const [name, setName] = useState(s.me.name)
-  const [email, setEmail] = useState(s.user?.email ?? '')
-  const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState(useSync().error)
-  const submit = async () => {
-    setBusy(true)
-    setErr('')
+function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [link, setLink] = useState('')
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    if (!open || m.joined || m.id === ME) return
+    api<{ link: string }>(`/api/groups/${g.id}/members/${m.id}/invite`, { method: 'POST', body: '{}' })
+      .then(r => setLink(r.link), () => setLink(''))
+  }, [open, m.joined, m.id, g.id])
+  if (m.id === ME)
+    return (
+      <li className="person">
+        <Avatar name={s.me.name} image={s.user?.image} size={40} />
+        <span className="grow"><strong>{s.me.name || 'You'} (you)</strong><small>{s.me.upi || 'Add your UPI ID in Account'}</small></span>
+      </li>
+    )
+  const status = m.joined ? 'Joined' : m.invited ? 'Invited' : 'Guest'
+  const resend = async () => {
     try {
-      const res = mode === 'up'
-        ? await authClient.signUp.email({ name: name.trim(), email: email.trim(), password })
-        : await authClient.signIn.email({ email: email.trim(), password })
-      if (res.error) return setErr(res.error.message || 'That didn’t work. Check your details and try again.')
-      await signedIn(res.data.user)
-    } catch {
-      setErr('Can’t reach Splittr. Check your connection and try again.')
-    } finally {
-      setBusy(false)
-    }
+      await api(`/api/groups/${g.id}/members/${m.id}/invite`, { method: 'POST', body: JSON.stringify({ email: true }) })
+      setNote(`Invite sent to ${m.email}.`)
+    } catch (e) { setNote((e as Error).message) }
   }
+  const msg = `Hi ${m.name}! I added you to “${g.name}” on Splittr so we can split and settle up. Join here: ${link}`
   return (
-    <Screen t={s.theme}>
-      <div className="auth">
-        <BrandMark size={56} />
-        <h1 className="q">{mode === 'up' ? 'Money together, your way.' : 'Welcome back.'}</h1>
-        <p className="lede-sm">{mode === 'up' ? 'Create an account so your groups stay in sync with everyone in them.' : 'Sign in to see your groups.'}</p>
-        <form className="form" onSubmit={e => { e.preventDefault(); void submit() }}>
-          {mode === 'up' && (
-            <label className="field"><span>Your name</span><input value={name} onChange={e => setName(e.target.value)} autoComplete="name" required maxLength={40} /></label>
+    <li className={`person${open ? ' open' : ''}`}>
+      <button type="button" className="person-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Avatar name={m.name} size={40} />
+        <span className="grow"><strong>{m.name}</strong><small>{m.email || m.phone || (m.joined ? 'Has Splittr' : 'No contact yet')}</small></span>
+        <span className={`chip-state ${m.joined ? 'ok' : m.invited ? 'info' : ''}`}>{status}</span>
+      </button>
+      {open && (
+        <div className="person-body">
+          {m.joined ? <p className="muted-p">{m.name} manages their own details. {m.upi && <>UPI: <code className="vpa">{m.upi}</code></>}</p> : <>
+            <label className="field"><span>Name</span><CommitInput value={m.name} maxLength={40} onCommit={v => v && setMember(g, m.id, y => { y.name = v })} /></label>
+            <label className="field"><span>Email</span>
+              <CommitInput type="email" value={m.email ?? ''} placeholder="Gets an invite and sees this group after signing up" autoCapitalize="none"
+                aria-invalid={!!m.email && !emailOk(m.email)} onCommit={v => setMember(g, m.id, y => { y.email = v || undefined })} />
+            </label>
+            <label className="field"><span>Phone</span>
+              <CommitInput type="tel" value={m.phone ?? ''} placeholder="+91 98765 43210" aria-invalid={!!m.phone && !phoneOk(m.phone)}
+                onCommit={v => setMember(g, m.id, y => { y.phone = v || undefined })} />
+            </label>
+            <label className="field"><span>UPI ID</span>
+              <CommitInput value={m.upi ?? ''} placeholder="name@okaxis" inputMode="email" autoCapitalize="none" spellCheck={false}
+                aria-invalid={!!m.upi && !isVpa(m.upi)} onCommit={v => setMember(g, m.id, y => { y.upi = v || undefined })} />
+            </label>
+            <div className="person-actions">
+              {m.email && emailOk(m.email) && <button type="button" className="btn-sm" onClick={() => void resend()}><Icon n="send" size={16} />{m.invited ? 'Resend email' : 'Email invite'}</button>}
+              {m.phone && phoneOk(m.phone) && link && <a className="btn-sm" href={`https://wa.me/${waNumber(m.phone)}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noopener"><Icon n="send" size={16} />WhatsApp invite</a>}
+              {link && <button type="button" className="btn-sm ghost" onClick={() => { void navigator.clipboard?.writeText(link); setNote('Invite link copied.') }}><Icon n="copy" size={16} />Copy link</button>}
+            </div>
+            {!link && <small>Invite links appear once this person has synced. Check your connection.</small>}
+          </>}
+          {note && <p className="notice" role="status">{note}</p>}
+          {!used && !m.joined && (
+            <button type="button" className="link danger" onClick={() => edit(g.id, x => { x.members = x.members.filter(y => y.id !== m.id) })}>Remove {m.name}</button>
           )}
-          <label className="field"><span>Email</span>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" autoCapitalize="none" required />
-          </label>
-          <label className="field"><span>Password</span>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === 'up' ? 'new-password' : 'current-password'} minLength={8} required />
-            {mode === 'up' && <small>At least 8 characters.</small>}
-          </label>
-          {err && <p className="error" role="alert">{err}</p>}
-          <button className="btn primary" disabled={busy}>{busy ? 'One moment…' : mode === 'up' ? 'Create account' : 'Sign in'}</button>
-        </form>
-        <button type="button" className="link center-link" onClick={() => { setMode(mode === 'up' ? 'in' : 'up'); setErr('') }}>
-          {mode === 'up' ? 'I already have an account' : 'I’m new here: create an account'}
-        </button>
-      </div>
-    </Screen>
+          {used && !m.joined && <small>{m.name} has expenses, so they can’t be removed.</small>}
+        </div>
+      )}
+    </li>
   )
 }
 
-// ---------- invites ----------
+function AddPerson({ g }: { g: Group }) {
+  const [name, setName] = useState('')
+  const [contact, setContact] = useState('')
+  const c = contact.trim()
+  const bad = !!c && !emailOk(c) && !phoneOk(c)
+  const add = () => {
+    if (!name.trim() || bad) return
+    edit(g.id, x => { x.members.push({ id: uid(), name: name.trim(), ...(emailOk(c) ? { email: c.toLowerCase() } : phoneOk(c) ? { phone: c } : {}) }) })
+    setName('')
+    setContact('')
+  }
+  return (
+    <form className="add-person-form" onSubmit={e => { e.preventDefault(); add() }}>
+      <h2 className="form-h">Add someone</h2>
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="Name" aria-label="Name" maxLength={40} />
+      <input value={contact} onChange={e => setContact(e.target.value)} placeholder="Email or phone (optional)" aria-label="Email or phone" autoCapitalize="none" aria-invalid={bad} />
+      <small>{emailOk(c) ? 'They’ll get an email invite. When they sign up with it, this group appears for them.' : phoneOk(c) ? 'Send them the WhatsApp invite from their row once added.' : 'Without contact details they stay a guest you track for them.'}</small>
+      <button className="btn secondary" disabled={!name.trim() || bad}>Add {name.trim() || 'person'}</button>
+    </form>
+  )
+}
+
+// ---------- group invite link ----------
 function Invite({ g }: { g: Group }) {
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')

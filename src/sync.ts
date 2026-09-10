@@ -7,7 +7,10 @@ import { blank, getState, onLocalChange, setRemote, update, type State } from '.
 import { API, authClient, token } from './auth-client'
 
 type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown }
-type Status = { authed: boolean; pending: number; offline: boolean; error: string }
+type Status = {
+  authed: boolean; booting: boolean; pending: number; offline: boolean; error: string
+  google: boolean; googleWebClientId: string | null; googleIosClientId: string | null
+}
 
 const OKEY = 'splittr-outbox'
 let outbox: Op[] = (() => { try { return JSON.parse(localStorage.getItem(OKEY) || '[]') } catch { return [] } })()
@@ -16,7 +19,11 @@ let timer: ReturnType<typeof setTimeout> | undefined
 let flushing = false
 let missedPull = false // a pull was skipped because an edit was pending
 
-let status: Status = { authed: !!(token.get() && getState().user), pending: outbox.length, offline: !navigator.onLine, error: '' }
+// Signed in = we know the user. A dead session is only concluded from the server (never from being offline).
+let status: Status = {
+  authed: !!getState().user, booting: true, pending: outbox.length, offline: !navigator.onLine, error: '',
+  google: false, googleWebClientId: null, googleIosClientId: null,
+}
 const subs = new Set<() => void>()
 const setStatus = (p: Partial<Status>) => { status = { ...status, ...p, pending: outbox.length }; subs.forEach(f => f()) }
 export const useSync = () => useSyncExternalStore(f => (subs.add(f), () => subs.delete(f)), () => status)
@@ -29,13 +36,19 @@ const sid = (g: Group, id: string) => (id === ME ? g.selfId! : id)
 const mapKeys = (g: Group, o?: Record<string, number>) => o && Object.fromEntries(Object.entries(o).map(([k, v]) => [sid(g, k), v]))
 const groupBody = (g: Group) => ({ name: g.name.trim() || 'Group', kind: g.kind, theme: g.theme, track: !!g.track, selfId: g.selfId })
 const selfBody = (s: State) => ({ name: s.me.name.trim() || 'Me', upi: isVpa(s.me.upi) ? s.me.upi : null })
-const memberBody = (m: Group['members'][number]) => ({ name: m.name.trim() || 'Someone', upi: m.upi && isVpa(m.upi) ? m.upi : null })
+const memberBody = (m: Group['members'][number]) => ({
+  name: m.name.trim() || 'Someone', upi: m.upi && isVpa(m.upi) ? m.upi : null,
+  email: m.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email) ? m.email.trim().toLowerCase() : null,
+  phone: m.phone && /^\+?[0-9 ()-]{7,20}$/.test(m.phone) ? m.phone.trim() : null,
+})
 const expenseBody = (g: Group, e: Expense) => ({
   title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid: mapKeys(g, e.paid), owed: mapKeys(g, e.owed),
   mode: e.mode ?? null, input: mapKeys(g, e.input) ?? null, settle: !!e.settle, repeat: e.repeat ?? null,
 })
+export const isPhone = (p = '') => /^\+?[0-9 ()-]{7,20}$/.test(p.trim())
 const profileBody = (s: State) => ({
   ...(s.me.name.trim() && { name: s.me.name.trim() }),
+  ...(isPhone(s.me.phone) ? { phone: s.me.phone!.trim() } : !s.me.phone && { phone: '' }),
   ...(isVpa(s.me.upi) ? { upi: s.me.upi } : !s.me.upi && { upi: '' }),
   theme: s.theme, tone: s.tone,
 })
@@ -88,7 +101,9 @@ function queueNow() {
 }
 
 // ---------- network ----------
-const headers = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token.get()}` })
+// Web: same-origin session cookie; native: bearer token. Send whichever exists.
+const headers = (): Record<string, string> => ({ 'Content-Type': 'application/json', ...(token.get() && { Authorization: `Bearer ${token.get()}` }) })
+const req = (path: string, init: RequestInit = {}) => fetch(API + path, { ...init, headers: headers(), credentials: 'include' })
 
 async function flush() {
   if (flushing || !status.authed) return
@@ -98,7 +113,7 @@ async function flush() {
       const op = outbox[0]
       let res: Response
       try {
-        res = await fetch(API + op.path, { method: op.m, headers: headers(), body: op.body ? JSON.stringify(op.body) : undefined })
+        res = await req(op.path, { method: op.m, body: op.body ? JSON.stringify(op.body) : undefined })
       } catch {
         return setStatus({ offline: true })
       }
@@ -119,7 +134,7 @@ async function flush() {
 
 type ServerGroup = {
   id: string; name: string; kind: Group['kind']; theme: Group['theme']; track: boolean; createdById: string
-  members: { id: string; name: string; upi: string | null; userId: string | null }[]
+  members: { id: string; name: string; upi: string | null; userId: string | null; email: string | null; phone: string | null; invitedAt: string | null }[]
   expenses: {
     id: string; title: string; cat: string; date: string; amount: number; mode: Expense['mode'] | null; input: Record<string, number> | null
     settle: boolean; repeatNext: string | null; repeatDay: number | null; shares: { memberId: string; paid: number; owed: number }[]
@@ -131,7 +146,10 @@ export function toClient(sg: ServerGroup, userId: string): Group {
   const id = (m: string) => (m === self?.id ? ME : m)
   return {
     id: sg.id, name: sg.name, kind: sg.kind, theme: sg.theme, track: sg.track || undefined, selfId: self?.id, mine: sg.createdById === userId,
-    members: sg.members.map(m => (m.id === self?.id ? { id: ME, name: 'Me' } : { id: m.id, name: m.name, upi: m.upi ?? undefined })),
+    members: sg.members.map(m => (m.id === self?.id ? { id: ME, name: 'Me' } : {
+      id: m.id, name: m.name, upi: m.upi ?? undefined, email: m.email ?? undefined, phone: m.phone ?? undefined,
+      joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined,
+    })),
     expenses: sg.expenses.map(e => {
       const paid: Record<string, number> = {}, owed: Record<string, number> = {}
       for (const s of e.shares) {
@@ -151,7 +169,7 @@ export async function pull() {
   const user = getState().user
   if (outbox.length || !user || !status.authed) return
   let res: Response
-  try { res = await fetch(`${API}/api/groups`, { headers: headers() }) } catch { return setStatus({ offline: true }) }
+  try { res = await req('/api/groups') } catch { return setStatus({ offline: true }) }
   if (res.status === 401) return expired()
   if (!res.ok) return
   const data = (await res.json()) as ServerGroup[]
@@ -163,14 +181,14 @@ export async function pull() {
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(API + path, { ...init, headers: headers() })
+  const res = await req(path, init)
   const body = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(body.error || 'Something went wrong')
   return body as T
 }
 
 // ---------- auth lifecycle ----------
-type AuthUser = { id: string; email: string; name: string; upi?: string | null; theme?: string | null; tone?: string | null }
+type AuthUser = { id: string; email: string; name: string; phone?: string | null; emailVerified?: boolean; image?: string | null; upi?: string | null; theme?: string | null; tone?: string | null }
 
 /** After sign-in/up: adopt the account's profile, upload anything made on this device before, then sync. */
 export async function signedIn(u: AuthUser) {
@@ -179,9 +197,10 @@ export async function signedIn(u: AuthUser) {
   if (local.user && local.user.id !== u.id) { outbox = []; saveOutbox() } // different account: don't leak data across
   setRemote(d => {
     if (local.user && local.user.id !== u.id) Object.assign(d, structuredClone(blank))
-    d.user = { id: u.id, email: u.email }
+    d.user = { id: u.id, email: u.email, emailVerified: !!u.emailVerified, image: u.image }
     d.me.name = u.name || d.me.name
     d.me.upi = u.upi || d.me.upi
+    d.me.phone = u.phone || d.me.phone
     if (u.theme) d.theme = u.theme as Theme
     if (u.tone) d.tone = u.tone as Tone
     for (const g of d.groups) g.selfId ||= uid()
@@ -199,7 +218,16 @@ export async function signedIn(u: AuthUser) {
 
 function expired() {
   token.clear()
+  // Keep state.user so signing back in as the same person keeps the outbox, and a different person gets a clean slate.
   setStatus({ authed: false, error: 'Your session ended. Sign in again; unsynced changes are kept.' })
+}
+
+/** Refresh account fields (verification, name) from the server session. */
+export async function refreshUser() {
+  const r = await authClient.getSession().catch(() => null)
+  const u = r?.data?.user
+  if (u) setRemote(d => { if (d.user) Object.assign(d.user, { email: u.email, emailVerified: u.emailVerified, image: u.image }); d.me.name = u.name || d.me.name })
+  return u
 }
 
 export async function signOut() {
@@ -222,11 +250,18 @@ export function startSync() {
     else void flush().then(pull)
   })
   setInterval(() => { if (document.visibilityState === 'visible') void flush().then(pull) }, 30_000)
+  // Boot: learn the sign-in options and confirm the session, but never hold an offline user hostage (800ms cap).
+  const config = fetch(`${API}/api/config`).then(r => r.json())
+    .then(c => setStatus({ google: !!c.google, googleWebClientId: c.googleWebClientId, googleIosClientId: c.googleIosClientId })).catch(() => {})
+  const session = authClient.getSession().then(async r => {
+    const u = r.data?.user
+    if (u && !getState().user) return signedIn(u) // back from Google's redirect with a session cookie
+    if (u) setRemote(d => { if (d.user) Object.assign(d.user, { emailVerified: u.emailVerified, image: u.image }) })
+    if (r.data === null && !r.error && getState().user) expired() // the server says no session; a network error only means offline
+  }).catch(() => {})
+  void Promise.race([Promise.all([config, session]), new Promise(r => setTimeout(r, 800))]).then(() => setStatus({ booting: false }))
   if (!status.authed) return
   // Catch up monthly repeats (deterministic ids, so two devices never duplicate), then sync.
   update(s => s.groups.forEach(g => runRecurring(g)))
-  authClient.getSession().then(r => {
-    if (r.data === null && !r.error) expired() // server says no session; a network error just means offline
-  }).catch(() => {})
   void flush().then(pull)
 }

@@ -2,7 +2,7 @@ import { useEffect, useId, useState, type CSSProperties, type ReactNode } from '
 import QRCode from 'qrcode'
 import { ME, balances, simplify, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import type { State } from './store'
-import { theme, themeVars, type ThemeId } from './themes'
+import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 
 // ---------- routing ----------
@@ -79,8 +79,8 @@ export function BrandMark({ size = 26 }: { size?: number }) {
   // Splittr mark: one coin, split. Always Splittr Indigo, in every theme.
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden className="brandmark">
-      <path d="M14.5 3.1A13 13 0 0 0 14.5 28.9z" fill="var(--brand)" />
-      <path d="M17.5 3.1A13 13 0 0 1 17.5 28.9z" fill="var(--brand)" opacity=".55" />
+      <path className="bm-l" d="M14.5 3.1A13 13 0 0 0 14.5 28.9z" fill="var(--brand)" />
+      <path className="bm-r" d="M17.5 3.1A13 13 0 0 1 17.5 28.9z" fill="var(--brand)" opacity=".55" />
     </svg>
   )
 }
@@ -163,6 +163,20 @@ export function useQr(link: string) {
   return qr
 }
 
+export function ThemePicker({ value, onChange }: { value: ThemeId; onChange: (t: ThemeId) => void }) {
+  useEffect(() => ensureFonts(THEMES.map(t => t.id)), [])
+  return (
+    <div className="themes" role="radiogroup" aria-label="Theme">
+      {THEMES.map(t => (
+        <button type="button" key={t.id} role="radio" aria-checked={t.id === value} className="swatch" data-theme={t.id} style={themeVars(t.id)} onClick={() => onChange(t.id)}>
+          <span className="swatch-num">₹840</span>
+          <span className="swatch-name">{t.name}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ---------- screens ----------
 export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['expenses'][number]; serial: number; showGroup?: boolean }) {
   const mine = (e.paid[ME] ?? 0) - (e.owed[ME] ?? 0)
@@ -184,7 +198,7 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
   )
 }
 
-export function Home({ s, t }: { s: State; t: ThemeId }) {
+export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNode }) {
   const rows = s.groups.map(g => ({ g, net: balances(g)[ME] ?? 0 }))
   const total = rows.reduce((a, r) => a + (r.g.track ? 0 : r.net), 0)
   const recent = s.groups
@@ -194,6 +208,7 @@ export function Home({ s, t }: { s: State; t: ThemeId }) {
   return (
     <Screen t={t} fab="/add" action={<button className="iconbtn" aria-label="You and settings" onClick={() => go('/me')}><Icon n="user" /></button>}>
       <Denomination t={t} amount={total} line={verb(null, total, true)} />
+      {banner}
       <SectionHead title="Groups" action={<button className="link" onClick={() => go('/new')}>New group</button>} />
       <ol className="slips">
         {rows.map(({ g, net }, i) => {

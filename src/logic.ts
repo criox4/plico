@@ -6,7 +6,12 @@ export type SplitMode = 'equal' | 'exact' | 'percent' | 'shares'
 export type Kind = 'trip' | 'home' | 'couple' | 'friends' | 'family' | 'office'
 export type Tone = 'gentle' | 'normal' | 'shameless'
 
-export type Member = { id: Id; name: string; upi?: string }
+export type Member = {
+  id: Id; name: string; upi?: string
+  email?: string; phone?: string // invite targets for people without the app
+  joined?: boolean // linked to an account
+  invited?: boolean // an invite has gone out
+}
 export type Expense = {
   id: Id
   title: string
