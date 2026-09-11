@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
 import { ME, balances, simplify, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import type { State } from './store'
@@ -69,7 +69,7 @@ const ROSETTE = [spiro(96, 36, 50), spiro(100, 24, 46), spiro(60, 22, 30)]
 export function Ornament({ t }: { t: ThemeId }) {
   const o = theme(t).ornament
   if (o === 'guilloche')
-    return <svg className="ornament" viewBox="-150 -150 300 300" aria-hidden>{ROSETTE.map(d => <path key={d.length} d={d} />)}</svg>
+    return <svg className="ornament" viewBox="-150 -150 300 300" aria-hidden>{ROSETTE.map(d => <path key={d.length} d={d} pathLength={1} />)}</svg>
   if (o === 'ripple')
     return <svg className="ornament" viewBox="-150 -150 300 300" aria-hidden>{[28, 52, 76, 100, 124, 148].map(r => <circle key={r} r={r} />)}</svg>
   return null
@@ -113,12 +113,39 @@ export function Screen({ t, title, back, action, fab, children }: {
   )
 }
 
+export const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/** Counts a money value from what was shown to its new value, so a changed balance reads as a change. */
+export function useTicker(value: number, ms = 700) {
+  const [shown, setShown] = useState(value)
+  const from = useRef(value)
+  useEffect(() => {
+    const start = from.current
+    if (start === value || calm()) { from.current = value; return setShown(value) }
+    let raf = 0
+    const t0 = performance.now()
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / ms)
+      const v = Math.round(start + (value - start) * (1 - Math.pow(2, -10 * k)) / (1 - Math.pow(2, -10)))
+      from.current = k < 1 ? v : value
+      setShown(k < 1 ? v : value)
+      if (k < 1) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [value, ms])
+  return shown
+}
+
 export function Denomination({ t, amount, line, caption }: { t: ThemeId; amount: number; line: string; caption?: ReactNode }) {
-  const digits = inr(amount).replace('₹', '')
+  const shown = useTicker(amount)
+  const digits = inr(shown).replace('₹', '')
+  // Size to the final value so the numeral doesn't resize while it counts.
+  const chars = inr(amount).length - 1
   return (
     <section className="hero" aria-label={`${line}: ${inr(amount)}`}>
       <Ornament t={t} />
-      <p className={`hero-num ${tone(amount)}`} aria-hidden style={{ '--chars': digits.length } as CSSProperties}><span className="cur">₹</span>{digits}</p>
+      <p className={`hero-num ${tone(amount)}`} aria-hidden style={{ '--chars': chars } as CSSProperties}><span className="cur">₹</span>{digits}</p>
       <p className="microprint" aria-hidden>{'SPLITTR · SETTLE · '.repeat(8)}</p>
       <p className="hero-verb" aria-hidden>{line}</p>
       {caption && <p className="hero-cap">{caption}</p>}
@@ -200,23 +227,27 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
 
 export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNode }) {
   const rows = s.groups.map(g => ({ g, net: balances(g)[ME] ?? 0 }))
-  const total = rows.reduce((a, r) => a + (r.g.track ? 0 : r.net), 0)
+  const live = rows.filter(r => !r.g.track)
+  const total = live.reduce((a, r) => a + r.net, 0)
+  const collect = live.reduce((a, r) => a + Math.max(r.net, 0), 0)
+  const pay = live.reduce((a, r) => a + Math.max(-r.net, 0), 0)
   const recent = s.groups
     .flatMap(g => g.expenses.map((e, i) => ({ g, e, i })))
     .sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
     .slice(0, 6)
   return (
     <Screen t={t} fab="/add" action={<button className="iconbtn" aria-label="You and settings" onClick={() => go('/me')}><Icon n="user" /></button>}>
-      <Denomination t={t} amount={total} line={verb(null, total, true)} />
+      <Denomination t={t} amount={total} line={verb(null, total, true)}
+        caption={collect && pay ? `${inr(collect)} to collect · ${inr(pay)} to pay` : undefined} />
       {banner}
       <SectionHead title="Groups" action={<button className="link" onClick={() => go('/new')}>New group</button>} />
       <ol className="slips">
         {rows.map(({ g, net }, i) => {
-          const gt = theme(g.theme).c
+          const gt = theme(g.theme)
           return (
-            <li key={g.id}>
+            <li key={g.id} style={{ '--i': i, '--gnum': `${gt.num}, ${gt.ui}, system-ui` } as CSSProperties}>
               <button className="slip" onClick={() => go('/g/' + g.id)}>
-                <span className="slip-kind" style={{ background: gt.accent, color: gt.onAccent }}><Icon n={g.kind} /></span>
+                <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}><Icon n={g.kind} /></span>
                 <span className="slip-body">
                   <span className="serial">No. {String(i + 1).padStart(2, '0')}</span>
                   <strong>{g.name}</strong>
@@ -229,9 +260,11 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
         })}
       </ol>
       <SectionHead title="Recent" />
-      <ol className="ledger">
-        {recent.map(({ g, e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} showGroup />)}
-      </ol>
+      {recent.length ? (
+        <ol className="ledger">
+          {recent.map(({ g, e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} showGroup />)}
+        </ol>
+      ) : <p className="empty">Nothing added yet. Tap + to add the first expense.</p>}
     </Screen>
   )
 }

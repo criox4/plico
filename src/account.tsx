@@ -1,13 +1,13 @@
 // Account: splash, welcome + sign-in flows, password reset, verification, the account hub and its pages, claim links.
 import { useEffect, useState, type ReactNode } from 'react'
 import { Capacitor } from '@capacitor/core'
-import { isVpa, type Kind, type Tone } from './logic'
+import { inr, isVpa, type Kind, type Tone } from './logic'
 import { update, type State } from './store'
 import { authClient } from './auth-client'
 import { api, isPhone, pull, refreshUser, signOut, signedIn, useSync } from './sync'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
-import { BrandMark, Screen, ThemePicker, TONES, go } from './ui'
+import { BrandMark, Ornament, Screen, ThemePicker, TONES, calm, go, useTicker } from './ui'
 
 const origin = () => location.origin + location.pathname.replace(/index\.html$/, '')
 const msg = (e: unknown, fallback = 'That didn’t work. Try again.') =>
@@ -42,6 +42,61 @@ async function googleSignIn(webClientId: string | null, iosClientId: string | nu
   if (r.error) throw new Error(r.error.message)
   const u = (r.data as { user?: Parameters<typeof signedIn>[0] }).user ?? (await authClient.getSession()).data?.user
   if (u) await signedIn(u)
+}
+
+// ---------- welcome showcase: sample groups, each in its own theme, settling in turn ----------
+const SAMPLES: { name: string; kind: Kind; t: ThemeId; amount: number; line: string }[] = [
+  { name: 'Goa 2027', kind: 'trip', t: 'goa', amount: 932000, line: 'Rohan and Isha owe you' },
+  { name: 'Flat 404', kind: 'home', t: 'auto', amount: -485000, line: 'Your share of rent and bills' },
+  { name: 'Friday football', kind: 'friends', t: 'midnight', amount: 68000, line: 'Karan owes you for the turf' },
+]
+const SHOW_MS = 1600, SETTLE_MS = 2000, OUT_MS = 420
+
+function ShowCard({ sample, pos, settled }: { sample: typeof SAMPLES[number]; pos: number; settled: boolean }) {
+  const value = useTicker(settled ? 0 : Math.abs(sample.amount), 900)
+  const th = theme(sample.t)
+  return (
+    <div className={`show-card pos-${pos}${settled ? ' settled' : ''}`} data-theme={sample.t} style={themeVars(sample.t)}>
+      <Ornament t={sample.t} />
+      <div className="show-head">
+        <span className="slip-kind"><Icon n={sample.kind} /></span>
+        <strong>{sample.name}</strong>
+        <span className="serial">{th.name}</span>
+      </div>
+      <p className={`show-num hero-num ${settled ? '' : sample.amount > 0 ? 'pos' : 'neg'}`}><span className="cur">₹</span>{inr(value).replace('₹', '')}</p>
+      <p className="show-line">{settled ? 'Paid over UPI. All square.' : sample.line}</p>
+      <span className="show-stamp">{th.celebrate}</span>
+    </div>
+  )
+}
+
+function Showcase() {
+  const [front, setFront] = useState(0)
+  const [phase, setPhase] = useState<'show' | 'settle' | 'out'>('show')
+  const [retry, setRetry] = useState(0)
+  useEffect(() => ensureFonts(SAMPLES.map(x => x.t)), [])
+  useEffect(() => {
+    if (calm()) return // reduced motion: a still stack, no loop
+    const wait = { show: SHOW_MS, settle: SETTLE_MS, out: OUT_MS }[phase]
+    const id = setTimeout(() => {
+      if (document.hidden) return setRetry(r => r + 1) // paused while the tab is hidden
+      if (phase === 'show') setPhase('settle')
+      else if (phase === 'settle') setPhase('out')
+      else { setFront(f => (f + 1) % SAMPLES.length); setPhase('show') }
+    }, wait)
+    return () => clearTimeout(id)
+  }, [phase, front, retry])
+  return (
+    <figure className="showcase" aria-label="Three sample groups, each in its own theme">
+      <div className="show-stack" aria-hidden>
+        {SAMPLES.map((x, i) => {
+          const pos = (i - front + SAMPLES.length) % SAMPLES.length
+          return <ShowCard key={x.name} sample={x} pos={pos === 0 && phase === 'out' ? -1 : pos} settled={pos === 0 && phase !== 'show'} />
+        })}
+      </div>
+      <figcaption>Sample groups. Every group wears its own theme.</figcaption>
+    </figure>
+  )
 }
 
 // ---------- welcome + auth ----------
@@ -83,10 +138,16 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
     return (
       <div className="welcome" data-theme="classic" style={themeVars('classic')}>
         <div className="welcome-top">
-          <BrandMark size={64} />
+          <span className="wordmark"><BrandMark />Splittr</span>
           <h1>Money together, your way.</h1>
-          <p>Split trips, rent and dinners with anyone. Settle up over UPI. Everyone sees the same numbers.</p>
+          <p>Split trips, rent and dinners. Everyone sees the same numbers, and settling up is one UPI tap.</p>
           {(notice || invited) && <p className="notice" role="status">{notice || 'You’ve been invited to a group. Create an account or sign in to join it.'}</p>}
+          <Showcase />
+          <ul className="points">
+            <li><Icon n="send" />Friends pay from a link. No app needed.</li>
+            <li><Icon n="check" />Works offline. Syncs when you’re back.</li>
+            <li><Icon n="qr" />Pay by UPI or QR, to a name you can see.</li>
+          </ul>
         </div>
         <div className="welcome-actions">
           {sync.google && <button className="btn google" disabled={busy} onClick={() => void google()}><GoogleG />Continue with Google</button>}
