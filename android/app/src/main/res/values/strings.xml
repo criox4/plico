@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Splittr</string>
-    <string name="title_activity_main">Splittr</string>
-    <string name="package_name">app.splittr</string>
-    <string name="custom_url_scheme">app.splittr</string>
+    <string name="app_name">Plico</string>
+    <string name="title_activity_main">Plico</string>
+    <string name="package_name">app.plico</string>
+    <string name="custom_url_scheme">app.plico</string>
 </resources>

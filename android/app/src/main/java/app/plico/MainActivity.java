@@ -1,4 +1,4 @@
-package app.splittr;
+package app.plico;
 
 import com.getcapacitor.BridgeActivity;
 

@@ -1,6 +1,6 @@
 // Offline-first: serve from cache, refresh in the background (stale-while-revalidate).
 // ponytail: one cache that grows with each deploy's hashed assets; bump C (or prune by age) if size matters.
-const C = 'splittr-v2' // v2: drops API responses v1 wrongly cached
+const C = 'plico-v3' // v3: Plico rebrand; v2 dropped API responses v1 wrongly cached
 
 self.addEventListener('install', e => {
   self.skipWaiting()

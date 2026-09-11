@@ -25,4 +25,4 @@ app.route('/api', api)
 app.get('/health', c => c.text('ok'))
 
 const port = Number(process.env.PORT) || 8787
-serve({ fetch: app.fetch, port }, () => console.log(`Splittr API on http://localhost:${port}`))
+serve({ fetch: app.fetch, port }, () => console.log(`Plico API on http://localhost:${port}`))

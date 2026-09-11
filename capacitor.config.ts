@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
-  appId: 'app.splittr',
-  appName: 'Splittr',
+  appId: 'app.plico',
+  appName: 'Plico',
   webDir: 'dist',
   plugins: {
     // Only Google is used; leaving the others out keeps their SDKs out of the native builds.
