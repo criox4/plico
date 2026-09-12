@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, type Group } from './logic.ts'
+import { ME, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -40,4 +40,14 @@ assert.ok(sharesError(1000, { a: 900 }, { a: 500, b: 500 }, m))
 assert.ok(sharesError(1000, { a: 1000 }, { a: 500, x: 500 }, m))
 assert.ok(sharesError(1000, { a: 1000.5 }, { a: 1000.5 }, m))
 assert.ok(sharesError(0, {}, {}, m))
+// a settlement waiting for the payee doesn't move balances until it's confirmed
+const p: Group = { id: 'p', name: 'P', kind: 'friends', theme: 'classic', members: [{ id: ME, name: 'Me' }, { id: 'r', name: 'Rahul', joined: true }, { id: 'q', name: 'Guest' }],
+  expenses: [{ id: 'd', title: 'Dinner', cat: 'food', date: '2026-09-26', amount: 2000, paid: { r: 2000 }, owed: { [ME]: 1000, r: 1000 } }] }
+p.expenses.push({ id: 's1', title: 'Settlement', cat: 'check', date: '2026-09-26', amount: 1000, paid: { [ME]: 1000 }, owed: { r: 1000 }, settle: true, pending: true })
+assert.equal(balances(p)[ME], -1000)
+delete p.expenses[1].pending
+assert.equal(balances(p)[ME], 0)
+assert.equal(needsConfirm(p, 'r'), true) // Rahul has an account: he confirms
+assert.equal(needsConfirm(p, 'q'), false) // a guest can't confirm
+assert.equal(needsConfirm(p, ME), false) // I'm the payee: my word is enough
 console.log('ok')

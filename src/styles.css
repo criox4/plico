@@ -104,6 +104,11 @@ small { font-size: .8125rem; color: var(--muted); }
 .pos { color: var(--pos); }
 .neg { color: var(--neg); }
 .settled-ink { color: var(--settled); }
+.muted-ink { color: var(--muted); }
+.confirm-card { display: grid; gap: 12px; padding: 14px 16px; background: color-mix(in srgb, var(--accent) 9%, var(--surface)); border-radius: var(--radius); box-shadow: var(--elev); }
+.confirm-card p { display: grid; gap: 3px; }
+.confirm-card strong { font-weight: 650; }
+.debt-wait { grid-column: 1 / -1; }
 .empty { color: var(--muted); padding: 20px 0; }
 
 /* group slips: numbered, the focused one lifts */

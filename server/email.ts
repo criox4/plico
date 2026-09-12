@@ -82,6 +82,14 @@ export const mail = {
     html: layout(`You’re in ${group}`, `${esc(inviter)} added you to <strong>${esc(group)}</strong>. It’s already waiting in Plico.`, { label: 'Open Plico', url: `${APP}/#/` }),
     text: `${inviter} added you to “${group}”. It’s already waiting in Plico: ${APP}/#/`,
   }),
+  paid: (to: string, payer: string, group: string, paise: number) => {
+    const amt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: paise % 100 ? 2 : 0 }).format(paise / 100)
+    return sendEmail({
+      to, subject: `${payer} says they paid you ${amt}`,
+      html: layout(`${payer} paid you ${amt}?`, `${esc(payer)} marked ${amt} as paid to you in <strong>${esc(group)}</strong>. Check your UPI app, then confirm in Plico so everyone’s even.`, { label: 'Confirm in Plico', url: `${APP}/#/` }),
+      text: `${payer} marked ${amt} as paid to you in “${group}”. Check your UPI app, then confirm in Plico: ${APP}/#/`,
+    })
+  },
   emailChanged: (to: string, newEmail: string, url: string) => sendEmail({
     to, subject: 'Confirm your new Plico email',
     html: layout('Confirm the email change', `Your Plico account is changing its email to <strong>${esc(newEmail)}</strong>. If that’s you, confirm below. If not, change your password now.`, { label: 'Confirm change', url }),

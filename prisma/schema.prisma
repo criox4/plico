@@ -137,6 +137,7 @@ model Expense {
   mode        String?
   input       Json?
   settle      Boolean        @default(false)
+  pending     Boolean        @default(false) /// settlement waiting for the payee to confirm; excluded from balances
   repeatNext  String?
   repeatDay   Int?
   createdById String?

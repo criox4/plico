@@ -1,5 +1,5 @@
 import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
-import { ME, addMonth, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
+import { ME, addMonth, needsConfirm, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { update, useStore, type State } from './store'
 import { api, pull, useSync } from './sync'
@@ -47,7 +47,7 @@ export default function App() {
     if (r[2] === 'pay' && r[3] && r[4] && +r[5] > 0) {
       const [from, to] = [r[3], r[4]]
       const record = (p: number) => {
-        edit(g.id, x => { x.expenses.push({ id: uid(), title: 'Settlement', cat: 'check', date: today(), amount: p, paid: { [from]: p }, owed: { [to]: p }, settle: true }) })
+        edit(g.id, x => { x.expenses.push({ id: uid(), title: 'Settlement', cat: 'check', date: today(), amount: p, paid: { [from]: p }, owed: { [to]: p }, settle: true, ...(needsConfirm(x, to) && { pending: true }) }) })
         back()
       }
       return <Settle s={s} g={g} from={from} to={to} amount={+r[5]} onRecord={record} />

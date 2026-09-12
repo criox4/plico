@@ -23,6 +23,7 @@ export type Expense = {
   mode?: SplitMode
   input?: Record<Id, number> // raw split input, kept so edits reopen as entered
   settle?: true
+  pending?: true // settlement waiting for the payee to confirm; doesn't move balances yet
   repeat?: { next: string; day: number } // monthly
 }
 export type Group = {
@@ -81,11 +82,15 @@ export function split(total: number, mode: SplitMode, input: Record<Id, number>)
 export function balances(g: Group): Record<Id, number> {
   const b: Record<Id, number> = Object.fromEntries(g.members.map(m => [m.id, 0]))
   for (const e of g.expenses) {
+    if (e.pending) continue
     for (const k in e.paid) b[k] = (b[k] ?? 0) + e.paid[k]
     for (const k in e.owed) b[k] = (b[k] ?? 0) - e.owed[k]
   }
   return b
 }
+
+/** A settlement waits for the payee unless the payee recorded it or can't confirm (a guest without an account). */
+export const needsConfirm = (g: Group, to: Id) => to !== ME && !!g.members.find(m => m.id === to)?.joined
 
 /** Greedy largest-debtor → largest-creditor: at most n-1 payments. */
 export function simplify(bal: Record<Id, number>): Transfer[] {

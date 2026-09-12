@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
-import { ME, balances, simplify, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
-import type { State } from './store'
+import { ME, balances, simplify, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
+import { update, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 
@@ -31,6 +31,7 @@ export const PUBLIC = import.meta.env.VITE_PUBLIC_URL || location.origin
 export const who = (g: Group, id: Id) => (id === ME ? 'You' : g.members.find(m => m.id === id)?.name ?? 'Someone')
 export const realName = (s: State, g: Group, id: Id) => (id === ME ? s.me.name || 'Me' : who(g, id))
 export const upiOf = (s: State, g: Group, id: Id) => (id === ME ? s.me.upi : g.members.find(m => m.id === id)?.upi) ?? ''
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 const lower = (name: string) => (name === 'You' ? 'you' : name)
 const tone = (p: number) => (p > 0 ? 'pos' : p < 0 ? 'neg' : '')
 
@@ -249,17 +250,42 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
   return (
     <li className="ledger-row">
       <button onClick={() => go(`/g/${g.id}/e/${e.id}`)}>
-        <span className={`cat ${e.settle ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
+        <span className={`cat ${e.settle && !e.pending ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
         <span className="lr-body">
           <strong>{e.settle ? `${by} paid ${lower(who(g, Object.keys(e.owed)[0]))}` : e.title}</strong>
-          <small><span className="serial">{no} · </span>{e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${g.name}` : ''}</small>
+          <small><span className="serial">{no} · </span>{e.pending ? 'waiting to confirm' : e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${g.name}` : ''}</small>
         </span>
-        {e.settle ? <span className="lr-amt"><span className="money settled-ink">{inr(e.amount)}</span></span>
+        {e.settle ? <span className="lr-amt"><span className={`money ${e.pending ? 'muted-ink' : 'settled-ink'}`}>{inr(e.amount)}</span></span>
           : <span className="lr-amt"><Money p={mine} sign /><small>{mine > 0 ? 'you lent' : mine < 0 ? 'your share' : 'not in it'}</small></span>}
       </button>
     </li>
   )
 }
+
+// ---------- settlements waiting for the payee ----------
+const ends = (e: Expense) => ({ from: Object.keys(e.paid)[0], to: Object.keys(e.owed)[0] })
+const setPending = (gid: Id, eid: Id, ok: boolean) => update(d => {
+  const g = d.groups.find(x => x.id === gid)
+  if (!g) return
+  if (ok) { const e = g.expenses.find(x => x.id === eid); if (e) delete e.pending }
+  else g.expenses = g.expenses.filter(x => x.id !== eid)
+})
+
+/** The payee's side: someone says they paid you. You're the only one who can say it arrived. */
+export function ConfirmCard({ g, e, showGroup }: { g: Group; e: Expense; showGroup?: boolean }) {
+  const { from } = ends(e)
+  return (
+    <li className="confirm-card">
+      <p><strong>{who(g, from)} marked <span className="money">{inr(e.amount)}</span> as paid to you</strong>
+        <small>{showGroup ? `${g.name} · ` : ''}Check your UPI app first.</small></p>
+      <span className="debt-actions">
+        <button className="btn-sm" onClick={() => setPending(g.id, e.id, true)}><Icon n="check" size={16} />Got it</button>
+        <button className="btn-sm ghost" onClick={() => setPending(g.id, e.id, false)}>Not yet</button>
+      </span>
+    </li>
+  )
+}
+const waitingFor = (g: Group) => g.expenses.filter(e => e.pending && ends(e).to === ME)
 
 export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNode }) {
   const rows = s.groups.map(g => ({ g, net: balances(g)[ME] ?? 0 }))
@@ -276,6 +302,10 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
       <Denomination t={t} amount={total} line={verb(null, total, true)}
         caption={collect && pay ? `${inr(collect)} to collect · ${inr(pay)} to pay` : undefined} />
       {banner}
+      {s.groups.some(g => waitingFor(g).length) && <>
+        <SectionHead title="To confirm" />
+        <ol className="debts">{s.groups.flatMap(g => waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup />))}</ol>
+      </>}
       <SectionHead title="Groups" action={<button className="link" onClick={() => go('/new')}>New group</button>} />
       <ol className="slips">
         {rows.map(({ g, net }, i) => {
@@ -287,7 +317,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
                 <span className="slip-body">
                   <span className="serial">No. {String(i + 1).padStart(2, '0')}</span>
                   <strong>{g.name}</strong>
-                  <small>{g.members.length} people · {g.expenses.filter(e => !e.settle).length} expenses</small>
+                  <small>{count(g.members.length, 'person', 'people')} · {count(g.expenses.filter(e => !e.settle).length, 'expense', 'expenses')}</small>
                 </span>
                 <span className="slip-amt">{net ? <Money p={net} /> : <span className="money settled-ink"><Icon n="check" size={20} /></span>}<small>{g.track ? 'tracking' : verbShort(g, net)}</small></span>
               </button>
@@ -330,6 +360,8 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
   const paid = spent.reduce((a, e) => a + (e.paid[ME] ?? 0), 0)
   const debts = simplify(bal)
   const toMe = debts.filter(d => d.to === ME)
+  const confirmMine = waitingFor(g)
+  const waiting = (d: Transfer) => g.expenses.find(e => e.pending && ends(e).from === d.from && ends(e).to === d.to)
   const list = g.expenses.map((e, i) => ({ e, i })).sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
   const remindAll = `Tiny reminder from ${g.name}:\n` + toMe.map(d => `${realName(s, g, d.from)}: ${inr(d.amount)} → ${shareLink(s, g, d)}`).join('\n')
   return (
@@ -338,6 +370,10 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
       <Denomination t={t} amount={net} line={g.track ? 'Tracking only, no nudges' : verb(g, net)}
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
       {spent.length > 0 && !debts.length && <Seal t={t} />}
+      {confirmMine.length > 0 && <>
+        <SectionHead title="To confirm" />
+        <ol className="debts">{confirmMine.map(e => <ConfirmCard key={e.id} g={g} e={e} />)}</ol>
+      </>}
       <SpendBar g={g} />
       {debts.length > 0 && <>
         <SectionHead title={g.track ? 'Balances' : 'Still to settle'}
@@ -351,7 +387,7 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
                 <span className="who">{who(g, d.to)}</span>
               </span>
               <span className={`money ${d.to === ME ? 'pos' : d.from === ME ? 'neg' : ''}`}>{inr(d.amount)}</span>
-              {!g.track && (
+              {!g.track && waiting(d) && d.to !== ME ? <small className="debt-wait">Paid {inr(waiting(d)!.amount)}. Waiting for {who(g, d.to)} to confirm.</small> : !g.track && (
                 <span className="debt-actions">
                   <button className="btn-sm" onClick={() => go(`/g/${g.id}/pay/${d.from}/${d.to}/${d.amount}`)}>Settle</button>
                   {d.to === ME && <a className="btn-sm ghost" href={wa(reminder(s, g, d))} target="_blank" rel="noopener"><Icon n="bell" size={16} />Remind</a>}
