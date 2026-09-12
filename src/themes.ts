@@ -2,7 +2,7 @@
 // ornament, motion and the settle celebration. Money semantics never change:
 // pos = owed to you, neg = you owe, settled = only for settled. All pairs pass WCAG AA (npm test).
 
-export const BRAND = { indigo: '#6C5CE7', dark: '#5145CD', light: '#EAE7FF' }
+export const BRAND = { indigo: '#6C5CE7', dark: '#5145CD', light: '#ECE9FF' } // Plico Purple
 
 export type ThemeId =
   | 'classic' | 'midnight' | 'khata' | 'goa' | 'mono' | 'retro'
@@ -23,14 +23,14 @@ export type ThemeDef = {
   fonts: string[] // Google Fonts css2 family specs
   radius: number
   stroke: number
-  ornament: 'guilloche' | 'ripple' | 'ledger' | 'meter' | 'none'
+  ornament: 'pieces' | 'guilloche' | 'ripple' | 'ledger' | 'meter' | 'none'
   celebrate: string // the word the settle seal prints
   motion: 'calm' | 'fluid' | 'snappy' | 'steps' | 'bouncy'
 }
 
 const f = {
   anek: 'Anek+Latin:wdth,wght@75..125,300..800',
-  bodoni: 'Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900',
+  gabarito: 'Gabarito:wght@400..900',
   martelSans: 'Martel+Sans:wght@400;600;800',
   kalam: 'Kalam:wght@400;700',
   baloo: 'Baloo+2:wght@400..800',
@@ -49,16 +49,16 @@ const f = {
 
 export const THEMES: ThemeDef[] = [
   {
-    id: 'classic', name: 'Classic', line: 'Splittr Indigo, engraved numerals, hairline guilloche. The brand at rest.',
-    dark: false, radius: 16, stroke: 1.6, ornament: 'guilloche', celebrate: 'Settled', motion: 'calm',
-    ui: "'Anek Latin'", num: "'Bodoni Moda'", fonts: [f.anek, f.bodoni],
-    c: { bg: '#F7F7FB', surface: '#FFFFFF', surface2: '#EFEEF6', ink: '#17171C', muted: '#5E5E6A', line: '#E3E2EC',
+    id: 'classic', name: 'Classic', line: 'Plico Purple, bold friendly numbers, soft pieces coming together. The brand at rest.',
+    dark: false, radius: 18, stroke: 1.7, ornament: 'pieces', celebrate: 'Sorted', motion: 'calm',
+    ui: "'Anek Latin'", num: "'Gabarito'", fonts: [f.anek, f.gabarito],
+    c: { bg: '#F8F7FC', surface: '#FFFFFF', surface2: '#ECE9FF', ink: '#17171C', muted: '#5E5E6A', line: '#E6E3F2',
       accent: '#6C5CE7', onAccent: '#FFFFFF', link: '#5145CD', pos: '#0B7A56', neg: '#C8374A', settled: '#8F6410' },
   },
   {
-    id: 'midnight', name: 'Midnight', line: 'Violet light on charcoal glass. Dark-first, dramatic, quiet.',
-    dark: true, radius: 18, stroke: 1.5, ornament: 'guilloche', celebrate: 'Settled', motion: 'fluid',
-    ui: "'Anek Latin'", num: "'Bodoni Moda'", fonts: [f.anek, f.bodoni],
+    id: 'midnight', name: 'Midnight', line: 'Violet glow on charcoal glass. Dark-first, dramatic, quiet.',
+    dark: true, radius: 20, stroke: 1.5, ornament: 'pieces', celebrate: 'All even', motion: 'fluid',
+    ui: "'Anek Latin'", num: "'Gabarito'", fonts: [f.anek, f.gabarito],
     c: { bg: '#0D0D12', surface: '#17171F', surface2: '#21212C', ink: '#F1F0F7', muted: '#A3A2B5', line: '#2B2B39',
       accent: '#9D7BF8', onAccent: '#0D0D12', link: '#B49BFA', pos: '#3DD39B', neg: '#FF7D89', settled: '#E6BC62' },
   },

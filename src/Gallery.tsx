@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ME, balances, simplify } from './logic'
 import { THEMES, ensureFonts, themeVars, type ThemeDef, type ThemeId } from './themes'
-import { BrandMark, GroupView, Home, Seal, Settle } from './ui'
+import { GroupView, Home, Seal, Settle, Wordmark } from './ui'
 import { DEMO } from './demo'
 
 const goa = DEMO.groups[0]
@@ -61,7 +61,7 @@ export default function Gallery() {
   return (
     <div className="gallery" data-theme="classic" style={themeVars('classic')}>
       <header className="g-head">
-        <span className="wordmark"><BrandMark />Splittr</span>
+        <Wordmark />
         <h1>Twelve themes, one ledger.</h1>
         <p>
           Each theme changes type, shape, texture, icon stroke, motion and the moment a group settles. What money means never changes:

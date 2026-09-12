@@ -7,19 +7,19 @@ import { authClient } from './auth-client'
 import { api, isPhone, pull, refreshUser, signOut, signedIn, useSync } from './sync'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
-import { BrandMark, Ornament, Screen, ThemePicker, TONES, calm, go, useTicker } from './ui'
+import { Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, useTicker } from './ui'
 
 const origin = () => location.origin + location.pathname.replace(/index\.html$/, '')
-const msg = (e: unknown, fallback = 'That didn’t work. Try again.') =>
+const msg = (e: unknown, fallback = 'That didn’t work. Your balances are safe. Try again.') =>
   (e as { message?: string })?.message || fallback
 const cleanUrl = (hash = '#/') => history.replaceState(null, '', location.pathname + hash)
 
 // ---------- splash ----------
 export function Splash() {
   return (
-    <div className="splash" role="status" aria-label="Splittr is starting">
-      <BrandMark size={84} />
-      <span className="splash-word">Splittr</span>
+    <div className="splash" role="status" aria-label="Plico is starting">
+      <Plico mood="settled" size={112} />
+      <span className="splash-word">plico</span>
     </div>
   )
 }
@@ -61,10 +61,10 @@ function ShowCard({ sample, pos, settled }: { sample: typeof SAMPLES[number]; po
       <div className="show-head">
         <span className="slip-kind"><Icon n={sample.kind} /></span>
         <strong>{sample.name}</strong>
-        <span className="serial">{th.name}</span>
+        <span className="show-theme">{th.name}</span>
       </div>
       <p className={`show-num hero-num ${settled ? '' : sample.amount > 0 ? 'pos' : 'neg'}`}><span className="cur">₹</span>{inr(value).replace('₹', '')}</p>
-      <p className="show-line">{settled ? 'Paid over UPI. All square.' : sample.line}</p>
+      <p className="show-line">{settled ? 'Paid over UPI. Everyone’s even ✨' : sample.line}</p>
       <span className="show-stamp">{th.celebrate}</span>
     </div>
   )
@@ -116,7 +116,7 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
   const run = async (fn: () => Promise<void>) => {
     setBusy(true)
     setErr('')
-    try { await fn() } catch (e) { setErr(msg(e, 'Can’t reach Splittr. Check your connection and try again.')) } finally { setBusy(false) }
+    try { await fn() } catch (e) { setErr(msg(e, 'Can’t reach Plico. Check your connection and try again. Your balances are safe.')) } finally { setBusy(false) }
   }
   const submit = () => run(async () => {
     if (step === 'forgot') {
@@ -138,9 +138,9 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
     return (
       <div className="welcome" data-theme="classic" style={themeVars('classic')}>
         <div className="welcome-top">
-          <span className="wordmark"><BrandMark />Splittr</span>
-          <h1>Money together, your way.</h1>
-          <p>Split trips, rent and dinners. Everyone sees the same numbers, and settling up is one UPI tap.</p>
+          <Wordmark />
+          <h1>Money together, sorted.</h1>
+          <div className="hello"><Plico mood="idle" size={52} /><p><strong>Hi. I’m Plico.</strong>I keep track of the awkward money stuff, so trips, rent and dinners stay fun.</p></div>
           {(notice || invited) && <p className="notice" role="status">{notice || 'You’ve been invited to a group. Create an account or sign in to join it.'}</p>}
           <Showcase />
           <ul className="points">
@@ -164,7 +164,7 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
       <div className="auth">
         {notice && <p className="notice" role="status">{notice}</p>}
         {step === 'sent' ? <>
-          <p className="muted-p">If <strong>{email}</strong> has a Splittr account, a link to choose a new password is on its way. It works for one hour.</p>
+          <p className="muted-p">If <strong>{email}</strong> has a Plico account, a link to choose a new password is on its way. It works for one hour.</p>
           <button className="btn secondary" onClick={() => to('signin')}>Back to sign in</button>
         </> : <>
           {sync.google && step !== 'forgot' && <>
@@ -362,8 +362,9 @@ export function AccountHub({ s }: { s: State }) {
 
 export function SyncLine() {
   const { pending, offline, error } = useSync()
-  const text = error || (offline ? `Offline. ${pending ? `${pending} change${pending > 1 ? 's' : ''} will sync when you’re back.` : 'Everything is saved on this phone.'}`
-    : pending ? `Syncing ${pending} change${pending > 1 ? 's' : ''}…` : 'All changes synced.')
+  const n = `${pending} change${pending > 1 ? 's' : ''}`
+  const text = error || (offline ? `No signal? No problem. ${pending ? `I’ll sync ${n} later.` : 'Everything is saved on this phone.'}`
+    : pending ? `Syncing ${n}…` : 'All synced.')
   return <p className="sync-line" role="status">{text}</p>
 }
 
@@ -397,9 +398,9 @@ export function RemindersPage({ s }: { s: State }) {
   return (
     <Page s={s} title="Reminders">
       <div className="seg" role="radiogroup" aria-label="Reminder tone">
-        {(['gentle', 'normal', 'shameless'] as Tone[]).map(t => (
+        {(['normal', 'gentle', 'shameless'] as Tone[]).map(t => (
           <button type="button" key={t} role="radio" aria-checked={s.tone === t} className={s.tone === t ? 'on' : ''} onClick={() => update(d => { d.tone = t })}>
-            {t[0].toUpperCase() + t.slice(1)}
+            {{ normal: 'Normal', gentle: 'Friendly', shameless: 'Playful' }[t]}
           </button>
         ))}
       </div>
@@ -435,7 +436,7 @@ export function SecurityPage({ s }: { s: State }) {
         <button className="btn secondary">Change email</button>
       </form>
       <h2 className="form-h">Password</h2>
-      {hasPassword === false ? <p className="muted-p">You sign in with Google, so there’s no Splittr password to change.</p> : (
+      {hasPassword === false ? <p className="muted-p">You sign in with Google, so there’s no Plico password to change.</p> : (
         <form className="form" onSubmit={e => { e.preventDefault(); void changePassword() }}>
           <label className="field"><span>Current password</span><input type="password" value={cur} onChange={e => setCur(e.target.value)} autoComplete="current-password" required /></label>
           <label className="field"><span>New password</span><input type="password" value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" minLength={8} required /><small>At least 8 characters. Other devices will be signed out.</small></label>
@@ -450,7 +451,7 @@ export function SecurityPage({ s }: { s: State }) {
 type Sess = { id: string; token: string; userAgent?: string | null; createdAt: string | Date; updatedAt: string | Date }
 const device = (ua = '') => {
   const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iPhone' : /Mac OS/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : 'Device'
-  const app = /Splittr|wv\)/.test(ua) ? 'Splittr app' : /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser'
+  const app = /Plico|wv\)/.test(ua) ? 'Plico app' : /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser'
   return `${app} on ${os}`
 }
 

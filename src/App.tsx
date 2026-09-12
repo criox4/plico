@@ -5,7 +5,7 @@ import { update, useStore, type State } from './store'
 import { api, pull, useSync } from './sync'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Denomination, ThemePicker, GroupView, Home, KINDS, PUBLIC, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
+import { Denomination, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
 import { AccountHub, AppearancePage, AuthFlow, Avatar, Claim, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
@@ -76,8 +76,8 @@ function NewGroup({ s }: { s: State }) {
     return (
       <Screen t={s.theme} back={!first}>
         {first && <VerifyBanner s={s} />}
-        {first && <p className="lede">Money together, your way.</p>}
-        <h1 className="q">What are we splitting?</h1>
+        {first && <div className="hello"><Plico mood="idle" size={56} /><p><strong>Hi. I’m Plico.</strong>I keep track of the awkward money stuff.</p></div>}
+        <h1 className="q">Who’s spending together?</h1>
         <div className="kinds">
           {(Object.keys(KINDS) as Kind[]).map(k => (
             <button key={k} className="kind" onClick={() => { setKind(k); setTh(KINDS[k].theme) }}>
@@ -357,12 +357,12 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
       setNote(`Invite sent to ${m.email}.`)
     } catch (e) { setNote((e as Error).message) }
   }
-  const msg = `Hi ${m.name}! I added you to “${g.name}” on Splittr so we can split and settle up. Join here: ${link}`
+  const msg = `Hi ${m.name}! I added you to “${g.name}” on Plico so we can split and settle up. Join here: ${link}`
   return (
     <li className={`person${open ? ' open' : ''}`}>
       <button type="button" className="person-head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Avatar name={m.name} size={40} />
-        <span className="grow"><strong>{m.name}</strong><small>{m.email || m.phone || (m.joined ? 'Has Splittr' : 'No contact yet')}</small></span>
+        <span className="grow"><strong>{m.name}</strong><small>{m.email || m.phone || (m.joined ? 'Has Plico' : 'No contact yet')}</small></span>
         <span className={`chip-state ${m.joined ? 'ok' : m.invited ? 'info' : ''}`}>{status}</span>
       </button>
       {open && (
@@ -433,7 +433,7 @@ function Invite({ g }: { g: Group }) {
     {link ? <>
       <p className="muted-p">Friends open this link, sign in, and pick which name in the group is theirs.</p>
       {qr && <div className="qr-plate qr-sm"><img src={qr} alt={`QR code to join ${g.name}`} /></div>}
-      <a className="btn secondary" href={wa(`Join “${g.name}” on Splittr so we can split and settle up: ${link}`)} target="_blank" rel="noopener"><Icon n="send" />Share invite on WhatsApp</a>
+      <a className="btn secondary" href={wa(`Join “${g.name}” on Plico so we can split and settle up: ${link}`)} target="_blank" rel="noopener"><Icon n="send" />Share invite on WhatsApp</a>
       <button type="button" className="link center-link" onClick={() => navigator.clipboard?.writeText(link)}><Icon n="copy" size={18} />Copy invite link</button>
     </> : <p className="muted-p">{err || 'Loading invite link…'}</p>}
   </>
@@ -497,8 +497,8 @@ function SharedPay({ p }: { p: string }) {
       </> : <p className="note"><span>{d.t} hasn’t added a UPI ID yet. Pay them directly.</span></p>}
       <section className="cta">
         <strong>Keep track of the whole group</strong>
-        <small>Splittr splits group expenses and settles them over UPI.</small>
-        <a className="btn secondary" href={`${PUBLIC}/#/`}>Open Splittr</a>
+        <small>Plico splits group expenses and settles them over UPI.</small>
+        <a className="btn secondary" href={`${PUBLIC}/#/`}>Open Plico</a>
       </section>
     </Screen>
   )

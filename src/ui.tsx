@@ -35,17 +35,17 @@ const lower = (name: string) => (name === 'You' ? 'you' : name)
 const tone = (p: number) => (p > 0 ? 'pos' : p < 0 ? 'neg' : '')
 
 export function verb(g: Group | null, net: number, overall = false) {
-  if (!net) return overall ? 'All square. Nothing pending.' : 'All square in this group.'
+  if (!net) return overall ? 'All even. Nothing to settle.' : 'Everyone’s even here.'
   if (g?.kind === 'couple') return net > 0 ? 'You covered more this month' : 'They covered more this month'
-  return net > 0 ? (overall ? 'You are owed overall' : 'You are owed') : overall ? 'You owe overall' : 'You owe'
+  return net > 0 ? (overall ? 'You’re owed overall' : 'You’re owed') : overall ? 'You owe overall' : 'You owe'
 }
 const verbShort = (g: Group, net: number) =>
-  !net ? 'settled' : g.kind === 'couple' ? (net > 0 ? 'you covered more' : 'they covered more') : net > 0 ? 'you are owed' : 'you owe'
+  !net ? 'even' : g.kind === 'couple' ? (net > 0 ? 'you covered more' : 'they covered more') : net > 0 ? 'you’re owed' : 'you owe'
 
 export const TONES = {
-  gentle: (a: string, to: string, g: string) => `Tiny reminder: ${a} is still pending with ${to} from ${g}.`,
-  normal: (a: string, to: string, g: string) => `${g}: ${a} settlement pending with ${to}.`,
-  shameless: (a: string, to: string, g: string) => `${g} ended. Your debt apparently didn't. ${a} to ${to}.`,
+  gentle: (a: string, to: string, g: string) => `Tiny reminder: ${a} for ${to} from ${g} is still hanging around 👀`,
+  normal: (a: string, to: string, g: string) => `${g}: ${a} still pending to ${to}.`,
+  shameless: (a: string, to: string, g: string) => `${g} is over. The ${a} subplot continues. It goes to ${to}.`,
 }
 export const shareLink = (s: State, g: Group, t: Transfer) =>
   `${PUBLIC}/#/s/${encodeShare({ g: g.name, f: realName(s, g, t.from), t: realName(s, g, t.to), v: upiOf(s, g, t.to) || undefined, a: t.amount })}`
@@ -68,6 +68,15 @@ const ROSETTE = [spiro(96, 36, 50), spiro(100, 24, 46), spiro(60, 22, 30)]
 
 export function Ornament({ t }: { t: ThemeId }) {
   const o = theme(t).ornament
+  // Pieces coming together: two soft halves drift in and overlap, Plico's motif at hero scale.
+  if (o === 'pieces')
+    return (
+      <svg className="ornament pieces" viewBox="-150 -150 300 300" aria-hidden>
+        <circle className="pc-a" cx="-34" cy="-10" r="92" />
+        <circle className="pc-b" cx="46" cy="18" r="70" />
+        <circle className="pc-c" cx="-6" cy="96" r="30" />
+      </svg>
+    )
   if (o === 'guilloche')
     return <svg className="ornament" viewBox="-150 -150 300 300" aria-hidden>{ROSETTE.map(d => <path key={d.length} d={d} pathLength={1} />)}</svg>
   if (o === 'ripple')
@@ -75,12 +84,37 @@ export function Ornament({ t }: { t: ThemeId }) {
   return null
 }
 
+// Plico's body is the brand: a purple stem and a rounder bowl that overlap into a soft "p".
+// The stem is always Plico Purple (--brand); the bowl takes the theme's accent, so every theme re-skins Plico.
+const STEM = <rect className="pl-stem" x="4" y="4" width="10" height="25" rx="5" />
+const BOWL = <circle className="pl-bowl-body" cx="18" cy="13" r="10" />
+
 export function BrandMark({ size = 26 }: { size?: number }) {
-  // Splittr mark: one coin, split. Always Splittr Indigo, in every theme.
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden className="brandmark">
-      <path className="bm-l" d="M14.5 3.1A13 13 0 0 0 14.5 28.9z" fill="var(--brand)" />
-      <path className="bm-r" d="M17.5 3.1A13 13 0 0 1 17.5 28.9z" fill="var(--brand)" opacity=".55" />
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden className="brandmark plico-shape">
+      <g className="pl-bowl">{BOWL}</g>{STEM}
+    </svg>
+  )
+}
+
+export const Wordmark = () => <span className="wordmark" role="img" aria-label="plico"><BrandMark /><span aria-hidden>lico</span></span>
+
+export type Mood = 'idle' | 'owed' | 'owe' | 'settled' | 'empty' | 'thinking'
+/** Plico, the mascot. Appears in onboarding, empty states, settling, loading and errors; never parked on money. */
+export function Plico({ mood = 'idle', size = 64 }: { mood?: Mood; size?: number }) {
+  const closed = mood === 'empty'
+  return (
+    <svg width={size} height={size} viewBox="-2 -3 36 36" aria-hidden className={`plico plico-shape is-${mood}`}>
+      {mood === 'settled' && <g className="pl-sparks">{[[-1, 2], [31, 3], [30, 26], [0, 27]].map(([x, y]) => <path key={x + '' + y} d={`M${x} ${y - 2.5}v5M${x - 2.5} ${y}h5`} />)}</g>}
+      <g className="pl-bowl">
+        {BOWL}
+        <g className="pl-face">
+          {closed ? <path className="pl-lids" d="M16.2 12.8q1.4 1.3 2.8 0M21.8 12.8q1.4 1.3 2.8 0" />
+            : <g className="pl-eyes"><circle cx="17.6" cy="12.4" r="1.7" /><circle cx="23.2" cy="12.4" r="1.7" /></g>}
+          {(mood === 'settled' || closed) && <path className="pl-mouth" d="M18.4 16.4q2 1.8 4 0" />}
+        </g>
+      </g>
+      {STEM}
     </svg>
   )
 }
@@ -97,7 +131,7 @@ export function Screen({ t, title, back, action, fab, children }: {
     <div className="screen" data-theme={t} style={themeVars(t)}>
       <header className="bar">
         {back ? <button className="iconbtn" onClick={typeof back === 'function' ? back : goBack} aria-label="Back"><Icon n="back" /></button>
-          : <span className="wordmark"><BrandMark />Splittr</span>}
+          : <Wordmark />}
         {title && <h1 className="bar-title">{title}</h1>}
         <span className="bar-end">{action}</span>
       </header>
@@ -146,21 +180,24 @@ export function Denomination({ t, amount, line, caption }: { t: ThemeId; amount:
     <section className="hero" aria-label={`${line}: ${inr(amount)}`}>
       <Ornament t={t} />
       <p className={`hero-num ${tone(amount)}`} aria-hidden style={{ '--chars': chars } as CSSProperties}><span className="cur">₹</span>{digits}</p>
-      <p className="microprint" aria-hidden>{'SPLITTR · SETTLE · '.repeat(8)}</p>
       <p className="hero-verb" aria-hidden>{line}</p>
       {caption && <p className="hero-cap">{caption}</p>}
     </section>
   )
 }
 
+const Peaceful = () => (
+  <div className="peaceful"><Plico mood="empty" size={64} /><p><strong>Suspiciously peaceful in here.</strong>Add the first expense with +.</p></div>
+)
+
 export const SectionHead = ({ title, action }: { title: string; action?: ReactNode }) => (
   <div className="section-head"><h2>{title}</h2>{action}</div>
 )
 
-export function Seal({ t, replay = 0, caption = 'Everyone is square in this group.' }: { t: ThemeId; replay?: number; caption?: string }) {
+export function Seal({ t, replay = 0, caption = 'Everyone’s even ✨' }: { t: ThemeId; replay?: number; caption?: string }) {
   const id = useId()
   const th = theme(t)
-  const ring = `${th.celebrate} · Splittr · ${th.celebrate} · Splittr · `.toUpperCase()
+  const ring = `${th.celebrate} · plico · ${th.celebrate} · plico · `.toUpperCase()
   return (
     <div className="seal" key={replay} role="status">
       <svg className="seal-svg" viewBox="-60 -60 120 120" aria-hidden>
@@ -168,9 +205,8 @@ export function Seal({ t, replay = 0, caption = 'Everyone is square in this grou
         {(th.ornament === 'ripple' || t === 'midnight') && <g className="seal-ripples">{[20, 20, 20].map((r, i) => <circle key={i} r={r} style={{ animationDelay: `${i * 180}ms` }} />)}</g>}
         {th.radius === 0 ? <><rect className="seal-outer" x="-54" y="-54" width="108" height="108" /><rect className="seal-inner" x="-34" y="-34" width="68" height="68" /></>
           : <><circle className="seal-outer" r="56" /><circle className="seal-inner" r="36" /></>}
-        <g className="seal-rosette" transform="scale(.3)"><path d={ROSETTE[2]} /></g>
         <text className="seal-text"><textPath href={`#${id}`} textLength="272">{ring}</textPath></text>
-        <path className="seal-check" d="M-13 1l8 8 18-18" />
+        <g className="seal-plico" transform="translate(-17 -17) scale(1.05)"><g className="pl-bowl">{BOWL}<circle className="pl-eye" cx="17.6" cy="12.4" r="1.7" /><circle className="pl-eye" cx="23.2" cy="12.4" r="1.7" /><path className="pl-smile" d="M18.4 16.4q2 1.8 4 0" /></g>{STEM}</g>
         {t === 'chai' && <g className="seal-steam">{[-10, 0, 10].map(x => <path key={x} d={`M${x} -62c-5 -6 5 -10 0 -16s5 -10 0 -16`} />)}</g>}
       </svg>
       <p className="seal-caption"><span className="seal-word">{th.celebrate}.</span> {caption}</p>
@@ -216,7 +252,7 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
         <span className={`cat ${e.settle ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
         <span className="lr-body">
           <strong>{e.settle ? `${by} paid ${lower(who(g, Object.keys(e.owed)[0]))}` : e.title}</strong>
-          <small><span className="serial">{no}</span> · {e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${g.name}` : ''}</small>
+          <small><span className="serial">{no} · </span>{e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${g.name}` : ''}</small>
         </span>
         {e.settle ? <span className="lr-amt"><span className="money settled-ink">{inr(e.amount)}</span></span>
           : <span className="lr-amt"><Money p={mine} sign /><small>{mine > 0 ? 'you lent' : mine < 0 ? 'your share' : 'not in it'}</small></span>}
@@ -264,7 +300,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
         <ol className="ledger">
           {recent.map(({ g, e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} showGroup />)}
         </ol>
-      ) : <p className="empty">Nothing added yet. Tap + to add the first expense.</p>}
+      ) : <Peaceful />}
     </Screen>
   )
 }
@@ -304,7 +340,7 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
       {spent.length > 0 && !debts.length && <Seal t={t} />}
       <SpendBar g={g} />
       {debts.length > 0 && <>
-        <SectionHead title={g.track ? 'Balances' : 'Who hasn’t paid'}
+        <SectionHead title={g.track ? 'Balances' : 'Still to settle'}
           action={!g.track && toMe.length > 1 && <a className="link" href={wa(remindAll)} target="_blank" rel="noopener">Remind all</a>} />
         <ol className="debts">
           {debts.map(d => (
@@ -325,9 +361,9 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
           ))}
         </ol>
       </>}
-      <SectionHead title="Ledger" />
+      <SectionHead title="Expenses" />
       {list.length ? <ol className="ledger">{list.map(({ e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} />)}</ol>
-        : <p className="empty">Nothing here yet. Add the first expense with the + button.</p>}
+        : <Peaceful />}
     </Screen>
   )
 }
