@@ -8,6 +8,16 @@
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
         <string>Plico</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<!-- Google sign-in returns here: the iOS client ID, reversed -->
+				<string>com.googleusercontent.apps.1083483767626-7t3ipcpggd6gbbhrul995vkqbp56mca8</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
