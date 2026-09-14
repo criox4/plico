@@ -34,7 +34,7 @@ const saveOutbox = () => localStorage.setItem(OKEY, JSON.stringify(outbox))
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const sid = (g: Group, id: string) => (id === ME ? g.selfId! : id)
 const mapKeys = (g: Group, o?: Record<string, number>) => o && Object.fromEntries(Object.entries(o).map(([k, v]) => [sid(g, k), v]))
-const groupBody = (g: Group) => ({ name: g.name.trim() || 'Group', kind: g.kind, theme: g.theme, track: !!g.track, selfId: g.selfId })
+const groupBody = (g: Group) => ({ name: g.name.trim() || 'Group', kind: g.kind, theme: g.theme, track: !!g.track, emoji: g.emoji || null, cover: g.cover || null, selfId: g.selfId })
 const selfBody = (s: State) => ({ name: s.me.name.trim() || 'Me', upi: isVpa(s.me.upi) ? s.me.upi : null })
 const memberBody = (m: Group['members'][number]) => ({
   name: m.name.trim() || 'Someone', upi: m.upi && isVpa(m.upi) ? m.upi : null,
@@ -133,7 +133,7 @@ async function flush() {
 }
 
 type ServerGroup = {
-  id: string; name: string; kind: Group['kind']; theme: Group['theme']; track: boolean; createdById: string
+  id: string; name: string; kind: Group['kind']; theme: Group['theme']; track: boolean; emoji: string | null; cover: string | null; createdById: string
   members: { id: string; name: string; upi: string | null; userId: string | null; email: string | null; phone: string | null; invitedAt: string | null; user?: { image: string | null } | null }[]
   expenses: {
     id: string; title: string; cat: string; date: string; amount: number; mode: Expense['mode'] | null; input: Record<string, number> | null
@@ -145,7 +145,7 @@ export function toClient(sg: ServerGroup, userId: string): Group {
   const self = sg.members.find(m => m.userId === userId)
   const id = (m: string) => (m === self?.id ? ME : m)
   return {
-    id: sg.id, name: sg.name, kind: sg.kind, theme: sg.theme, track: sg.track || undefined, selfId: self?.id, mine: sg.createdById === userId,
+    id: sg.id, name: sg.name, kind: sg.kind, theme: sg.theme, track: sg.track || undefined, emoji: sg.emoji ?? undefined, cover: sg.cover ?? undefined, selfId: self?.id, mine: sg.createdById === userId,
     members: sg.members.map(m => (m.id === self?.id ? { id: ME, name: 'Me' } : {
       id: m.id, name: m.name, upi: m.upi ?? undefined, email: m.email ?? undefined, phone: m.phone ?? undefined,
       joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined, image: m.user?.image ?? undefined,

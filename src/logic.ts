@@ -35,6 +35,8 @@ export type Group = {
   kind: Kind
   theme: Theme
   track?: boolean // family-style: show balances, never nag
+  emoji?: string // the group's face on home
+  cover?: string // cover photo file name
   selfId?: Id // my member id on the server; the UI always calls me ME
   mine?: boolean // I created it (only the creator can delete)
   members: Member[]

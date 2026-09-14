@@ -18,7 +18,8 @@ const Upi = z.string().trim().max(256).refine(v => !v || isVpa(v), 'Not a valid 
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const Paise = z.number().int().min(0).max(2_000_000_000)
 
-const GroupIn = z.object({ name: z.string().trim().min(1).max(60), kind: Kind, theme: Theme, track: z.boolean().optional(), selfId: Id })
+const Emoji = z.string().regex(/^(?=.*\p{Extended_Pictographic})\S{1,16}$/u)
+const GroupIn = z.object({ name: z.string().trim().min(1).max(60), kind: Kind, theme: Theme, track: z.boolean().optional(), emoji: Emoji.nullish(), cover: z.string().regex(/^[0-9a-f-]{36}\.(jpg|png|webp)$/).nullish(), selfId: Id })
 const Email = z.string().trim().toLowerCase().max(254).refine(v => !v || z.email().safeParse(v).success, 'Not a valid email').nullish()
 const Phone = z.string().trim().max(20).refine(v => !v || /^\+?[0-9 ()-]{7,20}$/.test(v), 'Not a valid phone number').nullish()
 const MemberIn = z.object({ name: z.string().trim().min(1).max(60), upi: Upi, email: Email, phone: Phone })
@@ -70,10 +71,10 @@ api.put('/groups/:id', async c => {
   const exists = await db.group.findUnique({ where: { id }, select: { id: true } })
   if (exists) {
     if (!(await membership(id, uid))) return c.json(notFound, 404)
-    await db.group.update({ where: { id }, data: { name: b.name, kind: b.kind, theme: b.theme, track: !!b.track } })
+    await db.group.update({ where: { id }, data: { name: b.name, kind: b.kind, theme: b.theme, track: !!b.track, emoji: b.emoji ?? null, cover: b.cover ?? null } })
   } else {
     await db.group.create({
-      data: { id, name: b.name, kind: b.kind, theme: b.theme, track: !!b.track, inviteCode: inviteCode(), createdById: uid,
+      data: { id, name: b.name, kind: b.kind, theme: b.theme, track: !!b.track, emoji: b.emoji ?? null, cover: b.cover ?? null, inviteCode: inviteCode(), createdById: uid,
         members: { create: { id: b.selfId, name: c.get('userName'), userId: uid } } },
     })
   }

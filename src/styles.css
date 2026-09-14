@@ -109,6 +109,36 @@ small { font-size: .8125rem; color: var(--muted); }
 .confirm-card p { display: grid; gap: 3px; }
 .confirm-card strong { font-weight: 650; }
 .debt-wait { grid-column: 1 / -1; }
+.slip-emoji { font-size: 1.5rem; line-height: 1; }
+.group-cover { margin: 12px 0 -4px; aspect-ratio: 5 / 2; border-radius: var(--radius); overflow: hidden; background: var(--surface2); }
+.group-cover img { width: 100%; height: 100%; object-fit: cover; }
+.seal { position: relative; }
+.confetti { position: absolute; left: 50%; top: 68px; pointer-events: none; }
+.confetti i { position: absolute; width: 8px; height: 12px; border-radius: 2px; background: var(--c); opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .confetti i { animation: confetti 1.5s cubic-bezier(.16, 1, .3, 1) var(--d) both; }
+}
+@keyframes confetti {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0); }
+  55% { opacity: 1; transform: translate(var(--x), var(--y)) rotate(var(--r)); }
+  100% { opacity: 0; transform: translate(calc(var(--x) * 1.1), calc(var(--y) + 170px)) rotate(calc(var(--r) * 2)); }
+}
+.converge { position: fixed; inset: 0; z-index: 40; display: grid; place-content: center; justify-items: center; gap: 28px; background: var(--bg); color: var(--ink); }
+.cv-ring { position: relative; width: 280px; height: 280px; display: grid; place-items: center; }
+.cv-av { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) translate(var(--tx), var(--ty)); }
+.cv-av .avatar { box-shadow: 0 0 0 3px var(--bg); }
+.cv-num { font: 800 clamp(1.75rem, 8vw, 2.25rem)/1.1 var(--num); letter-spacing: -.03em; text-align: center; max-width: 150px; font-variant-numeric: tabular-nums; }
+.cv-title { color: var(--muted); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .cv-av { animation: converge 1.2s cubic-bezier(.16, 1, .3, 1) calc(var(--i) * 50ms) both; }
+  .cv-num { animation: rise 500ms cubic-bezier(.16, 1, .3, 1) 350ms both; }
+}
+@keyframes converge {
+  0% { transform: translate(-50%, -50%) translate(calc(var(--tx) * 2.6), calc(var(--ty) * 2.6)); opacity: 0; }
+  55% { transform: translate(-50%, -50%) translate(var(--tx), var(--ty)); opacity: 1; }
+  75% { transform: translate(-50%, -50%) translate(calc(var(--tx) * .82), calc(var(--ty) * .82)); }
+  100% { transform: translate(-50%, -50%) translate(var(--tx), var(--ty)); }
+}
 .confirm-card.warn { background: color-mix(in srgb, #F4A340 14%, var(--surface)); }
 .empty { color: var(--muted); padding: 20px 0; }
 

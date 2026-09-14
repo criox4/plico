@@ -91,6 +91,8 @@ model Group {
   kind        String
   theme       String
   track       Boolean   @default(false)
+  emoji       String? /// the group's face on home, in place of the kind icon
+  cover       String? /// cover photo file name in the group's private files
   inviteCode  String    @unique
   createdById String? /// null once the creator deletes their account; the group lives on for everyone else
   createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)

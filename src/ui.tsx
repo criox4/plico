@@ -5,6 +5,7 @@ import { update, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { API } from './auth-client'
+import { fileUrl } from './sync'
 
 // ---------- routing ----------
 export function useRoute() {
@@ -121,6 +122,22 @@ export function Plico({ mood = 'idle', size = 64 }: { mood?: Mood; size?: number
   )
 }
 
+export const EMOJI = ['🌵', '🦊', '🌙', '🍜', '🎧', '🐯', '🌸', '☕', '🏏', '🎸', '🥭', '🍕', '🐼', '🌊', '⚡', '🪁', '🏖️', '🏔️', '🏠', '🎉', '⚽', '🍻', '🚗', '💼']
+
+/** A private group photo (receipt, cover) as a local URL; '' while loading or when there's none. */
+export function useGroupImage(gid: Id, name?: string) {
+  const [url, setUrl] = useState('')
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    setUrl(''); setFailed(false)
+    if (!name) return
+    let live = true, made = ''
+    fileUrl(`/api/groups/${gid}/files/${name}`).then(u => { made = u; if (live) setUrl(u) }).catch(() => live && setFailed(true))
+    return () => { live = false; if (made) URL.revokeObjectURL(made) }
+  }, [gid, name])
+  return { url, failed }
+}
+
 // ---------- people ----------
 export const initials = (n: string) => n.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join('') || '?'
 /** A Plico face from a 6-hex seed: its own stem, bowl and backdrop colours. */
@@ -210,16 +227,61 @@ const Peaceful = () => (
   <div className="peaceful"><Plico mood="empty" size={64} /><p><strong>Suspiciously peaceful in here.</strong>Add the first expense with +.</p></div>
 )
 
+/** After adding an expense: everyone in it converges around their share for a beat. */
+export function Converge({ s, g, e }: { s: State; g: Group; e: Expense }) {
+  const ids = Object.keys(e.owed)
+  const vals = Object.values(e.owed)
+  const line = ids.length < 2 ? `${inr(e.amount)} added` : vals.every(v => v === vals[0]) ? `${inr(vals[0])} each` : `${inr(e.amount)}, ${ids.length} ways`
+  return (
+    <div className="converge" data-theme={g.theme} style={themeVars(g.theme)} role="status" aria-label={`Added ${e.title}: ${line}`}>
+      <div className="cv-ring" aria-hidden>
+        {ids.slice(0, 8).map((id, i, a) => {
+          const ang = (i / a.length) * 2 * Math.PI - Math.PI / 2
+          return (
+            <span key={id} className="cv-av" style={{ '--tx': `${Math.round(Math.cos(ang) * 104)}px`, '--ty': `${Math.round(Math.sin(ang) * 104)}px`, '--i': i } as CSSProperties}>
+              <Avatar name={realName(s, g, id)} image={id === ME ? s.user?.image : g.members.find(m => m.id === id)?.image} size={48} />
+            </span>
+          )
+        })}
+        <p className="cv-num">{line}</p>
+      </div>
+      <p className="cv-title">{e.title} · {g.name}</p>
+    </div>
+  )
+}
+
 export const SectionHead = ({ title, action }: { title: string; action?: ReactNode }) => (
   <div className="section-head"><h2>{title}</h2>{action}</div>
 )
 
-export function Seal({ t, replay = 0, caption = 'Everyone’s even ✨' }: { t: ThemeId; replay?: number; caption?: string }) {
+const CONFETTI = ['#6C5CE7', '#22B983', '#EA6673', '#F4A340', '#B7AEF5']
+/** Pieces burst out and fall: the group just became even. Decorative; skipped with reduced motion by CSS. */
+const Confetti = () => (
+  <div className="confetti" aria-hidden>
+    {Array.from({ length: 22 }, (_, i) => (
+      <i key={i} style={{ '--c': CONFETTI[i % 5], '--x': `${Math.round(Math.cos(i * 2.4) * (90 + (i % 4) * 30))}px`, '--y': `${Math.round(Math.sin(i * 2.4) * 60 - 90 - (i % 3) * 20)}px`, '--r': `${(i * 67) % 360}deg`, '--d': `${(i % 5) * 40}ms` } as CSSProperties} />
+    ))}
+  </div>
+)
+
+// Groups whose open debts we saw this session, so the moment they reach zero can be celebrated once.
+const hadDebts = new Map<Id, boolean>()
+function useJustSettled(gid: Id, open: number) {
+  const [burst, setBurst] = useState(false)
+  useEffect(() => {
+    if (hadDebts.get(gid) && !open) setBurst(true)
+    hadDebts.set(gid, open > 0)
+  }, [gid, open])
+  return burst
+}
+
+export function Seal({ t, replay = 0, caption = 'Everyone’s even ✨', burst }: { t: ThemeId; replay?: number; caption?: string; burst?: boolean }) {
   const id = useId()
   const th = theme(t)
   const ring = `${th.celebrate} · plico · ${th.celebrate} · plico · `.toUpperCase()
   return (
     <div className="seal" key={replay} role="status">
+      {burst && <Confetti />}
       <svg className="seal-svg" viewBox="-60 -60 120 120" aria-hidden>
         <defs><path id={id} d="M-44 0a44 44 0 1 1 88 0a44 44 0 1 1-88 0" /></defs>
         {(th.ornament === 'ripple' || t === 'midnight') && <g className="seal-ripples">{[20, 20, 20].map((r, i) => <circle key={i} r={r} style={{ animationDelay: `${i * 180}ms` }} />)}</g>}
@@ -229,7 +291,7 @@ export function Seal({ t, replay = 0, caption = 'Everyone’s even ✨' }: { t: 
         <g className="seal-plico" transform="translate(-17 -17) scale(1.05)"><g className="pl-bowl">{BOWL}<circle className="pl-eye" cx="17.6" cy="12.4" r="1.7" /><circle className="pl-eye" cx="23.2" cy="12.4" r="1.7" /><path className="pl-smile" d="M18.4 16.4q2 1.8 4 0" /></g>{STEM}</g>
         {t === 'chai' && <g className="seal-steam">{[-10, 0, 10].map(x => <path key={x} d={`M${x} -62c-5 -6 5 -10 0 -16s5 -10 0 -16`} />)}</g>}
       </svg>
-      <p className="seal-caption"><span className="seal-word">{th.celebrate}.</span> {caption}</p>
+      <p className="seal-caption"><span className="seal-word">{/[.!?]$/.test(th.celebrate) ? th.celebrate : th.celebrate + "."}</span> {caption}</p>
     </div>
   )
 }
@@ -357,7 +419,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
           return (
             <li key={g.id} style={{ '--i': i, '--gnum': `${gt.num}, ${gt.ui}, system-ui` } as CSSProperties}>
               <button className="slip" onClick={() => go('/g/' + g.id)}>
-                <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}><Icon n={g.kind} /></span>
+                <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
                 <span className="slip-body">
                   <span className="serial">No. {String(i + 1).padStart(2, '0')}</span>
                   <strong>{g.name}</strong>
@@ -404,15 +466,18 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
   const paid = spent.reduce((a, e) => a + (e.paid[ME] ?? 0), 0)
   const debts = simplify(bal)
   const toMe = debts.filter(d => d.to === ME)
+  const burst = useJustSettled(g.id, debts.length)
+  const cover = useGroupImage(g.id, g.cover)
   const waiting = (d: Transfer) => g.expenses.find(e => e.pending && ends(e).from === d.from && ends(e).to === d.to)
   const list = g.expenses.map((e, i) => ({ e, i })).sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
   const remindAll = `Tiny reminder from ${g.name}:\n` + toMe.map(d => `${realName(s, g, d.from)}: ${inr(d.amount)} → ${shareLink(s, g, d)}`).join('\n')
   return (
     <Screen t={t} back title={g.name} fab={`/g/${g.id}/add`}
       action={<button className="iconbtn" aria-label="Group settings" onClick={() => go(`/g/${g.id}/edit`)}><Icon n="settings" /></button>}>
+      {g.cover && <div className="group-cover">{cover.url && <img src={cover.url} alt="" />}</div>}
       <Denomination t={t} amount={net} line={g.track ? 'Tracking only, no nudges' : verb(g, net)}
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
-      {spent.length > 0 && !debts.length && <Seal t={t} />}
+      {spent.length > 0 && !debts.length && <Seal t={t} burst={burst} />}
       <NeedsYou groups={[g]} />
       <SpendBar g={g} />
       {debts.length > 0 && <>

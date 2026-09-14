@@ -2,10 +2,10 @@ import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'r
 import { ME, addMonth, fromSplitwise, needsConfirm, parseSplitwise, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { update, useStore, type State } from './store'
-import { api, fileUrl, pull, uploadImage, useSync } from './sync'
+import { api, pull, uploadImage, useSync } from './sync'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Denomination, count, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
+import { Avatar, Converge, Denomination, EMOJI, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
 import { AccountHub, AppearancePage, AuthFlow, Claim, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
@@ -153,8 +153,10 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
   const [adjust, setAdjust] = useState((old?.mode ?? 'equal') !== 'equal' || payers0.length > 1)
   const [repeat, setRepeat] = useState(!!old?.repeat)
   const [receipt, setReceipt] = useState(old?.receipt)
+  const [done, setDone] = useState<Expense | null>(null)
 
   useEffect(() => { if (eid && !old) location.replace('#/g/' + g.id) }, [eid, old, g.id])
+  if (done) return <Converge s={s} g={g} e={done} />
   if (eid && !old) return null
 
   const del = () => {
@@ -209,8 +211,10 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
       else x.expenses.push(e)
       runRecurring(x)
     })
-    if (gid) back()
-    else location.replace('#/g/' + g.id)
+    const leave = () => (gid ? back() : location.replace('#/g/' + g.id))
+    if (old || calm()) return leave()
+    setDone(e) // a beat to see the split land, then on to the group
+    setTimeout(leave, 1500)
   }
 
   return (
@@ -292,15 +296,9 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
 
 /** Receipt photo: uploaded to the group's private files; shown only to its members. */
 function ReceiptField({ gid, name, onChange }: { gid: Id; name?: string; onChange: (n?: string) => void }) {
-  const [url, setUrl] = useState('')
+  const { url, failed } = useGroupImage(gid, name)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  useEffect(() => {
-    if (!name) return setUrl('')
-    let live = true, made = ''
-    fileUrl(`/api/groups/${gid}/files/${name}`).then(u => { made = u; if (live) setUrl(u) }).catch(() => live && setErr('Couldn’t load the receipt photo.'))
-    return () => { live = false; if (made) URL.revokeObjectURL(made) }
-  }, [gid, name])
   const pick = async (f: File) => {
     setBusy(true); setErr('')
     try { onChange((await uploadImage<{ name: string }>(`/api/groups/${gid}/files`, f, 1600)).name) }
@@ -317,9 +315,38 @@ function ReceiptField({ gid, name, onChange }: { gid: Id; name?: string; onChang
           <Icon n="plus" />{busy ? 'Uploading…' : 'Add receipt photo'}
         </label>
       )}
-      {err && <p className="error" role="alert">{err}</p>}
+      {(err || failed) && <p className="error" role="alert">{err || 'Couldn’t load the receipt photo.'}</p>}
     </div>
   )
+}
+
+/** Group look: an emoji face for home and an optional cover photo. */
+function GroupLook({ g, set }: { g: Group; set: (fn: (x: Group) => void) => void }) {
+  const cover = useGroupImage(g.id, g.cover)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const pick = async (f: File) => {
+    setBusy(true); setErr('')
+    try { const { name } = await uploadImage<{ name: string }>(`/api/groups/${g.id}/files`, f, 1600); set(x => { x.cover = name }) }
+    catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  }
+  return <>
+    <h2 className="form-h">Emoji</h2>
+    <div className="emoji-grid" role="radiogroup" aria-label="Group emoji">
+      {EMOJI.map(x => <button type="button" key={x} role="radio" aria-checked={g.emoji === x} onClick={() => set(y => { y.emoji = y.emoji === x ? undefined : x })}>{x}</button>)}
+    </div>
+    <h2 className="form-h">Cover photo</h2>
+    {g.cover ? <>
+      <div className="group-cover">{cover.url && <img src={cover.url} alt="Group cover" />}</div>
+      <button type="button" className="link danger" onClick={() => set(x => { x.cover = undefined })}>Remove cover</button>
+    </> : (
+      <label className="btn secondary" aria-busy={busy}>
+        <input type="file" accept="image/*" className="sr-only" disabled={busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pick(f) }} />
+        <Icon n="plus" />{busy ? 'Uploading…' : 'Add a cover photo'}
+      </label>
+    )}
+    {err && <p className="error" role="alert">{err}</p>}
+  </>
 }
 
 // ---------- Splitwise import ----------
@@ -397,6 +424,7 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
         <label className="check"><input type="checkbox" checked={!!g.track} onChange={e => set(x => { x.track = e.target.checked || undefined })} />Tracking only: show balances, never nudge anyone to settle</label>
         <h2 className="form-h">Theme</h2>
         <ThemePicker value={g.theme} onChange={t => set(x => { x.theme = t })} />
+        <GroupLook g={g} set={set} />
         <h2 className="form-h">People</h2>
         <ul className="people">
           {g.members.map(m => <Person key={m.id} s={s} g={g} m={m} used={used.has(m.id)} />)}

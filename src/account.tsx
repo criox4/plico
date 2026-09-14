@@ -7,7 +7,7 @@ import { authClient } from './auth-client'
 import { api, isPhone, pull, refreshUser, signOut, signedIn, uploadImage, useSync } from './sync'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
-import { Avatar, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker } from './ui'
+import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker } from './ui'
 
 const origin = () => location.origin + location.pathname.replace(/index\.html$/, '')
 const msg = (e: unknown, fallback = 'That didn’t work. Your balances are safe. Try again.') =>
@@ -363,8 +363,6 @@ export function SyncLine() {
 function Page({ s, title, children }: { s: State; title: string; children: ReactNode }) {
   return <Screen t={s.theme} back title={title}><div className="form">{children}</div></Screen>
 }
-
-const EMOJI = ['🌵', '🦊', '🌙', '🍜', '🎧', '🐯', '🌸', '☕', '🏏', '🎸', '🥭', '🍕', '🐼', '🌊', '⚡', '🪁']
 
 /** Profile picture: a photo, an emoji, a Plico face, or just initials. */
 function AvatarPicker({ s }: { s: State }) {
