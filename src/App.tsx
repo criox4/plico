@@ -2,11 +2,11 @@ import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'r
 import { ME, addMonth, needsConfirm, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { update, useStore, type State } from './store'
-import { api, pull, useSync } from './sync'
+import { api, fileUrl, pull, uploadImage, useSync } from './sync'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Denomination, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
-import { AccountHub, AppearancePage, AuthFlow, Avatar, Claim, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
+import { Avatar, Denomination, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
+import { AccountHub, AppearancePage, AuthFlow, Claim, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
 
@@ -150,6 +150,7 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
     old?.input ? strs(old.input) : old ? Object.fromEntries(g.members.map(m => [m.id, old.owed[m.id] ? '1' : '0'])) : flags(g))
   const [adjust, setAdjust] = useState((old?.mode ?? 'equal') !== 'equal' || payers0.length > 1)
   const [repeat, setRepeat] = useState(!!old?.repeat)
+  const [receipt, setReceipt] = useState(old?.receipt)
 
   useEffect(() => { if (eid && !old) location.replace('#/g/' + g.id) }, [eid, old, g.id])
   if (eid && !old) return null
@@ -176,7 +177,7 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
 
   const pickGroup = (id: Id) => {
     const ng = s.groups.find(x => x.id === id)!
-    setGroupId(id); setPayer(ME); setMulti(false); setPaidIn({}); setMode('equal'); setInp(flags(ng))
+    setGroupId(id); setReceipt(undefined); setPayer(ME); setMulti(false); setPaidIn({}); setMode('equal'); setInp(flags(ng))
   }
   const switchMode = (m: SplitMode) => { setMode(m); setInp(flags(g, m === 'equal' ? '1' : '')) }
 
@@ -197,7 +198,7 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
     if (!total || error) return
     const day = +date.slice(8)
     const e: Expense = {
-      id: old?.id ?? uid(), title: title.trim() || CATS.find(c => c.id === cat)!.label, cat, date, amount: total, paid, owed, mode, input,
+      id: old?.id ?? uid(), title: title.trim() || CATS.find(c => c.id === cat)!.label, cat, date, amount: total, paid, owed, mode, input, receipt,
       repeat: repeat ? old?.repeat ?? { next: addMonth(date, day), day } : undefined,
     }
     edit(g.id, x => {
@@ -278,11 +279,44 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
 
         <label className="check"><input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} />Repeats every month</label>
         <label className="field"><span>Date</span><input type="date" value={date} onChange={e => setDate(e.target.value || today())} /></label>
+        <ReceiptField gid={g.id} name={receipt} onChange={setReceipt} />
         {total > 0 && error && <p className="error" role="alert">{error}</p>}
         <button className="btn primary" disabled={!total || !!error}>{old ? 'Save changes' : total ? `Add ${inr(total)}` : 'Add expense'}</button>
         {old && <button type="button" className="link danger" onClick={del}>Delete expense</button>}
       </form>
     </Screen>
+  )
+}
+
+/** Receipt photo: uploaded to the group's private files; shown only to its members. */
+function ReceiptField({ gid, name, onChange }: { gid: Id; name?: string; onChange: (n?: string) => void }) {
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    if (!name) return setUrl('')
+    let live = true, made = ''
+    fileUrl(`/api/groups/${gid}/files/${name}`).then(u => { made = u; if (live) setUrl(u) }).catch(() => live && setErr('Couldn’t load the receipt photo.'))
+    return () => { live = false; if (made) URL.revokeObjectURL(made) }
+  }, [gid, name])
+  const pick = async (f: File) => {
+    setBusy(true); setErr('')
+    try { onChange((await uploadImage<{ name: string }>(`/api/groups/${gid}/files`, f, 1600)).name) }
+    catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="receipt">
+      {name ? <>
+        <a className="receipt-img" href={url || undefined} target="_blank" rel="noopener">{url ? <img src={url} alt="Receipt photo" /> : <span>Loading photo…</span>}</a>
+        <button type="button" className="link danger" onClick={() => onChange(undefined)}>Remove photo</button>
+      </> : (
+        <label className="btn secondary" aria-busy={busy}>
+          <input type="file" accept="image/*" className="sr-only" disabled={busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pick(f) }} />
+          <Icon n="plus" />{busy ? 'Uploading…' : 'Add receipt photo'}
+        </label>
+      )}
+      {err && <p className="error" role="alert">{err}</p>}
+    </div>
   )
 }
 
@@ -361,7 +395,7 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
   return (
     <li className={`person${open ? ' open' : ''}`}>
       <button type="button" className="person-head" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <Avatar name={m.name} size={40} />
+        <Avatar name={m.name} image={m.image} size={40} />
         <span className="grow"><strong>{m.name}</strong><small>{m.email || m.phone || (m.joined ? 'Has Plico' : 'No contact yet')}</small></span>
         <span className={`chip-state ${m.joined ? 'ok' : m.invited ? 'info' : ''}`}>{status}</span>
       </button>

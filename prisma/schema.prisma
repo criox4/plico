@@ -138,6 +138,7 @@ model Expense {
   input       Json?
   settle      Boolean        @default(false)
   pending     Boolean        @default(false) /// settlement waiting for the payee to confirm; excluded from balances
+  receipt     String? /// photo file name in the private bucket, under the group's folder
   repeatNext  String?
   repeatDay   Int?
   createdById String?

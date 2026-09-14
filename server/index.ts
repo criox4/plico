@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { ORIGINS, auth } from './auth.ts'
 import { api } from './api.ts'
+import { BUCKET, getFile } from './storage.ts'
 
 const app = new Hono()
 
@@ -21,6 +22,14 @@ app.get('/api/config', c => c.json({
   googleWebClientId: process.env.GOOGLE_CLIENT_ID ?? null,
   googleIosClientId: process.env.GOOGLE_IOS_CLIENT_ID ?? null,
 }))
+// Public: profile pictures (random names; shown to anyone in a shared group, and <img> can't send a bearer token).
+app.get('/api/files/avatars/:uid/:name', async c => {
+  const { uid, name } = c.req.param()
+  if (!/^[\w-]{1,64}$/.test(uid) || !/^[\w-]{1,64}\.(jpg|png|webp)$/.test(name)) return c.notFound()
+  const f = await getFile(BUCKET.public, `${uid}/${name}`)
+  if (!f) return c.notFound()
+  return c.body(new Uint8Array(f.body), 200, { 'content-type': f.type, 'cache-control': 'public, max-age=31536000, immutable' })
+})
 app.route('/api', api)
 app.get('/health', c => c.text('ok'))
 

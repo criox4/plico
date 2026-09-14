@@ -4,10 +4,10 @@ import { Capacitor } from '@capacitor/core'
 import { inr, isVpa, type Kind, type Tone } from './logic'
 import { update, type State } from './store'
 import { authClient } from './auth-client'
-import { api, isPhone, pull, refreshUser, signOut, signedIn, useSync } from './sync'
+import { api, isPhone, pull, refreshUser, signOut, signedIn, uploadImage, useSync } from './sync'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
-import { Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, useTicker } from './ui'
+import { Avatar, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker } from './ui'
 
 const origin = () => location.origin + location.pathname.replace(/index\.html$/, '')
 const msg = (e: unknown, fallback = 'That didn’t work. Your balances are safe. Try again.') =>
@@ -321,14 +321,6 @@ function Row({ icon, title, sub, to, danger }: { icon: IconName; title: string; 
   )
 }
 
-export const initials = (n: string) => n.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join('') || '?'
-
-export function Avatar({ name, image, size = 56 }: { name: string; image?: string | null; size?: number }) {
-  return image
-    ? <img className="avatar" src={image} alt="" width={size} height={size} referrerPolicy="no-referrer" />
-    : <span className="avatar" style={{ width: size, height: size, fontSize: size * 0.38 }} aria-hidden>{initials(name)}</span>
-}
-
 export function AccountHub({ s }: { s: State }) {
   const sync = useSync()
   const out = () => {
@@ -372,9 +364,42 @@ function Page({ s, title, children }: { s: State; title: string; children: React
   return <Screen t={s.theme} back title={title}><div className="form">{children}</div></Screen>
 }
 
+const EMOJI = ['🌵', '🦊', '🌙', '🍜', '🎧', '🐯', '🌸', '☕', '🏏', '🎸', '🥭', '🍕', '🐼', '🌊', '⚡', '🪁']
+
+/** Profile picture: a photo, an emoji, a Plico face, or just initials. */
+function AvatarPicker({ s }: { s: State }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const cur = s.user?.image ?? ''
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true); setErr('')
+    try { await fn(); await refreshUser() } catch (e) { setErr(msg(e)) } finally { setBusy(false) }
+  }
+  const set = (image: string | null) => run(async () => { const r = await authClient.updateUser({ image }); if (r.error) throw new Error(r.error.message) })
+  return (
+    <section className="avatar-pick" aria-label="Profile picture" aria-busy={busy}>
+      <Avatar name={s.me.name} image={cur} size={96} />
+      <div className="avatar-actions">
+        <label className="btn-sm">
+          <input type="file" accept="image/*" className="sr-only" disabled={busy}
+            onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void run(() => uploadImage('/api/me/avatar', f, 512)) }} />
+          <Icon n="plus" size={16} />Photo
+        </label>
+        <button type="button" className="btn-sm ghost" disabled={busy} onClick={() => void set(`plico:${randomSeed()}`)}>{cur.startsWith('plico:') ? 'Another Plico' : 'Plico face'}</button>
+        {cur && <button type="button" className="btn-sm ghost" disabled={busy} onClick={() => void set(null)}>Initials</button>}
+      </div>
+      <div className="emoji-grid" role="radiogroup" aria-label="Emoji">
+        {EMOJI.map(x => <button type="button" key={x} role="radio" aria-checked={cur === `emoji:${x}`} disabled={busy} onClick={() => void set(`emoji:${x}`)}>{x}</button>)}
+      </div>
+      {err && <p className="error" role="alert">{err}</p>}
+    </section>
+  )
+}
+
 export function ProfilePage({ s }: { s: State }) {
   return (
     <Page s={s} title="Profile">
+      <AvatarPicker s={s} />
       <label className="field"><span>Name</span><input value={s.me.name} maxLength={40} autoComplete="name" onChange={e => update(d => { d.me.name = e.target.value })} /></label>
       <label className="field"><span>Phone</span>
         <input type="tel" value={s.me.phone ?? ''} placeholder="+91 98765 43210" autoComplete="tel" aria-invalid={!!s.me.phone && !isPhone(s.me.phone)}

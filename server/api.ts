@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
 import { mail } from './email.ts'
+import { BUCKET, deleteFile, getFile, imageType, putFile, storageReady } from './storage.ts'
 import { Prisma } from './generated/prisma/client.ts'
 import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
@@ -23,11 +24,12 @@ const Phone = z.string().trim().max(20).refine(v => !v || /^\+?[0-9 ()-]{7,20}$/
 const MemberIn = z.object({ name: z.string().trim().min(1).max(60), upi: Upi, email: Email, phone: Phone })
 const APP = process.env.PUBLIC_URL || 'http://localhost:5173'
 const claimUrl = (token: string) => `${APP}/#/claim/${token}`
+const FileName = z.string().regex(/^[0-9a-f-]{36}\.(jpg|png|webp)$/)
 const ExpenseIn = z.object({
   title: z.string().trim().min(1).max(120), cat: z.string().max(20), date: Day, amount: Paise.min(1),
   paid: z.record(Id, Paise), owed: z.record(Id, Paise),
   mode: z.enum(['equal', 'exact', 'percent', 'shares']).nullish(), input: z.record(Id, z.number()).nullish(),
-  settle: z.boolean().optional(), pending: z.boolean().optional(), repeat: z.object({ next: Day, day: z.number().int().min(1).max(31) }).nullish(),
+  settle: z.boolean().optional(), pending: z.boolean().optional(), receipt: FileName.nullish(), repeat: z.object({ next: Day, day: z.number().int().min(1).max(31) }).nullish(),
 })
 const JoinIn = z.object({ memberId: Id.optional() })
 
@@ -55,7 +57,7 @@ const membership = (groupId: string, userId: string) => db.member.findFirst({ wh
 api.get('/groups', async c => {
   const groups = await db.group.findMany({
     where: { members: { some: { userId: c.get('userId') } } },
-    include: { members: { orderBy: { createdAt: 'asc' }, omit: { inviteToken: true } }, expenses: { include: { shares: true }, orderBy: { createdAt: 'asc' } } },
+    include: { members: { orderBy: { createdAt: 'asc' }, omit: { inviteToken: true }, include: { user: { select: { image: true } } } }, expenses: { include: { shares: true }, orderBy: { createdAt: 'asc' } } },
     orderBy: { createdAt: 'desc' },
   })
   return c.json(groups)
@@ -177,7 +179,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   const shares = [...ids].map(memberId => ({ memberId, paid: b.paid[memberId] ?? 0, owed: b.owed[memberId] ?? 0 }))
   const data = {
     title: b.title, cat: b.cat, date: b.date, amount: b.amount, mode: b.mode ?? null, input: b.input ?? Prisma.DbNull,
-    settle: !!b.settle, pending, repeatNext: b.repeat?.next ?? null, repeatDay: b.repeat?.day ?? null,
+    settle: !!b.settle, pending, receipt: b.receipt ?? null, repeatNext: b.repeat?.next ?? null, repeatDay: b.repeat?.day ?? null,
   }
   await db.$transaction([
     db.expense.upsert({ where: { id: eid }, create: { id: eid, groupId: gid, createdById: uid, ...data }, update: data }),
@@ -198,6 +200,50 @@ api.delete('/groups/:gid/expenses/:eid', async c => {
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
   await db.expense.deleteMany({ where: { id: eid, groupId: gid } })
   return c.json({ ok: true })
+})
+
+// ---------- files: images only, sniffed, stored under our names ----------
+const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
+async function readImage(c: { req: { arrayBuffer: () => Promise<ArrayBuffer> } }, max: number) {
+  const buf = Buffer.from(await c.req.arrayBuffer())
+  if (!buf.length || buf.length > max) return { error: `Images up to ${max >> 20} MB` }
+  const type = imageType(buf)
+  return type ? { buf, type } : { error: 'That isn’t a photo we can use (JPEG, PNG or WebP)' }
+}
+
+// Profile picture: replaces the old upload, sets user.image.
+api.post('/me/avatar', async c => {
+  if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
+  const img = await readImage(c, 3 << 20)
+  if ('error' in img) return c.json({ error: img.error }, 400)
+  const uid = c.get('userId')
+  const path = `${uid}/${crypto.randomUUID()}.${EXT[img.type]}`
+  await putFile(BUCKET.public, path, img.buf, img.type)
+  const old = (await db.user.findUnique({ where: { id: uid }, select: { image: true } }))?.image
+  const image = `/api/files/avatars/${path}`
+  await db.user.update({ where: { id: uid }, data: { image } })
+  if (old?.startsWith(`/api/files/avatars/${uid}/`)) void deleteFile(BUCKET.public, old.slice('/api/files/avatars/'.length))
+  return c.json({ image })
+})
+
+// Group files (receipts, covers): private, members only.
+api.post('/groups/:gid/files', async c => {
+  const gid = Id.parse(c.req.param('gid'))
+  if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
+  if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
+  const img = await readImage(c, 6 << 20)
+  if ('error' in img) return c.json({ error: img.error }, 400)
+  const name = `${crypto.randomUUID()}.${EXT[img.type]}`
+  await putFile(BUCKET.private, `${gid}/${name}`, img.buf, img.type)
+  return c.json({ name })
+})
+
+api.get('/groups/:gid/files/:name', async c => {
+  const gid = Id.parse(c.req.param('gid')), name = FileName.parse(c.req.param('name'))
+  if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
+  const f = await getFile(BUCKET.private, `${gid}/${name}`)
+  if (!f) return c.json(notFound, 404)
+  return c.body(new Uint8Array(f.body), 200, { 'content-type': f.type, 'cache-control': 'private, max-age=86400' })
 })
 
 // ---------- personal claim links: whoever holds the token takes that guest spot ----------

@@ -4,6 +4,7 @@ import { ME, balances, simplify, type Expense, inr, upiLink, isVpa, encodeShare,
 import { update, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
+import { API } from './auth-client'
 
 // ---------- routing ----------
 export function useRoute() {
@@ -118,6 +119,24 @@ export function Plico({ mood = 'idle', size = 64 }: { mood?: Mood; size?: number
       {STEM}
     </svg>
   )
+}
+
+// ---------- people ----------
+export const initials = (n: string) => n.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join('') || '?'
+/** A Plico face from a 6-hex seed: its own stem, bowl and backdrop colours. */
+export const plicoColors = (seed: string) => {
+  const h = parseInt(seed, 16) % 360
+  return { '--brand': `hsl(${h} 62% 52%)`, '--plico-bowl': `hsl(${(h + 48) % 360} 80% 78%)`, background: `hsl(${h} 70% 94%)` }
+}
+export const randomSeed = () => Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')
+
+/** Profile picture: an uploaded photo, a Google photo, an emoji, a Plico face, or initials. */
+export function Avatar({ name, image, size = 56 }: { name: string; image?: string | null; size?: number }) {
+  const box = { width: size, height: size }
+  if (image?.startsWith('emoji:')) return <span className="avatar avatar-emoji" style={{ ...box, fontSize: size * 0.56 }} aria-hidden>{image.slice(6)}</span>
+  if (image?.startsWith('plico:')) return <span className="avatar avatar-plico" style={{ ...box, ...plicoColors(image.slice(6)) } as CSSProperties} aria-hidden><Plico size={size * 0.78} /></span>
+  if (image) return <img className="avatar" src={image.startsWith('/') ? API + image : image} alt="" width={size} height={size} referrerPolicy="no-referrer" />
+  return <span className="avatar" style={{ ...box, fontSize: size * 0.38 }} aria-hidden>{initials(name)}</span>
 }
 
 // ---------- primitives ----------
@@ -298,7 +317,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
     .sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
     .slice(0, 6)
   return (
-    <Screen t={t} fab="/add" action={<button className="iconbtn" aria-label="You and settings" onClick={() => go('/me')}><Icon n="user" /></button>}>
+    <Screen t={t} fab="/add" action={<button className="iconbtn" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
       <Denomination t={t} amount={total} line={verb(null, total, true)}
         caption={collect && pay ? `${inr(collect)} to collect · ${inr(pay)} to pay` : undefined} />
       {banner}

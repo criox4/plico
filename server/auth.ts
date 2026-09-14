@@ -65,6 +65,8 @@ export const auth = betterAuth({
           if (data.theme && !THEMES.some(t => t.id === data.theme)) return false
           if (data.tone && !TONES.includes(String(data.tone))) return false
           if (data.phone && !/^\+?[0-9 ()-]{7,20}$/.test(String(data.phone))) return false
+          // Profile picture: our uploaded file, a Google photo, an emoji, or a Plico face seed.
+          if (data.image && !/^(\/api\/files\/avatars\/[\w/-]+\.(jpg|png|webp)|https:\/\/[^\s"<>]{1,500}|plico:[0-9a-f]{6}|emoji:(?=.*\p{Extended_Pictographic})\S{1,16})$/u.test(String(data.image))) return false
           return { data }
         },
         after: async u => { if (u.emailVerified) await linkByEmail(u.id, u.email) },

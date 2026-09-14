@@ -11,6 +11,7 @@ export type Member = {
   email?: string; phone?: string // invite targets for people without the app
   joined?: boolean // linked to an account
   invited?: boolean // an invite has gone out
+  image?: string // their account's profile picture (photo path, emoji:…, plico:…)
 }
 export type Expense = {
   id: Id
@@ -23,6 +24,7 @@ export type Expense = {
   mode?: SplitMode
   input?: Record<Id, number> // raw split input, kept so edits reopen as entered
   settle?: true
+  receipt?: string // photo file name, stored with the group
   pending?: true // settlement waiting for the payee to confirm; doesn't move balances yet
   repeat?: { next: string; day: number } // monthly
 }

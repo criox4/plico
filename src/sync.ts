@@ -43,7 +43,7 @@ const memberBody = (m: Group['members'][number]) => ({
 })
 const expenseBody = (g: Group, e: Expense) => ({
   title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid: mapKeys(g, e.paid), owed: mapKeys(g, e.owed),
-  mode: e.mode ?? null, input: mapKeys(g, e.input) ?? null, settle: !!e.settle, pending: !!e.pending, repeat: e.repeat ?? null,
+  mode: e.mode ?? null, input: mapKeys(g, e.input) ?? null, settle: !!e.settle, pending: !!e.pending, receipt: e.receipt ?? null, repeat: e.repeat ?? null,
 })
 export const isPhone = (p = '') => /^\+?[0-9 ()-]{7,20}$/.test(p.trim())
 const profileBody = (s: State) => ({
@@ -134,10 +134,10 @@ async function flush() {
 
 type ServerGroup = {
   id: string; name: string; kind: Group['kind']; theme: Group['theme']; track: boolean; createdById: string
-  members: { id: string; name: string; upi: string | null; userId: string | null; email: string | null; phone: string | null; invitedAt: string | null }[]
+  members: { id: string; name: string; upi: string | null; userId: string | null; email: string | null; phone: string | null; invitedAt: string | null; user?: { image: string | null } | null }[]
   expenses: {
     id: string; title: string; cat: string; date: string; amount: number; mode: Expense['mode'] | null; input: Record<string, number> | null
-    settle: boolean; pending: boolean; repeatNext: string | null; repeatDay: number | null; shares: { memberId: string; paid: number; owed: number }[]
+    settle: boolean; pending: boolean; receipt: string | null; repeatNext: string | null; repeatDay: number | null; shares: { memberId: string; paid: number; owed: number }[]
   }[]
 }
 
@@ -148,7 +148,7 @@ export function toClient(sg: ServerGroup, userId: string): Group {
     id: sg.id, name: sg.name, kind: sg.kind, theme: sg.theme, track: sg.track || undefined, selfId: self?.id, mine: sg.createdById === userId,
     members: sg.members.map(m => (m.id === self?.id ? { id: ME, name: 'Me' } : {
       id: m.id, name: m.name, upi: m.upi ?? undefined, email: m.email ?? undefined, phone: m.phone ?? undefined,
-      joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined,
+      joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined, image: m.user?.image ?? undefined,
     })),
     expenses: sg.expenses.map(e => {
       const paid: Record<string, number> = {}, owed: Record<string, number> = {}
@@ -159,7 +159,7 @@ export function toClient(sg: ServerGroup, userId: string): Group {
       return {
         id: e.id, title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid, owed,
         mode: e.mode ?? undefined, input: e.input ? Object.fromEntries(Object.entries(e.input).map(([k, v]) => [id(k), v])) : undefined,
-        settle: e.settle || undefined, pending: e.pending || undefined, repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay } : undefined,
+        settle: e.settle || undefined, pending: e.pending || undefined, receipt: e.receipt ?? undefined, repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay } : undefined,
       }
     }),
   }
@@ -178,6 +178,35 @@ export async function pull() {
   setRemote(d => { d.groups = data.map(g => toClient(g, user.id)) })
   snap = getState()
   setStatus({ offline: false })
+}
+
+/** Shrink a photo on the phone before it travels: JPEG, longest side at most `max`. */
+export async function shrink(f: Blob, max: number): Promise<Blob> {
+  const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' }).catch(() => { throw new Error('Couldn’t read that photo. Try a JPEG or PNG.') })
+  const k = Math.min(1, max / Math.max(bmp.width, bmp.height))
+  const c = document.createElement('canvas')
+  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k)
+  c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height)
+  return new Promise((ok, no) => c.toBlob(b => (b ? ok(b) : no(new Error('Couldn’t read that photo.'))), 'image/jpeg', 0.82))
+}
+
+/** Upload a photo (needs a connection). Syncs first so the group it belongs to exists on the server. */
+export async function uploadImage<T>(path: string, f: Blob, max: number): Promise<T> {
+  const body = await shrink(f, max)
+  await flush()
+  const res = await fetch(API + path, { method: 'POST', body, credentials: 'include',
+    headers: { 'Content-Type': body.type, ...(token.get() && { Authorization: `Bearer ${token.get()}` }) } })
+    .catch(() => { throw new Error('Photos need a connection. Try again when you’re online.') })
+  const out = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(out.error || 'Upload didn’t work. Try again.')
+  return out as T
+}
+
+/** A private group file as a local URL (bearer-authenticated, so it works in the native apps too). */
+export async function fileUrl(path: string) {
+  const res = await req(path)
+  if (!res.ok) throw new Error('Couldn’t load the photo')
+  return URL.createObjectURL(await res.blob())
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {

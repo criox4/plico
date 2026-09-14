@@ -584,6 +584,18 @@ small { font-size: .8125rem; color: var(--muted); }
   display: inline-grid; place-items: center; flex: none; border-radius: 50%; object-fit: cover;
   background: var(--brand); color: #FFFFFF; font-weight: 700; letter-spacing: .02em;
 }
+.avatar-emoji { background: var(--surface2); line-height: 1; }
+.avatar-plico { display: inline-grid; place-items: center; overflow: hidden; }
+.avatar .plico .pl-eyes { animation: none; }
+.avatar-pick { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 16px; margin: 16px 0 24px; }
+.avatar-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.avatar-actions label:has(input:focus-visible), .receipt label:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 3px; }
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; width: 100%; max-width: 400px; }
+.emoji-grid button { aspect-ratio: 1; min-height: 44px; font-size: 1.5rem; border-radius: var(--radius-sm); background: var(--surface2); }
+.emoji-grid button[aria-checked=true] { outline: 2px solid var(--link); outline-offset: 2px; }
+.receipt { display: grid; gap: 4px; }
+.receipt-img { display: grid; place-items: center; min-height: 120px; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface2); color: var(--muted); }
+.receipt-img img { width: 100%; max-height: 320px; object-fit: cover; }
 .chip-state { display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border-radius: var(--pill); font-size: .75rem; font-weight: 700; background: var(--surface2); color: var(--muted); white-space: nowrap; }
 .chip-state.ok { color: var(--pos); background: color-mix(in srgb, var(--pos) 12%, var(--surface)); }
 .chip-state.warn { color: var(--neg); background: color-mix(in srgb, var(--neg) 10%, var(--surface)); }
