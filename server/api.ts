@@ -29,7 +29,7 @@ const ExpenseIn = z.object({
   title: z.string().trim().min(1).max(120), cat: z.string().max(20), date: Day, amount: Paise.min(1),
   paid: z.record(Id, Paise), owed: z.record(Id, Paise),
   mode: z.enum(['equal', 'exact', 'percent', 'shares']).nullish(), input: z.record(Id, z.number()).nullish(),
-  settle: z.boolean().optional(), pending: z.boolean().optional(), receipt: FileName.nullish(), repeat: z.object({ next: Day, day: z.number().int().min(1).max(31) }).nullish(),
+  settle: z.boolean().optional(), pending: z.boolean().optional(), rejected: z.boolean().optional(), receipt: FileName.nullish(), repeat: z.object({ next: Day, day: z.number().int().min(1).max(31) }).nullish(),
 })
 const JoinIn = z.object({ memberId: Id.optional() })
 
@@ -166,7 +166,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   const all = await db.member.findMany({ where: { groupId: gid }, select: { id: true, name: true, userId: true, user: { select: { email: true } } } })
   const bad = sharesError(b.amount, b.paid, b.owed, new Set(all.map(m => m.id)))
   if (bad) return c.json({ error: bad }, 400)
-  const existing = await db.expense.findUnique({ where: { id: eid }, select: { groupId: true, pending: true, amount: true } })
+  const existing = await db.expense.findUnique({ where: { id: eid }, select: { groupId: true, pending: true, rejected: true, amount: true } })
   if (existing && existing.groupId !== gid) return c.json(notFound, 404)
 
   // Only the payee can confirm a settlement (or nobody can, when the payee is a guest). Anyone else's
@@ -174,19 +174,27 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   const payee = b.settle ? all.find(m => m.id === Object.keys(b.owed)[0]) : undefined
   const canConfirm = !payee?.userId || payee.userId === uid
   const pending = !!b.settle && (canConfirm ? !!b.pending : !(existing && !existing.pending && existing.amount === b.amount))
+  // Only the payee can say it hasn't arrived.
+  const rejected = !!b.settle && (payee?.userId === uid ? !!b.rejected : !!existing?.rejected)
 
   const ids = new Set([...Object.keys(b.paid), ...Object.keys(b.owed)])
   const shares = [...ids].map(memberId => ({ memberId, paid: b.paid[memberId] ?? 0, owed: b.owed[memberId] ?? 0 }))
   const data = {
     title: b.title, cat: b.cat, date: b.date, amount: b.amount, mode: b.mode ?? null, input: b.input ?? Prisma.DbNull,
-    settle: !!b.settle, pending, receipt: b.receipt ?? null, repeatNext: b.repeat?.next ?? null, repeatDay: b.repeat?.day ?? null,
+    settle: !!b.settle, pending: pending && !rejected, rejected, receipt: b.receipt ?? null, repeatNext: b.repeat?.next ?? null, repeatDay: b.repeat?.day ?? null,
   }
   await db.$transaction([
     db.expense.upsert({ where: { id: eid }, create: { id: eid, groupId: gid, createdById: uid, ...data }, update: data }),
     db.expenseShare.deleteMany({ where: { expenseId: eid } }),
     db.expenseShare.createMany({ data: shares.map(s => ({ expenseId: eid, ...s })) }),
   ])
-  if (pending && !existing?.pending && payee?.user?.email) {
+  if (rejected && !existing?.rejected) {
+    const payer = all.find(m => m.id === Object.keys(b.paid)[0])
+    const g = await db.group.findUnique({ where: { id: gid }, select: { name: true } })
+    const to = payer?.userId && (await db.user.findUnique({ where: { id: payer.userId }, select: { email: true } }))?.email
+    if (to) void mail.notReceived(to, c.get('userName'), g?.name ?? 'your group', b.amount).catch(console.error)
+  }
+  if (pending && !rejected && !existing?.pending && payee?.user?.email) {
     const g = await db.group.findUnique({ where: { id: gid }, select: { name: true } })
     const payer = all.find(m => m.id === Object.keys(b.paid)[0])
     const by = payer?.userId === uid ? c.get('userName') : (payer?.name ?? c.get('userName'))

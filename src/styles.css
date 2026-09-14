@@ -109,6 +109,7 @@ small { font-size: .8125rem; color: var(--muted); }
 .confirm-card p { display: grid; gap: 3px; }
 .confirm-card strong { font-weight: 650; }
 .debt-wait { grid-column: 1 / -1; }
+.confirm-card.warn { background: color-mix(in srgb, #F4A340 14%, var(--surface)); }
 .empty { color: var(--muted); padding: 20px 0; }
 
 /* group slips: numbered, the focused one lifts */

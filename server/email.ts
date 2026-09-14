@@ -90,6 +90,14 @@ export const mail = {
       text: `${payer} marked ${amt} as paid to you in “${group}”. Check your UPI app, then confirm in Plico: ${APP}/#/`,
     })
   },
+  notReceived: (to: string, payee: string, group: string, paise: number) => {
+    const amt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: paise % 100 ? 2 : 0 }).format(paise / 100)
+    return sendEmail({
+      to, subject: `${payee} hasn’t received your ${amt} yet`,
+      html: layout(`${payee} hasn’t got it yet`, `${esc(payee)} says your ${amt} in <strong>${esc(group)}</strong> hasn’t arrived. Check your UPI app: if it went through, share the transaction ID with them; if not, pay again from Plico.`, { label: 'Open Plico', url: `${APP}/#/` }),
+      text: `${payee} says your ${amt} in “${group}” hasn’t arrived. Check your UPI app, then pay again or share the transaction ID: ${APP}/#/`,
+    })
+  },
   emailChanged: (to: string, newEmail: string, url: string) => sendEmail({
     to, subject: 'Confirm your new Plico email',
     html: layout('Confirm the email change', `Your Plico account is changing its email to <strong>${esc(newEmail)}</strong>. If that’s you, confirm below. If not, change your password now.`, { label: 'Confirm change', url }),

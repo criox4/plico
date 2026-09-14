@@ -269,12 +269,12 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
   return (
     <li className="ledger-row">
       <button onClick={() => go(`/g/${g.id}/e/${e.id}`)}>
-        <span className={`cat ${e.settle && !e.pending ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
+        <span className={`cat ${e.settle && !e.pending && !e.rejected ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
         <span className="lr-body">
           <strong>{e.settle ? `${by} paid ${lower(who(g, Object.keys(e.owed)[0]))}` : e.title}</strong>
-          <small><span className="serial">{no} · </span>{e.pending ? 'waiting to confirm' : e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${g.name}` : ''}</small>
+          <small><span className="serial">{no} · </span>{e.rejected ? 'not received' : e.pending ? 'waiting to confirm' : e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${g.name}` : ''}</small>
         </span>
-        {e.settle ? <span className="lr-amt"><span className={`money ${e.pending ? 'muted-ink' : 'settled-ink'}`}>{inr(e.amount)}</span></span>
+        {e.settle ? <span className="lr-amt"><span className={`money ${e.pending || e.rejected ? 'muted-ink' : 'settled-ink'}`}>{inr(e.amount)}</span></span>
           : <span className="lr-amt"><Money p={mine} sign /><small>{mine > 0 ? 'you lent' : mine < 0 ? 'your share' : 'not in it'}</small></span>}
       </button>
     </li>
@@ -286,9 +286,30 @@ const ends = (e: Expense) => ({ from: Object.keys(e.paid)[0], to: Object.keys(e.
 const setPending = (gid: Id, eid: Id, ok: boolean) => update(d => {
   const g = d.groups.find(x => x.id === gid)
   if (!g) return
-  if (ok) { const e = g.expenses.find(x => x.id === eid); if (e) delete e.pending }
-  else g.expenses = g.expenses.filter(x => x.id !== eid)
+  const e = g.expenses.find(x => x.id === eid)
+  if (!e) return
+  delete e.pending
+  if (!ok) e.rejected = true // tells the payer; they dismiss or pay again
 })
+const drop = (gid: Id, eid: Id) => update(d => {
+  const g = d.groups.find(x => x.id === gid)
+  if (g) g.expenses = g.expenses.filter(x => x.id !== eid)
+})
+
+/** The payer's side after "Not yet": nothing moved; pay again or clear it. */
+export function NotReceivedCard({ g, e, showGroup }: { g: Group; e: Expense; showGroup?: boolean }) {
+  const { to } = ends(e)
+  return (
+    <li className="confirm-card warn">
+      <p><strong>{who(g, to)} hasn’t got your <span className="money">{inr(e.amount)}</span> yet</strong>
+        <small>{showGroup ? `${g.name} · ` : ''}Check your UPI app. If it went through, send them the transaction ID.</small></p>
+      <span className="debt-actions">
+        <button className="btn-sm" onClick={() => { drop(g.id, e.id); go(`/g/${g.id}/pay/${ME}/${to}/${e.amount}`) }}>Pay again</button>
+        <button className="btn-sm ghost" onClick={() => drop(g.id, e.id)}>Dismiss</button>
+      </span>
+    </li>
+  )
+}
 
 /** The payee's side: someone says they paid you. You're the only one who can say it arrived. */
 export function ConfirmCard({ g, e, showGroup }: { g: Group; e: Expense; showGroup?: boolean }) {
@@ -305,6 +326,13 @@ export function ConfirmCard({ g, e, showGroup }: { g: Group; e: Expense; showGro
   )
 }
 const waitingFor = (g: Group) => g.expenses.filter(e => e.pending && ends(e).to === ME)
+const bounced = (g: Group) => g.expenses.filter(e => e.rejected && ends(e).from === ME)
+/** Settlements that need you: confirm money you received, or deal with money that didn't arrive. */
+function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean }) {
+  const items = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup={showGroup} />),
+    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup={showGroup} />)])
+  return items.length ? <><SectionHead title="Needs you" /><ol className="debts">{items}</ol></> : null
+}
 
 export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNode }) {
   const rows = s.groups.map(g => ({ g, net: balances(g)[ME] ?? 0 }))
@@ -321,10 +349,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
       <Denomination t={t} amount={total} line={verb(null, total, true)}
         caption={collect && pay ? `${inr(collect)} to collect · ${inr(pay)} to pay` : undefined} />
       {banner}
-      {s.groups.some(g => waitingFor(g).length) && <>
-        <SectionHead title="To confirm" />
-        <ol className="debts">{s.groups.flatMap(g => waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup />))}</ol>
-      </>}
+      <NeedsYou groups={s.groups} showGroup />
       <SectionHead title="Groups" action={<button className="link" onClick={() => go('/new')}>New group</button>} />
       <ol className="slips">
         {rows.map(({ g, net }, i) => {
@@ -379,7 +404,6 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
   const paid = spent.reduce((a, e) => a + (e.paid[ME] ?? 0), 0)
   const debts = simplify(bal)
   const toMe = debts.filter(d => d.to === ME)
-  const confirmMine = waitingFor(g)
   const waiting = (d: Transfer) => g.expenses.find(e => e.pending && ends(e).from === d.from && ends(e).to === d.to)
   const list = g.expenses.map((e, i) => ({ e, i })).sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
   const remindAll = `Tiny reminder from ${g.name}:\n` + toMe.map(d => `${realName(s, g, d.from)}: ${inr(d.amount)} → ${shareLink(s, g, d)}`).join('\n')
@@ -389,10 +413,7 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
       <Denomination t={t} amount={net} line={g.track ? 'Tracking only, no nudges' : verb(g, net)}
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
       {spent.length > 0 && !debts.length && <Seal t={t} />}
-      {confirmMine.length > 0 && <>
-        <SectionHead title="To confirm" />
-        <ol className="debts">{confirmMine.map(e => <ConfirmCard key={e.id} g={g} e={e} />)}</ol>
-      </>}
+      <NeedsYou groups={[g]} />
       <SpendBar g={g} />
       {debts.length > 0 && <>
         <SectionHead title={g.track ? 'Balances' : 'Still to settle'}

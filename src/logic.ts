@@ -26,6 +26,7 @@ export type Expense = {
   settle?: true
   receipt?: string // photo file name, stored with the group
   pending?: true // settlement waiting for the payee to confirm; doesn't move balances yet
+  rejected?: true // the payee says it hasn't arrived; doesn't move balances
   repeat?: { next: string; day: number } // monthly
 }
 export type Group = {
@@ -84,7 +85,7 @@ export function split(total: number, mode: SplitMode, input: Record<Id, number>)
 export function balances(g: Group): Record<Id, number> {
   const b: Record<Id, number> = Object.fromEntries(g.members.map(m => [m.id, 0]))
   for (const e of g.expenses) {
-    if (e.pending) continue
+    if (e.pending || e.rejected) continue
     for (const k in e.paid) b[k] = (b[k] ?? 0) + e.paid[k]
     for (const k in e.owed) b[k] = (b[k] ?? 0) - e.owed[k]
   }

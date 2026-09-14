@@ -43,7 +43,7 @@ const memberBody = (m: Group['members'][number]) => ({
 })
 const expenseBody = (g: Group, e: Expense) => ({
   title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid: mapKeys(g, e.paid), owed: mapKeys(g, e.owed),
-  mode: e.mode ?? null, input: mapKeys(g, e.input) ?? null, settle: !!e.settle, pending: !!e.pending, receipt: e.receipt ?? null, repeat: e.repeat ?? null,
+  mode: e.mode ?? null, input: mapKeys(g, e.input) ?? null, settle: !!e.settle, pending: !!e.pending, rejected: !!e.rejected, receipt: e.receipt ?? null, repeat: e.repeat ?? null,
 })
 export const isPhone = (p = '') => /^\+?[0-9 ()-]{7,20}$/.test(p.trim())
 const profileBody = (s: State) => ({
@@ -137,7 +137,7 @@ type ServerGroup = {
   members: { id: string; name: string; upi: string | null; userId: string | null; email: string | null; phone: string | null; invitedAt: string | null; user?: { image: string | null } | null }[]
   expenses: {
     id: string; title: string; cat: string; date: string; amount: number; mode: Expense['mode'] | null; input: Record<string, number> | null
-    settle: boolean; pending: boolean; receipt: string | null; repeatNext: string | null; repeatDay: number | null; shares: { memberId: string; paid: number; owed: number }[]
+    settle: boolean; pending: boolean; rejected: boolean; receipt: string | null; repeatNext: string | null; repeatDay: number | null; shares: { memberId: string; paid: number; owed: number }[]
   }[]
 }
 
@@ -159,7 +159,7 @@ export function toClient(sg: ServerGroup, userId: string): Group {
       return {
         id: e.id, title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid, owed,
         mode: e.mode ?? undefined, input: e.input ? Object.fromEntries(Object.entries(e.input).map(([k, v]) => [id(k), v])) : undefined,
-        settle: e.settle || undefined, pending: e.pending || undefined, receipt: e.receipt ?? undefined, repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay } : undefined,
+        settle: e.settle || undefined, pending: e.pending || undefined, rejected: e.rejected || undefined, receipt: e.receipt ?? undefined, repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay } : undefined,
       }
     }),
   }
