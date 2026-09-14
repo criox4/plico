@@ -32,7 +32,7 @@ export const PUBLIC = import.meta.env.VITE_PUBLIC_URL || location.origin
 export const who = (g: Group, id: Id) => (id === ME ? 'You' : g.members.find(m => m.id === id)?.name ?? 'Someone')
 export const realName = (s: State, g: Group, id: Id) => (id === ME ? s.me.name || 'Me' : who(g, id))
 export const upiOf = (s: State, g: Group, id: Id) => (id === ME ? s.me.upi : g.members.find(m => m.id === id)?.upi) ?? ''
-const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+export const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 const lower = (name: string) => (name === 'You' ? 'you' : name)
 const tone = (p: number) => (p > 0 ? 'pos' : p < 0 ? 'neg' : '')
 

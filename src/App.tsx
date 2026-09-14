@@ -1,11 +1,11 @@
 import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
-import { ME, addMonth, needsConfirm, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
+import { ME, addMonth, fromSplitwise, needsConfirm, parseSplitwise, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { update, useStore, type State } from './store'
 import { api, fileUrl, pull, uploadImage, useSync } from './sync'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Denomination, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
+import { Avatar, Denomination, count, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
 import { AccountHub, AppearancePage, AuthFlow, Claim, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
@@ -37,6 +37,7 @@ export default function App() {
     const Page = { profile: ProfilePage, theme: AppearancePage, tone: RemindersPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage }[r[1] ?? '']
     return Page ? <Page key={r[1]} s={s} /> : <AccountHub s={s} />
   }
+  if (r[0] === 'import') return <ImportSplitwise s={s} />
   if (r[0] === 'new' || !s.groups.length) return <NewGroup s={s} />
   if (r[0] === 'add') return <ExpenseForm s={s} />
   const g = r[0] === 'g' ? s.groups.find(x => x.id === r[1]) : undefined
@@ -85,6 +86,7 @@ function NewGroup({ s }: { s: State }) {
             </button>
           ))}
         </div>
+        <button className="link center-link" onClick={() => go('/import')}>Coming from Splitwise? Import a group</button>
       </Screen>
     )
 
@@ -317,6 +319,66 @@ function ReceiptField({ gid, name, onChange }: { gid: Id; name?: string; onChang
       )}
       {err && <p className="error" role="alert">{err}</p>}
     </div>
+  )
+}
+
+// ---------- Splitwise import ----------
+function ImportSplitwise({ s }: { s: State }) {
+  const [data, setData] = useState<Splitwise | null>(null)
+  const [err, setErr] = useState('')
+  const [name, setName] = useState('')
+  const [me, setMe] = useState(-1)
+  const [kind, setKind] = useState<Kind>('friends')
+  const read = async (f: File) => {
+    setErr('')
+    const r = parseSplitwise(await f.text())
+    if ('error' in r) return setErr(r.error)
+    if (!r.rows.length) return setErr('No expenses in rupees found in that file.')
+    const first = s.me.name.trim().split(/\s+/)[0]?.toLowerCase()
+    setData(r)
+    setName(f.name.replace(/\.csv$/i, '').replace(/_\d{4}-\d{2}-\d{2}.*$/, '').replace(/[-_]+/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase()).slice(0, 40) || 'Imported group')
+    setMe(first ? r.people.findIndex(p => p.toLowerCase().startsWith(first)) : -1)
+  }
+  const doImport = () => {
+    if (!data || me < 0) return
+    const ids = data.people.map((_, i) => (i === me ? ME : uid()))
+    const expenses = data.rows.map(r => fromSplitwise(r, ids)).filter(e => !!e)
+    const id = uid()
+    update(d => {
+      d.groups.unshift({
+        id, name: name.trim() || 'Imported group', kind, theme: KINDS[kind].theme, track: kind === 'family' || undefined,
+        members: data.people.map((p, i) => (i === me ? { id: ME, name: 'Me' } : { id: ids[i], name: p.slice(0, 60) })), expenses,
+      })
+    })
+    location.replace('#/g/' + id)
+  }
+  const spent = data?.rows.filter(r => !r.settle).reduce((a, r) => a + r.amount, 0) ?? 0
+  return (
+    <Screen t={s.theme} back title="Import from Splitwise">
+      <div className="form">
+        {!data ? <>
+          <p className="muted-p">In Splitwise, open the group, tap the settings gear, then <strong>Export as spreadsheet</strong>. Pick that CSV file here. Balances come over exactly; people you add later can claim their spot.</p>
+          <label className="btn primary">
+            <input type="file" accept=".csv,text/csv" className="sr-only" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void read(f) }} />
+            <Icon n="plus" />Choose CSV file
+          </label>
+        </> : <>
+          <p className="notice">Found {count(data.rows.filter(r => !r.settle).length, 'expense', 'expenses')} ({inr(spent)}) and {count(data.rows.filter(r => r.settle).length, 'payment', 'payments')}.{data.skipped ? ` Left out ${count(data.skipped, 'row', 'rows')} in other currencies or without a date.` : ''}</p>
+          <label className="field"><span>Group name</span><input value={name} maxLength={40} onChange={e => setName(e.target.value)} /></label>
+          <h2 className="form-h">Which one is you?</h2>
+          <div className="chips" role="radiogroup" aria-label="Which one is you">
+            {data.people.map((p, i) => <Chip key={p + i} on={me === i} onClick={() => setMe(i)}>{p}</Chip>)}
+          </div>
+          <h2 className="form-h">Kind of group</h2>
+          <div className="chips" role="radiogroup" aria-label="Kind of group">
+            {(Object.keys(KINDS) as Kind[]).map(k => <Chip key={k} on={kind === k} onClick={() => setKind(k)}><Icon n={k} size={18} />{KINDS[k].label}</Chip>)}
+          </div>
+          <button className="btn primary" disabled={me < 0} onClick={doImport}>{me < 0 ? 'Pick which one is you' : `Import ${data.rows.length} entries`}</button>
+          <button className="link center-link" onClick={() => setData(null)}>Choose a different file</button>
+        </>}
+        {err && <p className="error" role="alert">{err}</p>}
+      </div>
+    </Screen>
   )
 }
 

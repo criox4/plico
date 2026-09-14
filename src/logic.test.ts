@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, type Group } from './logic.ts'
+import { ME, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -51,3 +51,27 @@ assert.equal(needsConfirm(p, 'r'), true) // Rahul has an account: he confirms
 assert.equal(needsConfirm(p, 'q'), false) // a guest can't confirm
 assert.equal(needsConfirm(p, ME), false) // I'm the payee: my word is enough
 console.log('ok')
+
+// Splitwise import reproduces Splitwise's balances
+const csv = `Date,Description,Category,Cost,Currency,Asha Rao,Bilal,"Chen, Li"
+2024-01-05,Dinner,Dining out,90.00,INR,60.00,-30.00,-30.00
+2024-01-06,"Cab, airport",Taxi,45.00,INR,-15.00,30.00,-15.00
+2024-01-07,Payment,Payment,15.00,INR,-15.00,15.00,0.00
+2024-01-08,Souvenir,General,20.00,USD,10.00,-10.00,0.00
+
+2024-01-09,Total balance, , ,INR,30.00,15.00,-45.00
+`
+const sw = parseSplitwise(csv)
+assert.ok(!('error' in sw))
+if (!('error' in sw)) {
+  assert.deepEqual(sw.people, ['Asha Rao', 'Bilal', 'Chen, Li'])
+  assert.equal(sw.rows.length, 3); assert.equal(sw.skipped, 1)
+  const ids = ['a', 'b', 'c']
+  const gi: Group = { id: 'i', name: 'I', kind: 'trip', theme: 'goa', members: ids.map(i => ({ id: i, name: i })), expenses: sw.rows.map(r => fromSplitwise(r, ids)!) }
+  const bal = balances(gi)
+  assert.deepEqual([bal.a, bal.b, bal.c], [3000, 1500, -4500])
+  assert.ok(gi.expenses.every(e => !sharesError(e.amount, e.paid, e.owed, new Set(ids))))
+  assert.equal(gi.expenses[0].amount, 9000); assert.equal(gi.expenses[0].cat, 'food'); assert.ok(gi.expenses[2].settle)
+}
+assert.ok('error' in parseSplitwise('hello,world'))
+console.log('splitwise ok')

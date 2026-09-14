@@ -162,3 +162,74 @@ export function sharesError(amount: number, paid: Record<Id, number>, owed: Reco
   if (sum(owed) !== amount) return 'What is owed must add up to the amount'
   return null
 }
+
+// ---------- Splitwise import ----------
+/** Minimal RFC 4180 CSV: quoted fields, doubled quotes, commas and newlines inside quotes. */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = [], f = '', q = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { f += '"'; i++ } else if (c === '"') q = false; else f += c
+    } else if (c === '"') q = true
+    else if (c === ',') { row.push(f); f = '' }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = '' }
+    else f += c
+  }
+  if (f || row.length) { row.push(f); rows.push(row) }
+  return rows.filter(r => r.some(x => x.trim()))
+}
+
+const SW_CATS: [RegExp, string][] = [
+  [/grocer/i, 'groceries'], [/dining|food|restaurant/i, 'food'], [/liquor|alcohol|drink/i, 'drinks'],
+  [/hotel|lodg/i, 'stay'], [/taxi|car|fuel|gas\/|bus|train|plane|flight|parking|transport|bicycle/i, 'transport'],
+  [/rent|mortgage/i, 'rent'], [/electric|utilit|water|internet|phone|tv|heat|trash|bill/i, 'bills'],
+  [/clean|maid|help|household/i, 'help'], [/entertain|game|movie|music|sport|fun/i, 'fun'],
+]
+export type SwRow = { date: string; title: string; cat: string; amount: number; net: number[]; settle: boolean }
+export type Splitwise = { people: string[]; rows: SwRow[]; skipped: number }
+
+/** Splitwise's group export: Date, Description, Category, Cost, Currency, then one net column per person
+ *  (positive = paid more than their share). Non-INR rows and the "Total balance" line are skipped. */
+export function parseSplitwise(text: string): Splitwise | { error: string } {
+  const [head, ...body] = parseCsv(text.replace(/^﻿/, ''))
+  if (!head || head.length < 6 || !/date/i.test(head[0]) || !/cost/i.test(head[3])) return { error: 'This doesn’t look like a Splitwise export. In Splitwise, open the group, then Settings → Export as spreadsheet.' }
+  const people = head.slice(5).map(p => p.trim()).filter(Boolean)
+  const rows: SwRow[] = []
+  let skipped = 0
+  for (const r of body) {
+    if (/total balance/i.test(r[1] ?? '')) continue
+    const date = (r[0] ?? '').trim().slice(0, 10)
+    const amount = toPaise(r[3] ?? '')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || amount <= 0 || (r[4] ?? '').trim().toUpperCase() !== 'INR') { skipped++; continue }
+    const net = people.map((_, i) => toPaise((r[5 + i] ?? '').trim() || '0'))
+    const drift = net.reduce((a, b) => a + b, 0) // rounding: nets should sum to zero
+    if (drift) { const k = net.indexOf(drift > 0 ? Math.max(...net) : Math.min(...net)); net[k] -= drift }
+    const cat = (r[2] ?? '').trim()
+    rows.push({ date, title: (r[1] ?? '').trim() || 'Expense', cat, amount, net, settle: /^payment$/i.test(cat) })
+  }
+  return { people, rows, skipped }
+}
+
+/** Nets → paid/owed that reproduce Splitwise's balances exactly. The biggest payer also carries their own share. */
+export function fromSplitwise(row: SwRow, ids: Id[]): Expense | null {
+  const pos = row.net.map((v, i) => [i, v] as const).filter(([, v]) => v > 0)
+  if (!pos.length) return null
+  const paid: Record<Id, number> = {}, owed: Record<Id, number> = {}
+  if (row.settle) {
+    const neg = row.net.map((v, i) => [i, v] as const).filter(([, v]) => v < 0)
+    if (pos.length !== 1 || neg.length !== 1) return null
+    return { id: uid(), title: 'Settlement', cat: 'check', date: row.date, amount: pos[0][1], paid: { [ids[pos[0][0]]]: pos[0][1] }, owed: { [ids[neg[0][0]]]: pos[0][1] }, settle: true }
+  }
+  const sumPos = pos.reduce((a, [, v]) => a + v, 0)
+  const amount = Math.max(row.amount, sumPos)
+  const top = pos.reduce((a, b) => (b[1] > a[1] ? b : a))[0]
+  row.net.forEach((v, i) => {
+    const extra = i === top ? amount - sumPos : 0
+    if (v > 0 || extra) paid[ids[i]] = Math.max(v, 0) + extra
+    if (v < 0 || extra) owed[ids[i]] = Math.max(-v, 0) + extra
+  })
+  const cat = SW_CATS.find(([re]) => re.test(row.cat))?.[1] ?? 'other'
+  return { id: uid(), title: row.title, cat, date: row.date, amount, paid, owed }
+}
