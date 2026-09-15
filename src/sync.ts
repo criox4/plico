@@ -9,7 +9,7 @@ import { API, authClient, token } from './auth-client'
 type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown }
 type Status = {
   authed: boolean; booting: boolean; pending: number; offline: boolean; error: string
-  google: boolean; googleWebClientId: string | null; googleIosClientId: string | null
+  google: boolean; googleWebClientId: string | null; googleIosClientId: string | null; ai: boolean
 }
 
 const OKEY = 'splittr-outbox'
@@ -22,7 +22,7 @@ let missedPull = false // a pull was skipped because an edit was pending
 // Signed in = we know the user. A dead session is only concluded from the server (never from being offline).
 let status: Status = {
   authed: !!getState().user, booting: true, pending: outbox.length, offline: !navigator.onLine, error: '',
-  google: false, googleWebClientId: null, googleIosClientId: null,
+  google: false, googleWebClientId: null, googleIosClientId: null, ai: false,
 }
 const subs = new Set<() => void>()
 const setStatus = (p: Partial<Status>) => { status = { ...status, ...p, pending: outbox.length }; subs.forEach(f => f()) }
@@ -202,6 +202,15 @@ export async function uploadImage<T>(path: string, f: Blob, max: number): Promis
   return out as T
 }
 
+export type Read = { title: string; amount: number | null; cat: string; date: string | null; payer: string | null; people: string[]; items: { name: string; amount: number }[]; extras: number }
+const dataUrl = (b: Blob) => new Promise<string>((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => no(r.error); r.readAsDataURL(b) })
+/** Ask the server to read an expense out of a sentence or a photo (receipt, order, UPI screenshot). */
+export async function readExpense(src: { text?: string; image?: Blob; groupId?: string }) {
+  const image = src.image && await dataUrl(await shrink(src.image, 1600))
+  return api<Read>('/api/ai/read', { method: 'POST', body: JSON.stringify({ text: src.text, image, groupId: src.groupId, today: new Date().toLocaleDateString('en-CA') }) })
+    .catch(e => { throw new Error(navigator.onLine ? (e as Error).message : 'Reading photos needs a connection. You can still type it in.') })
+}
+
 /** A private group file as a local URL (bearer-authenticated, so it works in the native apps too). */
 export async function fileUrl(path: string) {
   const res = await req(path)
@@ -281,7 +290,7 @@ export function startSync() {
   setInterval(() => { if (document.visibilityState === 'visible') void flush().then(pull) }, 30_000)
   // Boot: learn the sign-in options and confirm the session, but never hold an offline user hostage (800ms cap).
   const config = fetch(`${API}/api/config`).then(r => r.json())
-    .then(c => setStatus({ google: !!c.google, googleWebClientId: c.googleWebClientId, googleIosClientId: c.googleIosClientId })).catch(() => {})
+    .then(c => setStatus({ google: !!c.google, googleWebClientId: c.googleWebClientId, googleIosClientId: c.googleIosClientId, ai: !!c.ai })).catch(() => {})
   const session = authClient.getSession().then(async r => {
     const u = r.data?.user
     if (u && !getState().user) return signedIn(u) // back from Google's redirect with a session cookie

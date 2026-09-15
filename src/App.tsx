@@ -1,8 +1,9 @@
 import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
-import { ME, addMonth, fromSplitwise, needsConfirm, parseSplitwise, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
+import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { update, useStore, type State } from './store'
-import { api, pull, uploadImage, useSync } from './sync'
+import { api, pull, readExpense, uploadImage, useSync, type Read } from './sync'
+import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
 import { Avatar, Converge, Denomination, EMOJI, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
@@ -39,7 +40,7 @@ export default function App() {
   }
   if (r[0] === 'import') return <ImportSplitwise s={s} />
   if (r[0] === 'new' || !s.groups.length) return <NewGroup s={s} />
-  if (r[0] === 'add') return <ExpenseForm s={s} />
+  if (r[0] === 'add') return <ExpenseForm key={r[1] ?? 'add'} s={s} shared={r[1] === 'shared'} />
   const g = r[0] === 'g' ? s.groups.find(x => x.id === r[1]) : undefined
   if (g) {
     if (r[2] === 'add') return <ExpenseForm key="add" s={s} gid={g.id} />
@@ -133,7 +134,7 @@ const MODES: { id: SplitMode; label: string; unit: string }[] = [
 ]
 const strs = (o: Record<Id, number>, k = 1) => Object.fromEntries(Object.entries(o).map(([i, v]) => [i, String(v / k)]))
 
-function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
+function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; shared?: boolean }) {
   const [groupId, setGroupId] = useState(gid ?? s.groups[0].id)
   const g = s.groups.find(x => x.id === groupId) ?? s.groups[0]
   const old = eid ? g.expenses.find(e => e.id === eid) : undefined
@@ -154,8 +155,22 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
   const [repeat, setRepeat] = useState(!!old?.repeat)
   const [receipt, setReceipt] = useState(old?.receipt)
   const [done, setDone] = useState<Expense | null>(null)
+  // capture: type it, scan it, or arrive with something shared from another app
+  const sync = useSync()
+  const [quick, setQuick] = useState('')
+  const [reading, setReading] = useState(false)
+  const [capErr, setCapErr] = useState('')
+  const [items, setItems] = useState<Item[] | null>(null)
+  const [extras, setExtras] = useState(0)
 
   useEffect(() => { if (eid && !old) location.replace('#/g/' + g.id) }, [eid, old, g.id])
+  useEffect(() => {
+    if (!shared) return
+    void takeShared().then(p => {
+      if (p?.image) void scan(p.image)
+      else if (p?.text) { setQuick(p.text.slice(0, 200)); void typeIt(p.text.slice(0, 200)) }
+    })
+  }, [shared]) // eslint-disable-line react-hooks/exhaustive-deps
   if (done) return <Converge s={s} g={g} e={done} />
   if (eid && !old) return null
 
@@ -177,6 +192,48 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
         <button className="btn secondary" onClick={del}>Delete settlement</button>
       </Screen>
     )
+  }
+
+  const applyQuick = (q: Quick) => {
+    if (q.amount) setAmt(String(q.amount / 100))
+    if (q.title) setTitle(q.title.slice(0, 80))
+    if (q.payer) { setMulti(false); setPayer(q.payer) }
+    if (q.people?.length) { setMode('equal'); setInp(Object.fromEntries(g.members.map(m => [m.id, q.people!.includes(m.id) ? '1' : '0']))) }
+  }
+  const fromRead = (r: Read) => {
+    const who = (n: string) => matchMember(n, g.members)
+    applyQuick({ amount: r.amount ? Math.round(r.amount * 100) : undefined, title: r.title || undefined,
+      payer: r.payer ? who(r.payer) : undefined, people: r.people.map(who).filter((x): x is Id => !!x) })
+    if (CATS.some(c => c.id === r.cat)) setCat(r.cat)
+    if (r.date && r.date <= today()) setDate(r.date)
+    if (r.items.length > 1) { setItems(r.items.map(i => ({ name: i.name, amount: Math.round(i.amount * 100), who: g.members.map(m => m.id) }))); setExtras(Math.round(r.extras * 100)) }
+  }
+  const typeIt = async (text = quick) => {
+    if (!text.trim()) return
+    applyQuick(parseQuick(text, g.members)) // instant and offline; AI refines when it can
+    if (!sync.ai || !navigator.onLine) return
+    setReading(true); setCapErr('')
+    try { fromRead(await readExpense({ text, groupId: g.id })) } catch { /* the rule-based read already filled what it could */ } finally { setReading(false) }
+  }
+  const scan = async (f: Blob) => {
+    if (!sync.ai) return setCapErr('Reading photos isn’t set up yet. Type it in instead.')
+    setReading(true); setCapErr('')
+    try {
+      const [r] = await Promise.all([readExpense({ image: f, groupId: g.id }),
+        uploadImage<{ name: string }>(`/api/groups/${g.id}/files`, f, 1600).then(x => setReceipt(x.name)).catch(() => {})])
+      if (!r.amount && !r.items.length) setCapErr('Couldn’t find an amount in that photo. Type it in instead.')
+      fromRead(r)
+    } catch (e) { setCapErr((e as Error).message) } finally { setReading(false) }
+  }
+  const useItems = () => {
+    if (!items) return
+    const r = itemSplit(items, extras)
+    if ('error' in r) return setCapErr(r.error)
+    const res = r.owed
+    const sum = Object.values(res).reduce((a, b) => a + b, 0)
+    setAmt(String(sum / 100)); setMode('exact'); setAdjust(true)
+    setInp(Object.fromEntries(g.members.map(m => [m.id, res[m.id] ? String(res[m.id] / 100) : ''])))
+    setItems(null); setCapErr('')
   }
 
   const pickGroup = (id: Id) => {
@@ -220,6 +277,42 @@ function ExpenseForm({ s, gid, eid }: { s: State; gid?: Id; eid?: Id }) {
   return (
     <Screen t={g.theme} back title={old ? 'Edit expense' : 'Add expense'}>
       <form className="form" onSubmit={e => { e.preventDefault(); save() }}>
+        {!old && (
+          <div className="capture">
+            <input className="quick-in" placeholder="Type it: Dinner 3200, Karan paid, except Riya" aria-label="Type the expense in a sentence" value={quick} maxLength={200}
+              enterKeyHint="done" onChange={e => setQuick(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void typeIt() } }} onBlur={() => void typeIt()} />
+            <label className="iconbtn scan" aria-label="Scan a receipt or screenshot" title="Scan a receipt or screenshot">
+              <input type="file" accept="image/*" className="sr-only" disabled={reading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void scan(f) }} />
+              <Icon n="qr" />
+            </label>
+          </div>
+        )}
+        {reading && <p className="reading" role="status"><Plico mood="thinking" size={28} />Reading it…</p>}
+        {capErr && <p className="error" role="alert">{capErr}</p>}
+        {items && (
+          <section className="items" aria-label="Split by item">
+            <h2 className="form-h">Who had what?</h2>
+            <ul className="rows">
+              {items.map((it, i) => (
+                <li className="item-row" key={i}>
+                  <span className="grow">{it.name}</span><span className="money">{inr(it.amount)}</span>
+                  <span className="item-who">
+                    {g.members.map(m => {
+                      const on = it.who.includes(m.id)
+                      return <button type="button" key={m.id} className={`who-chip${on ? ' on' : ''}`} aria-pressed={on} aria-label={`${who(g, m.id)} had ${it.name}`}
+                        onClick={() => setItems(items.map((x, j) => (j !== i ? x : { ...x, who: on ? x.who.filter(w => w !== m.id) : [...x.who, m.id] })))}>{who(g, m.id)}</button>
+                    })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {extras !== 0 && <p className="muted-p">{extras > 0 ? 'Taxes, delivery and tips' : 'Discounts'} of {inr(Math.abs(extras))} are shared in proportion to what each person had.</p>}
+            <div className="row">
+              <button type="button" className="btn primary" onClick={useItems}>Use this split</button>
+              <button type="button" className="btn secondary" onClick={() => setItems(null)}>Just the total</button>
+            </div>
+          </section>
+        )}
         <label className="amount-field">
           <span className="sr-only">Amount in rupees</span>
           <span className="amount-cur" aria-hidden>₹</span>

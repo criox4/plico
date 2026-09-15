@@ -4,6 +4,7 @@ import { cors } from 'hono/cors'
 import { ORIGINS, auth } from './auth.ts'
 import { api } from './api.ts'
 import { BUCKET, getFile } from './storage.ts'
+import { aiReady } from './ai.ts'
 
 const app = new Hono()
 
@@ -21,6 +22,7 @@ app.get('/api/config', c => c.json({
   google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
   googleWebClientId: process.env.GOOGLE_CLIENT_ID ?? null,
   googleIosClientId: process.env.GOOGLE_IOS_CLIENT_ID ?? null,
+  ai: aiReady(),
 }))
 // Public: profile pictures (random names; shown to anyone in a shared group, and <img> can't send a bearer token).
 app.get('/api/files/avatars/:uid/:name', async c => {

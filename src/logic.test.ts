@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, type Group } from './logic.ts'
+import { ME, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -75,3 +75,20 @@ if (!('error' in sw)) {
 }
 assert.ok('error' in parseSplitwise('hello,world'))
 console.log('splitwise ok')
+
+// quick add
+const mem = [{ id: ME, name: 'Me' }, { id: 'r', name: 'Riya Sen' }, { id: 'k', name: 'Karan' }, { id: 'a', name: 'Arjun' }]
+assert.deepEqual(parseQuick('Dinner 3200 paid by me split everyone except Riya', mem), { amount: 320000, payer: ME, people: [ME, 'k', 'a'], title: 'Dinner' })
+assert.deepEqual(parseQuick('Uber 850 me and Arjun only, Karan paid', mem), { amount: 85000, payer: 'k', people: [ME, 'a'], title: 'Uber' })
+assert.deepEqual(parseQuick('Rent 65k', mem), { amount: 6500000, title: 'Rent' })
+assert.deepEqual(parseQuick('₹1,450.50 groceries with riya', mem), { amount: 145050, people: [ME, 'r'], title: 'Groceries' })
+assert.equal(parseQuick('Coffee', mem).amount, undefined)
+
+// item split: extras follow item subtotals, totals add up exactly
+const is = itemSplit([{ name: 'Burger', amount: 42000, who: [ME] }, { name: 'Pasta', amount: 58000, who: ['r'] }, { name: 'Beer x3', amount: 90000, who: [ME, 'r', 'k'] }], 10800)
+assert.ok(!('error' in is))
+if ('owed' in is) { assert.equal(Object.values(is.owed).reduce((a, b) => a + b, 0), 200800); assert.ok(is.owed[ME] > is.owed.k) }
+assert.ok('error' in itemSplit([{ name: 'Fries', amount: 100, who: [] }], 0))
+const disc = itemSplit([{ name: 'A', amount: 1000, who: [ME] }, { name: 'B', amount: 1000, who: ['k'] }], -200)
+assert.deepEqual(disc, { owed: { [ME]: 900, k: 900 } })
+console.log('capture ok')

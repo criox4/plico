@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
 import { mail } from './email.ts'
+import { aiReady, readExpense } from './ai.ts'
 import { BUCKET, deleteFile, getFile, imageType, putFile, storageReady } from './storage.ts'
 import { Prisma } from './generated/prisma/client.ts'
 import { isVpa, sharesError } from '../src/logic.ts'
@@ -253,6 +254,33 @@ api.get('/groups/:gid/files/:name', async c => {
   const f = await getFile(BUCKET.private, `${gid}/${name}`)
   if (!f) return c.json(notFound, 404)
   return c.body(new Uint8Array(f.body), 200, { 'content-type': f.type, 'cache-control': 'private, max-age=86400' })
+})
+
+// ---------- reading expenses: a sentence, a receipt photo, a payment screenshot ----------
+const ReadIn = z.object({
+  text: z.string().trim().min(1).max(500).optional(),
+  image: z.string().regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/).max(7_000_000).optional(),
+  groupId: Id.optional(), today: Day,
+}).refine(b => b.text || b.image, 'Send a sentence or a photo')
+const reads = new Map<string, number[]>() // ponytail: per-process limiter; move to the DB if we run several instances
+api.post('/ai/read', async c => {
+  if (!aiReady()) return c.json({ error: 'Reading receipts isn’t set up yet' }, 503)
+  const b = ReadIn.parse(await c.req.json())
+  const uid = c.get('userId'), now = Date.now()
+  const recent = (reads.get(uid) ?? []).filter(t => now - t < 3600_000)
+  if (recent.length >= 40) return c.json({ error: 'That’s a lot of scans for one hour. Try again a little later.' }, 429)
+  reads.set(uid, [...recent, now])
+  let members: string[] = []
+  if (b.groupId) {
+    if (!(await membership(b.groupId, uid))) return c.json(notFound, 404)
+    members = (await db.member.findMany({ where: { groupId: b.groupId, NOT: { userId: uid } }, select: { name: true } })).map(m => m.name)
+  }
+  try {
+    return c.json(await readExpense({ text: b.text, image: b.image, members, today: b.today }))
+  } catch (e) {
+    console.error('[ai]', (e as Error).message)
+    return c.json({ error: 'Couldn’t read that right now. You can still type it in.' }, 502)
+  }
 })
 
 // ---------- personal claim links: whoever holds the token takes that guest spot ----------

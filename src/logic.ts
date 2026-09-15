@@ -235,3 +235,69 @@ export function fromSplitwise(row: SwRow, ids: Id[]): Expense | null {
   const cat = SW_CATS.find(([re]) => re.test(row.cat))?.[1] ?? 'other'
   return { id: uid(), title: row.title, cat, date: row.date, amount, paid, owed }
 }
+
+// ---------- quick add: "Dinner 3200 paid by Karan except Riya" ----------
+export type Quick = { title?: string; amount?: number; payer?: Id; people?: Id[] }
+/** Offline, rule-based: an amount (3200, 3,200, ₹3.2k, 65k), who paid ("paid by X", "X paid", "I paid"),
+ *  who's in ("with A and B", "A, B only", "except C", "everyone"). Names match group members by prefix. */
+/** A spoken or written name → a member: "me", a full name, a first name, or a prefix of 3+ letters. */
+export function matchMember(w: string, members: { id: Id; name: string }[]): Id | undefined {
+  const x = w.trim().toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '')
+  if (!x) return undefined
+  if (/^(me|i|myself|you)$/.test(x)) return ME
+  return members.find(m => m.id !== ME && m.name.toLowerCase() === x)?.id ?? members.find(m => m.id !== ME && m.name.toLowerCase().split(/\s+/)[0] === x)?.id
+    ?? members.find(m => m.id !== ME && x.length >= 3 && m.name.toLowerCase().startsWith(x))?.id
+}
+
+export function parseQuick(text: string, members: { id: Id; name: string }[]): Quick {
+  let t = ` ${text.trim()} `
+  const out: Quick = {}
+  const find = (w: string) => matchMember(w, members)
+  const names = (s: string) => s.split(/,|\band\b|&|\+/i).map(find).filter((x): x is Id => !!x)
+  const m = t.match(/(?:₹|rs\.?|inr)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k|thousand|l|lakh)?\b/i)
+  if (m) {
+    const n = parseFloat(m[1].replace(/,/g, '')) * ({ k: 1e3, thousand: 1e3, l: 1e5, lakh: 1e5 }[m[2]?.toLowerCase() ?? ''] ?? 1)
+    if (n > 0) out.amount = Math.round(n * 100)
+    t = t.replace(m[0], ' ')
+  }
+  const paid = t.match(/\bpaid by ([\p{L} ]+?)(?=\b(?:split|with|except|for|only|and me)\b|,|$)/iu) ?? t.match(/\b([\p{L}]+) paid\b/iu)
+  if (paid) { const id = find(paid[1]); if (id) out.payer = id; t = t.replace(paid[0], ' ') }
+  const except = t.match(/\b(?:except|without|not|minus)\s+([\p{L} ,&+]+?)(?=\b(?:split|paid|with|for)\b|$)/iu)
+  // "A and B only": walk back from "only" over names and joiners, so the title before them survives.
+  const onlyAt = t.search(/\bonly\b/i)
+  const before = onlyAt > 0 ? t.slice(0, onlyAt).split(/(\s+|,)/) : []
+  let k = before.length
+  while (k > 0 && (/^(\s*|,|and|&|\+)$/i.test(before[k - 1]) || find(before[k - 1]))) k--
+  const tail = before.slice(k).join('')
+  const only = t.match(/\b(?:with|between|split(?: with| between)?|for)\s+([\p{L} ,&+]+?)(?=\b(?:paid|except|only)\b|$)/iu)
+    ?? (tail.trim() ? ([tail + 'only', tail] as unknown as RegExpMatchArray) : null)
+  if (except) {
+    const out_ = new Set(names(except[1]))
+    out.people = members.map(x => x.id).filter(id => !out_.has(id))
+    t = t.replace(except[0], ' ')
+  } else if (only && !/\b(everyone|all|everybody)\b/i.test(only[1])) {
+    const ids = names(only[1])
+    if (ids.length) { out.people = [...new Set([ME, ...ids])]; t = t.replace(only[0], ' ') }
+  }
+  t = t.replace(/\b(everyone|everybody|all|split|equally|evenly|only)\b/gi, ' ').replace(/\s+/g, ' ').replace(/^[\s,.;:-]+|[\s,.;:-]+$/g, '').replace(/\s+,/g, ',')
+  if (t) out.title = t[0].toUpperCase() + t.slice(1)
+  return out
+}
+
+// ---------- item split: restaurant bills, Swiggy/Zomato orders ----------
+export type Item = { name: string; amount: number; who: Id[] }
+/** Each item is split among its people; extras (tax, GST, delivery, tip, discounts) follow each person's item subtotal. */
+export function itemSplit(items: Item[], extras: number): { owed: Record<Id, number> } | { error: string } {
+  const sub: Record<Id, number> = {}
+  for (const it of items) {
+    if (it.amount <= 0) continue
+    if (!it.who.length) return { error: `Pick who had ${it.name}` }
+    const parts = allocate(it.amount, Object.fromEntries(it.who.map(id => [id, 1])))
+    for (const id in parts) sub[id] = (sub[id] ?? 0) + parts[id]
+  }
+  const subtotal = Object.values(sub).reduce((a, b) => a + b, 0)
+  if (!subtotal) return { error: 'Add at least one item' }
+  if (subtotal + extras <= 0) return { error: 'The discount is bigger than the bill' }
+  const ex = extras >= 0 ? allocate(extras, sub) : Object.fromEntries(Object.entries(allocate(-extras, sub)).map(([k, v]) => [k, -v]))
+  return { owed: Object.fromEntries(Object.keys(sub).map(id => [id, sub[id] + (ex[id] ?? 0)])) }
+}
