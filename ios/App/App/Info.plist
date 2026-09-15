@@ -15,6 +15,8 @@
 			<array>
 				<!-- Google sign-in returns here: the iOS client ID, reversed -->
 				<string>com.googleusercontent.apps.1083483767626-7t3ipcpggd6gbbhrul995vkqbp56mca8</string>
+				<!-- The Share Extension opens Plico with plico://share -->
+				<string>plico</string>
 			</array>
 		</dict>
 	</array>
