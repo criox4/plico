@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import WidgetKit
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
@@ -20,5 +21,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         SceneDelegateProxy.shared.scene(scene, continue: userActivity)
+    }
+
+    /// Hand the home-screen widget the latest summary (written by the web app via Capacitor Preferences).
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        guard let summary = UserDefaults.standard.string(forKey: "CapacitorStorage.widget") else { return }
+        UserDefaults(suiteName: "group.app.plico")?.set(summary, forKey: "widget")
+        WidgetCenter.shared.reloadAllTimelines()
     }
 }

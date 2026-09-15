@@ -52,8 +52,5 @@ export function setRemote(fn: (s: State) => void) {
   commit(next)
 }
 
-export const useStore = () =>
-  useSyncExternalStore(
-    f => (subs.add(f), () => subs.delete(f)),
-    () => state,
-  )
+export const subscribe = (f: () => void) => (subs.add(f), () => { subs.delete(f) })
+export const useStore = () => useSyncExternalStore(subscribe, () => state)

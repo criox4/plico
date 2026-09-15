@@ -4,4 +4,5 @@
     <string name="title_activity_main">Plico</string>
     <string name="package_name">app.plico</string>
     <string name="custom_url_scheme">app.plico</string>
+    <string name="widget_description">What you’re owed or owe, and your top groups</string>
 </resources>

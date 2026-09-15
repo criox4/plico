@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="16dp" android:background="@drawable/widget_bg">
+    <TextView android:id="@+id/widget_title" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Plico" android:textColor="#5E5E6A" android:textSize="13sp" android:textStyle="bold" />
+    <TextView android:id="@+id/widget_amount" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="—" android:textColor="#17171C" android:textSize="30sp" android:textStyle="bold" android:fontFeatureSettings="tnum" />
+    <LinearLayout android:id="@+id/row1" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="6dp" android:visibility="gone">
+        <TextView android:id="@+id/row1_name" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="#17171C" android:textSize="14sp" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/row1_amount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="14sp" android:textStyle="bold" android:paddingStart="8dp" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/row2" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="6dp" android:visibility="gone">
+        <TextView android:id="@+id/row2_name" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="#17171C" android:textSize="14sp" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/row2_amount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="14sp" android:textStyle="bold" android:paddingStart="8dp" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/row3" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="6dp" android:visibility="gone">
+        <TextView android:id="@+id/row3_name" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="#17171C" android:textSize="14sp" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/row3_amount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="14sp" android:textStyle="bold" android:paddingStart="8dp" />
+    </LinearLayout>
+</LinearLayout>

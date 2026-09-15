@@ -3,10 +3,12 @@ import { Capacitor } from '@capacitor/core'
 import App from './App'
 import { startSync } from './sync'
 import { startShareIntake } from './share'
+import { startWidget } from './widget'
 import './styles.css'
 
 startSync()
 startShareIntake()
+startWidget()
 createRoot(document.getElementById('root')!).render(<App />)
 
 // Native apps ship their assets locally; only the web build needs the offline worker.

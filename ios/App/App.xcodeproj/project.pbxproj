@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
+		4ADD5BFDAA0F10BC4B8C1639 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2434EB1BA68548E6D738E2BD /* SwiftUI.framework */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
@@ -15,13 +16,24 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		642C5BFC7F2E794016D791D5 /* PlicoWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C7DFE949D901E6EA44EB79 /* PlicoWidget.swift */; };
+		70679C59E005A9755A7E37BC /* PlicoWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 225C60FF9E09532F7FEC9CDA /* PlicoWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8E9F1153F78A8A37FD4BCD3E /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DC9BDE25B3DD8C0CEF3ADB96 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		9807A9B40EAEA08B88373C43 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00C6454B6C852503F02C66F /* ShareViewController.swift */; };
+		A049032E2641B4E0F866684F /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 74220D69805E7C2DAEE8C830 /* Foundation.framework */; };
 		EFE2512ED91FF9D2B93D571C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 74220D69805E7C2DAEE8C830 /* Foundation.framework */; };
+		F0B9E61A2F1EA22DA9AE88F0 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9D031CFFE88C44D384142B9B /* WidgetKit.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		55465876AD7469502652001D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B4FCE61B90B2A97A7E28367B;
+			remoteInfo = PlicoWidget;
+		};
 		D99D6A55AD23D2DD441E1497 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
@@ -39,6 +51,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				8E9F1153F78A8A37FD4BCD3E /* ShareExtension.appex in Embed Foundation Extensions */,
+				70679C59E005A9755A7E37BC /* PlicoWidget.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -46,8 +59,12 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		04FF9BFF74AB166050E985A6 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		225C60FF9E09532F7FEC9CDA /* PlicoWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PlicoWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		22B8F141CB1649F7FB7EE6D5 /* ShareExtension.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		2434EB1BA68548E6D738E2BD /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/SwiftUI.framework; sourceTree = DEVELOPER_DIR; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
+		4B394B2E42FCCDF8D0D74356 /* PlicoWidget.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = PlicoWidget.entitlements; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		504EC3071FED79650016851F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -60,6 +77,8 @@
 		74220D69805E7C2DAEE8C830 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		9D031CFFE88C44D384142B9B /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/WidgetKit.framework; sourceTree = DEVELOPER_DIR; };
+		A5C7DFE949D901E6EA44EB79 /* PlicoWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlicoWidget.swift; sourceTree = "<group>"; };
 		B00C6454B6C852503F02C66F /* ShareViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		DC9BDE25B3DD8C0CEF3ADB96 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E29DD3CDA55628794587F0AB /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -79,6 +98,16 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C3BB9120A2459093558B7CE3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A049032E2641B4E0F866684F /* Foundation.framework in Frameworks */,
+				F0B9E61A2F1EA22DA9AE88F0 /* WidgetKit.framework in Frameworks */,
+				4ADD5BFDAA0F10BC4B8C1639 /* SwiftUI.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -104,6 +133,7 @@
 				504EC3051FED79650016851F /* Products */,
 				6DBE677CF89D1C059A33C885 /* Frameworks */,
 				05A2EBA576D635AD0C1B6527 /* ShareExtension */,
+				DA9F53968A0BA4A0BBA33BC7 /* PlicoWidget */,
 			);
 			sourceTree = "<group>";
 		};
@@ -112,6 +142,7 @@
 			children = (
 				504EC3041FED79650016851F /* App.app */,
 				DC9BDE25B3DD8C0CEF3ADB96 /* ShareExtension.appex */,
+				225C60FF9E09532F7FEC9CDA /* PlicoWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -137,6 +168,8 @@
 			isa = PBXGroup;
 			children = (
 				74220D69805E7C2DAEE8C830 /* Foundation.framework */,
+				9D031CFFE88C44D384142B9B /* WidgetKit.framework */,
+				2434EB1BA68548E6D738E2BD /* SwiftUI.framework */,
 			);
 			name = iOS;
 			sourceTree = "<group>";
@@ -147,6 +180,17 @@
 				526E03D125BECEE10300E0F8 /* iOS */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		DA9F53968A0BA4A0BBA33BC7 /* PlicoWidget */ = {
+			isa = PBXGroup;
+			children = (
+				A5C7DFE949D901E6EA44EB79 /* PlicoWidget.swift */,
+				04FF9BFF74AB166050E985A6 /* Info.plist */,
+				4B394B2E42FCCDF8D0D74356 /* PlicoWidget.entitlements */,
+			);
+			name = PlicoWidget;
+			path = PlicoWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -182,6 +226,7 @@
 			);
 			dependencies = (
 				EC7224683D31DA495322DF52 /* PBXTargetDependency */,
+				A8346B0F4DD422B508335B66 /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -190,6 +235,23 @@
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		B4FCE61B90B2A97A7E28367B /* PlicoWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8A6EC7B5077A2C7B645AB455 /* Build configuration list for PBXNativeTarget "PlicoWidget" */;
+			buildPhases = (
+				6D17D8596532A942575071C8 /* Sources */,
+				C3BB9120A2459093558B7CE3 /* Frameworks */,
+				A99A06BDA813D10C72E01292 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PlicoWidget;
+			productName = PlicoWidget;
+			productReference = 225C60FF9E09532F7FEC9CDA /* PlicoWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -225,6 +287,7 @@
 			targets = (
 				504EC3031FED79650016851F /* App */,
 				414F6280304C0256DC31E045 /* ShareExtension */,
+				B4FCE61B90B2A97A7E28367B /* PlicoWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -250,6 +313,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A99A06BDA813D10C72E01292 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -259,6 +329,14 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6D17D8596532A942575071C8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				642C5BFC7F2E794016D791D5 /* PlicoWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -273,6 +351,12 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A8346B0F4DD422B508335B66 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = PlicoWidget;
+			target = B4FCE61B90B2A97A7E28367B /* PlicoWidget */;
+			targetProxy = 55465876AD7469502652001D /* PBXContainerItemProxy */;
+		};
 		EC7224683D31DA495322DF52 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = ShareExtension;
@@ -480,6 +564,30 @@
 			};
 			name = Release;
 		};
+		894DC41436517DF1DD196FC4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PlicoWidget/PlicoWidget.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PlicoWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.plico.PlicoWidget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		90700D243ECCEF6CB9C7C1DB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -496,6 +604,29 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.plico.ShareExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A9104BA2D1E3ABD0411A34FF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PlicoWidget/PlicoWidget.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PlicoWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.plico.PlicoWidget;
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
@@ -529,6 +660,15 @@
 			buildConfigurations = (
 				504EC3171FED79650016851F /* Debug */,
 				504EC3181FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8A6EC7B5077A2C7B645AB455 /* Build configuration list for PBXNativeTarget "PlicoWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				894DC41436517DF1DD196FC4 /* Release */,
+				A9104BA2D1E3ABD0411A34FF /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

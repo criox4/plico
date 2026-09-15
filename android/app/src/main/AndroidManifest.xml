@@ -31,6 +31,14 @@
             </intent-filter>
         </activity>
 
+        <!-- Home-screen widget: your balance and top groups -->
+        <receiver android:name=".PlicoWidget" android:exported="false" android:label="Plico balance">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_balance_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
