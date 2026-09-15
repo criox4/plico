@@ -7,6 +7,7 @@ export const BRAND = { indigo: '#6C5CE7', dark: '#5145CD', light: '#ECE9FF' } //
 export type ThemeId =
   | 'classic' | 'midnight' | 'khata' | 'goa' | 'mono' | 'retro'
   | 'monsoon' | 'cyber' | 'pixel' | 'matcha' | 'chai' | 'auto'
+  | 'mango' | 'diwali' | 'holi' | 'onam'
 
 type Colors = {
   bg: string; surface: string; surface2: string; ink: string; muted: string; line: string
@@ -45,6 +46,11 @@ const f = {
   yatra: 'Yatra+One',
   rajdhani: 'Rajdhani:wght@500;600;700',
   teko: 'Teko:wght@400..700',
+  fredoka: 'Fredoka:wght@400..700',
+  yeseva: 'Yeseva+One',
+  rubik: 'Rubik:wght@400..900',
+  manjari: 'Manjari:wght@400;700',
+  anekMal: 'Anek+Malayalam:wdth,wght@75..125,300..800',
 }
 
 export const THEMES: ThemeDef[] = [
@@ -131,6 +137,34 @@ export const THEMES: ThemeDef[] = [
     ui: "'Rajdhani'", num: "'Teko'", fonts: [f.rajdhani, f.teko],
     c: { bg: '#FFD60A', surface: '#FFFBEA', surface2: '#FFEE99', ink: '#111111', muted: '#3F3A1E', line: '#111111',
       accent: '#0B6B3A', onAccent: '#FFFFFF', link: '#0B5E33', pos: '#0A6634', neg: '#B0141F', settled: '#111111' },
+  },
+  {
+    id: 'mango', name: 'Mango', line: 'Alphonso season: ripe orange, leaf green, a bit of bounce.',
+    dark: false, radius: 22, stroke: 2, ornament: 'pieces', celebrate: 'Sweet!', motion: 'bouncy',
+    ui: "'Fredoka'", num: "'Fredoka'", fonts: [f.fredoka],
+    c: { bg: '#FFF4D6', surface: '#FFFBEF', surface2: '#FFE7A8', ink: '#2B1A05', muted: '#6B4E1F', line: '#F5D98A',
+      accent: '#C8420C', onAccent: '#FFFFFF', link: '#B3470A', pos: '#15703F', neg: '#B42318', settled: '#8A5A00' },
+  },
+  {
+    id: 'diwali', name: 'Diwali', line: 'A night of lamps: deep indigo dark, warm gold light that glows.',
+    dark: true, radius: 18, stroke: 1.6, ornament: 'ripple', celebrate: 'Shubh!', motion: 'fluid',
+    ui: "'Anek Latin'", num: "'Yeseva One'", fonts: [f.anek, f.yeseva],
+    c: { bg: '#130E1E', surface: '#1D162C', surface2: '#2A2140', ink: '#FBF3E4', muted: '#C9B99F', line: '#3A2E52',
+      accent: '#F4B63F', onAccent: '#1A1206', link: '#FFCB6B', pos: '#5BE0A0', neg: '#FF8A8A', settled: '#F4B63F' },
+  },
+  {
+    id: 'holi', name: 'Holi', line: 'Gulal in the air: magenta, marigold, green and blue on white.',
+    dark: false, radius: 20, stroke: 2, ornament: 'pieces', celebrate: 'Holi hai!', motion: 'bouncy',
+    ui: "'Rubik'", num: "'Rubik'", fonts: [f.rubik],
+    c: { bg: '#FFF8FC', surface: '#FFFFFF', surface2: '#FDEAF4', ink: '#1E1330', muted: '#5F536F', line: '#F4D5E6',
+      accent: '#C2187A', onAccent: '#FFFFFF', link: '#A3126A', pos: '#0E7A4A', neg: '#C0283C', settled: '#7A4FD0' },
+  },
+  {
+    id: 'onam', name: 'Onam', line: 'Kasavu cream with a gold edge, banana-leaf green, pookalam rings.',
+    dark: false, radius: 14, stroke: 1.8, ornament: 'ripple', celebrate: 'Sadya sorted', motion: 'calm',
+    ui: "'Manjari'", num: "'Anek Malayalam'", fonts: [f.manjari, f.anekMal],
+    c: { bg: '#FBF6E6', surface: '#FFFDF5', surface2: '#F1E8C9', ink: '#1E2614', muted: '#56603F', line: '#E3D5A1',
+      accent: '#2E6B2A', onAccent: '#FFFFFF', link: '#27601F', pos: '#1B6E3A', neg: '#B0302F', settled: '#8C6A12' },
   },
 ]
 

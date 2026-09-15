@@ -434,6 +434,57 @@ small { font-size: .8125rem; color: var(--muted); }
 }
 @keyframes flag { from { transform: perspective(400px) rotateX(95deg); opacity: 0; } }
 
+/* Mango: Alphonso season, ripe and bouncy */
+[data-theme=mango] { --plico-bowl: #FFC53D; --elev: 0 2px 0 #F2CF78, 0 12px 24px -12px rgb(160 80 0 / .28); --elev-hi: 0 2px 0 #F2CF78, 0 18px 30px -12px rgb(160 80 0 / .38); }
+[data-theme=mango] .hero-num { font-weight: 700; letter-spacing: -.02em; --fit: 132; }
+[data-theme=mango] .ornament.pieces .pc-a { fill: color-mix(in srgb, #FFB020 30%, transparent); }
+[data-theme=mango] .ornament.pieces .pc-b { fill: color-mix(in srgb, #F76707 22%, transparent); }
+[data-theme=mango] .ornament.pieces .pc-c { fill: color-mix(in srgb, #2F9E44 35%, transparent); }
+[data-theme=mango] .section-head h2 { font-weight: 700; font-size: 1.1875rem; }
+[data-theme=mango] .cat { background: #FFE0A3; }
+@media (prefers-reduced-motion: no-preference) {
+  [data-theme=mango] .seal-svg { animation-name: slap; }
+}
+
+/* Diwali: a night of lamps, gold light that glows */
+[data-theme=diwali] { --plico-bowl: #F4B63F; --elev: 0 14px 32px -12px rgb(0 0 0 / .75), 0 0 0 1px #2E2444; --elev-hi: 0 20px 40px -12px rgb(0 0 0 / .8), 0 0 0 1px #5A4520; }
+[data-theme=diwali] .hero-num { font-weight: 400; letter-spacing: -.01em; --fit: 128; text-shadow: 0 0 28px rgb(244 182 63 / .45); }
+[data-theme=diwali] .ornament { color: #F4B63F; opacity: .3; }
+[data-theme=diwali] .ornament circle { stroke-width: 1; }
+[data-theme=diwali] .section-head h2 { font-family: var(--num); font-weight: 400; font-size: 1.3125rem; }
+[data-theme=diwali] .fab { box-shadow: 0 0 0 1px #FFD98A, 0 8px 28px -4px rgb(244 182 63 / .6); }
+@media (prefers-reduced-motion: no-preference) {
+  [data-theme=diwali] .seal-svg { animation-name: bloom; }
+  [data-theme=diwali] .ornament circle { animation: glow 3.2s ease-in-out infinite alternate; }
+}
+@keyframes glow { from { opacity: .55; } to { opacity: 1; } }
+
+/* Holi: gulal in the air, colour everywhere but on the money */
+[data-theme=holi] { --plico-bowl: #FFC53D; }
+[data-theme=holi] .hero-num { font-weight: 800; letter-spacing: -.03em; }
+[data-theme=holi] .ornament.pieces .pc-a { fill: color-mix(in srgb, #E64980 22%, transparent); }
+[data-theme=holi] .ornament.pieces .pc-b { fill: color-mix(in srgb, #4DABF7 26%, transparent); }
+[data-theme=holi] .ornament.pieces .pc-c { fill: color-mix(in srgb, #FAB005 45%, transparent); }
+[data-theme=holi] .slips li:nth-child(4n+1) .slip-kind { box-shadow: 0 0 0 3px #FFD8E8; }
+[data-theme=holi] .slips li:nth-child(4n+2) .slip-kind { box-shadow: 0 0 0 3px #FFEC99; }
+[data-theme=holi] .slips li:nth-child(4n+3) .slip-kind { box-shadow: 0 0 0 3px #D3F9D8; }
+[data-theme=holi] .slips li:nth-child(4n+4) .slip-kind { box-shadow: 0 0 0 3px #D0EBFF; }
+[data-theme=holi] .section-head h2 { font-weight: 800; }
+@media (prefers-reduced-motion: no-preference) {
+  [data-theme=holi] .seal-svg { animation-name: slap; }
+}
+
+/* Onam: kasavu cream with a gold edge, pookalam rings */
+[data-theme=onam] { --plico-bowl: #E0B84A; --elev: 0 0 0 1px #E3D5A1, inset 0 -3px 0 #C9A227; --elev-hi: 0 0 0 1px #C9A227, inset 0 -3px 0 #C9A227, 0 12px 24px -12px rgb(90 70 10 / .3); }
+[data-theme=onam] .hero-num { font-weight: 700; font-stretch: 90%; letter-spacing: -.02em; --fit: 150; }
+[data-theme=onam] .ornament { opacity: .26; }
+[data-theme=onam] .ornament circle:nth-child(3n+1) { stroke: #E8590C; }
+[data-theme=onam] .ornament circle:nth-child(3n+2) { stroke: #F2B705; }
+[data-theme=onam] .ornament circle:nth-child(3n) { stroke: #2E6B2A; }
+[data-theme=onam] .ornament circle { stroke-width: 1.6; }
+[data-theme=onam] .section-head h2 { font-family: var(--num); font-weight: 700; }
+[data-theme=onam] .bar { box-shadow: inset 0 -2px 0 #C9A227; }
+
 /* ============ theme gallery (review surface) ============ */
 .gallery { min-height: 100dvh; background: var(--bg); padding-bottom: 96px; }
 .g-head { max-width: 1400px; margin: 0 auto; padding: 36px 24px 8px; }

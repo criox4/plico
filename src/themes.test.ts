@@ -19,6 +19,6 @@ for (const t of THEMES) {
     if (r < min) fails.push(`${t.id} ${n} ${r.toFixed(2)} < ${min}`)
   }
 }
-assert.equal(new Set(THEMES.map(t => t.id)).size, 12)
+assert.equal(new Set(THEMES.map(t => t.id)).size, 16)
 assert.deepEqual(fails, [])
 console.log('themes ok')

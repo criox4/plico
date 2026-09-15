@@ -62,7 +62,7 @@ export default function Gallery() {
     <div className="gallery" data-theme="classic" style={themeVars('classic')}>
       <header className="g-head">
         <Wordmark />
-        <h1>Twelve themes, one ledger.</h1>
+        <h1>Sixteen themes, one ledger.</h1>
         <p>
           Each theme changes type, shape, texture, icon stroke, motion and the moment a group settles. What money means never changes:
           green is owed to you, red is what you owe, and the settled colour marks only things that are settled.
