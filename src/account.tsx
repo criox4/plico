@@ -131,6 +131,8 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
     await signedIn(r.data.user)
   })
   const google = () => run(() => googleSignIn(sync.googleWebClientId, sync.googleIosClientId))
+  // App Store 4.8: offering Google sign-in on iOS requires Sign in with Apple too. Until that's added, iOS is email-only.
+  const showGoogle = sync.google && Capacitor.getPlatform() !== 'ios'
   const to = (next: Step) => { setStep(next); setErr('') }
 
   useEffect(() => ensureFonts(['classic']), [])
@@ -150,7 +152,7 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
           </ul>
         </div>
         <div className="welcome-actions">
-          {sync.google && <button className="btn google" disabled={busy} onClick={() => void google()}><GoogleG />Continue with Google</button>}
+          {showGoogle && <button className="btn google" disabled={busy} onClick={() => void google()}><GoogleG />Continue with Google</button>}
           <button className="btn primary" onClick={() => to('signup')}>Create an account</button>
           <button className="btn secondary" onClick={() => to('signin')}>I already have an account</button>
           {err && <p className="error" role="alert">{err}</p>}
@@ -167,7 +169,7 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
           <p className="muted-p">If <strong>{email}</strong> has a Plico account, a link to choose a new password is on its way. It works for one hour.</p>
           <button className="btn secondary" onClick={() => to('signin')}>Back to sign in</button>
         </> : <>
-          {sync.google && step !== 'forgot' && <>
+          {showGoogle && step !== 'forgot' && <>
             <button className="btn google" disabled={busy} onClick={() => void google()}><GoogleG />Continue with Google</button>
             <p className="or"><span>or with email</span></p>
           </>}
