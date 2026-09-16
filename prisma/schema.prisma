@@ -24,6 +24,11 @@ model User {
   phone         String?
   theme         String?   @default("classic")
   tone          String?   @default("gentle")
+  ageGroup          String? /// "adult" (18+) or "teen" (13-17); null until the person answers
+  guardianEmail     String? /// a teen's parent or guardian, who must consent (DPDP Act s.9)
+  guardianName      String?
+  guardianConsentAt DateTime?
+  aiConsentAt       DateTime? /// agreed to send photos/sentences to the AI reader; null = not asked or withdrawn
   sessions      Session[]
   accounts      Account[]
   members       Member[]

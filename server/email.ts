@@ -98,6 +98,11 @@ export const mail = {
       text: `${payee} says your ${amt} in “${group}” hasn’t arrived. Check your UPI app, then pay again or share the transaction ID: ${APP}/#/`,
     })
   },
+  guardian: (to: string, child: string, childEmail: string, url: string) => sendEmail({
+    to, subject: `${child} would like to use Plico: your consent is needed`,
+    html: layout(`Can ${child} use Plico?`, `${esc(child)} (${esc(childEmail)}) signed up for Plico, an app for splitting shared expenses with friends and family and settling up over UPI. They said they are between 13 and 17, so under India’s Digital Personal Data Protection Act we need a parent or guardian to agree before they can use it. Plico has no ads and never sells or tracks data. Open the link to read what Plico collects and to agree or decline. If you decline, their account is deleted.`, { label: 'Review and decide', url }),
+    text: `${child} (${childEmail}) signed up for Plico and said they are 13-17, so a parent or guardian needs to agree before they can use it (India’s DPDP Act). Review what Plico collects and agree or decline: ${url}\nIf you decline, their account is deleted. Questions: privacy@plico.space`,
+  }),
   emailChanged: (to: string, newEmail: string, url: string) => sendEmail({
     to, subject: 'Confirm your new Plico email',
     html: layout('Confirm the email change', `Your Plico account is changing its email to <strong>${esc(newEmail)}</strong>. If that’s you, confirm below. If not, change your password now.`, { label: 'Confirm change', url }),

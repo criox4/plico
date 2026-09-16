@@ -2,12 +2,12 @@ import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'r
 import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { update, useStore, type State } from './store'
-import { api, pull, readExpense, uploadImage, useSync, type Read } from './sync'
+import { api, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
 import { Avatar, Converge, Denomination, EMOJI, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
-import { AccountHub, AppearancePage, AuthFlow, Claim, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
+import { AccountHub, AgeGate, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
 
@@ -28,14 +28,17 @@ export default function App() {
   if (r[0] === 'themes') return <Gallery />
   if (r[0] === 's') return <SharedPay p={r[1] ?? ''} />
   if (r[0] === 'reset') return <ResetPassword />
+  if (r[0] === 'guardian' && r[1]) return <GuardianConsent token={r[1]} />
   if (sync.booting) return <Splash />
   if (!sync.authed) return <AuthFlow s={s} notice={r[0] === 'verified' ? 'Email verified. Sign in to continue.' : undefined} />
+  if (s.user && !s.user.ageGroup) return <AgeGate s={s} />
+  if (s.user?.ageGroup === 'teen' && !s.user.guardianConsent) return <GuardianWait s={s} />
   if (r[0] === 'verified') return <Verified />
   if (r[0] === 'claim' && r[1]) return <Claim s={s} token={r[1]} />
   if (r[0] === 'delete' && r[1]) return <DeleteConfirm s={s} token={r[1]} />
   if (r[0] === 'join' && r[1]) return <JoinGroup s={s} code={r[1]} />
   if (r[0] === 'me') {
-    const Page = { profile: ProfilePage, theme: AppearancePage, tone: RemindersPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage }[r[1] ?? '']
+    const Page = { profile: ProfilePage, theme: AppearancePage, tone: RemindersPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage, privacy: PrivacyPage }[r[1] ?? '']
     return Page ? <Page key={r[1]} s={s} /> : <AccountHub s={s} />
   }
   if (r[0] === 'import') return <ImportSplitwise s={s} />
@@ -162,12 +165,13 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   const [capErr, setCapErr] = useState('')
   const [items, setItems] = useState<Item[] | null>(null)
   const [extras, setExtras] = useState(0)
+  const [askAi, setAskAi] = useState<Blob | null>(null) // a photo waiting for the one-time AI consent
 
   useEffect(() => { if (eid && !old) location.replace('#/g/' + g.id) }, [eid, old, g.id])
   useEffect(() => {
     if (!shared) return
     void takeShared().then(p => {
-      if (p?.image) void scan(p.image)
+      if (p?.image) scan(p.image)
       else if (p?.text) { setQuick(p.text.slice(0, 200)); void typeIt(p.text.slice(0, 200)) }
     })
   }, [shared]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -212,12 +216,16 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   const typeIt = async (text = quick) => {
     if (!text.trim()) return
     applyQuick(parseQuick(text, g.members)) // instant and offline; AI refines when it can
-    if (!sync.ai || !navigator.onLine) return
+    if (!sync.ai || !s.user?.ai || !navigator.onLine) return // AI only with consent (Privacy and data)
     setReading(true); setCapErr('')
     try { fromRead(await readExpense({ text, groupId: g.id })) } catch { /* the rule-based read already filled what it could */ } finally { setReading(false) }
   }
-  const scan = async (f: Blob) => {
+  const scan = (f: Blob) => {
     if (!sync.ai) return setCapErr('Reading photos isn’t set up yet. Type it in instead.')
+    if (!s.user?.ai) return setAskAi(f)
+    void readPhoto(f)
+  }
+  const readPhoto = async (f: Blob) => {
     setReading(true); setCapErr('')
     try {
       const [r] = await Promise.all([readExpense({ image: f, groupId: g.id }),
@@ -283,10 +291,23 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
             <input className="quick-in" placeholder="Type it: Dinner 3200, Karan paid, except Riya" aria-label="Type the expense in a sentence" value={quick} maxLength={200}
               enterKeyHint="done" onChange={e => setQuick(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void typeIt() } }} onBlur={() => void typeIt()} />
             <label className="iconbtn scan" aria-label="Scan a receipt or screenshot" title="Scan a receipt or screenshot">
-              <input type="file" accept="image/*" className="sr-only" disabled={reading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void scan(f) }} />
+              <input type="file" accept="image/*" className="sr-only" disabled={reading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) scan(f) }} />
               <Icon n="qr" />
             </label>
           </div>
+        )}
+        {askAi && (
+          <section className="confirm-card" aria-label="Read it with AI?">
+            <p><strong>Read it with AI?</strong>
+              <small>Plico sends this photo and the first names in {g.name} to OpenRouter, which runs an OpenAI model to read the amount and items. Only providers that don’t store or train on it are used. You can turn this off in Privacy and data.</small></p>
+            <span className="debt-actions">
+              <button type="button" className="btn-sm" onClick={async () => {
+                const f = askAi; setAskAi(null)
+                try { await api('/api/me/ai', { method: 'POST', body: JSON.stringify({ consent: true }) }); await refreshUser(); void readPhoto(f!) } catch (e) { setCapErr((e as Error).message) }
+              }}>Allow and read</button>
+              <button type="button" className="btn-sm ghost" onClick={() => setAskAi(null)}>Not now</button>
+            </span>
+          </section>
         )}
         {reading && <p className="reading" role="status"><Plico mood="thinking" size={28} />Reading it…</p>}
         {capErr && <p className="error" role="alert">{capErr}</p>}

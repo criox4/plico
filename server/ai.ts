@@ -38,6 +38,8 @@ export async function readExpense(input: { text?: string; image?: string; member
     headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': process.env.PUBLIC_URL || 'https://plico.space', 'X-Title': 'Plico' },
     body: JSON.stringify({
       model: MODEL, temperature: 0,
+      // Only route to providers that don't store or train on prompts.
+      provider: { data_collection: 'deny' },
       messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],
       response_format: { type: 'json_schema', json_schema: { name: 'expense', strict: true, schema: SCHEMA } },
     }),

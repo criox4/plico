@@ -105,6 +105,9 @@ function queueNow() {
 const headers = (): Record<string, string> => ({ 'Content-Type': 'application/json', ...(token.get() && { Authorization: `Bearer ${token.get()}` }) })
 const req = (path: string, init: RequestInit = {}) => fetch(API + path, { ...init, headers: headers(), credentials: 'include' })
 
+/** Push queued changes now (e.g. right after a parent's consent unlocks the account). */
+export const syncNow = () => flush()
+
 async function flush() {
   if (flushing || !status.authed) return
   flushing = true
@@ -119,6 +122,8 @@ async function flush() {
       }
       if (res.status === 401) return expired()
       if (res.status >= 500) return setStatus({ error: 'The server had trouble. Your changes are safe and will retry.' })
+      // Waiting on the age question or a parent's consent: keep everything and try again once it's sorted.
+      if (res.status === 403 && /"code":"(age|guardian)"/.test(await res.clone().text())) return
       // The server refused this change (validation, permissions). Drop it; the pull below restores the truth.
       if (!res.ok) console.warn('Server rejected change', op, await res.text())
       outbox.shift()
@@ -226,7 +231,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 // ---------- auth lifecycle ----------
-type AuthUser = { id: string; email: string; name: string; phone?: string | null; emailVerified?: boolean; image?: string | null; upi?: string | null; theme?: string | null; tone?: string | null }
+type AuthUser = { id: string; email: string; name: string; phone?: string | null; emailVerified?: boolean; image?: string | null; upi?: string | null; theme?: string | null; tone?: string | null
+  ageGroup?: string | null; guardianEmail?: string | null; guardianConsentAt?: string | Date | null; aiConsentAt?: string | Date | null }
+/** The account facts the app gates on (age, parental consent, AI consent). */
+const gates = (u: AuthUser) => ({ ageGroup: u.ageGroup ?? null, guardianEmail: u.guardianEmail ?? null, guardianConsent: !!u.guardianConsentAt, ai: !!u.aiConsentAt })
 
 /** After sign-in/up: adopt the account's profile, upload anything made on this device before, then sync. */
 export async function signedIn(u: AuthUser) {
@@ -235,7 +243,7 @@ export async function signedIn(u: AuthUser) {
   if (local.user && local.user.id !== u.id) { outbox = []; saveOutbox() } // different account: don't leak data across
   setRemote(d => {
     if (local.user && local.user.id !== u.id) Object.assign(d, structuredClone(blank))
-    d.user = { id: u.id, email: u.email, emailVerified: !!u.emailVerified, image: u.image }
+    d.user = { id: u.id, email: u.email, emailVerified: !!u.emailVerified, image: u.image, ...gates(u) }
     d.me.name = u.name || d.me.name
     d.me.upi = u.upi || d.me.upi
     d.me.phone = u.phone || d.me.phone
@@ -264,7 +272,7 @@ function expired() {
 export async function refreshUser() {
   const r = await authClient.getSession().catch(() => null)
   const u = r?.data?.user
-  if (u) setRemote(d => { if (d.user) Object.assign(d.user, { email: u.email, emailVerified: u.emailVerified, image: u.image }); d.me.name = u.name || d.me.name })
+  if (u) setRemote(d => { if (d.user) Object.assign(d.user, { email: u.email, emailVerified: u.emailVerified, image: u.image, ...gates(u as AuthUser) }); d.me.name = u.name || d.me.name })
   return u
 }
 

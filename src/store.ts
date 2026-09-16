@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { uid, type Group, type Theme, type Tone } from './logic'
 
 export type State = {
-  user?: { id: string; email: string; emailVerified?: boolean; image?: string | null }
+  user?: { id: string; email: string; emailVerified?: boolean; image?: string | null; ageGroup?: string | null; guardianEmail?: string | null; guardianConsent?: boolean; ai?: boolean }
   me: { name: string; upi: string; phone?: string }
   theme: Theme
   tone: Tone

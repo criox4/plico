@@ -3,8 +3,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { inr, isVpa, type Kind, type Tone } from './logic'
 import { update, type State } from './store'
-import { authClient } from './auth-client'
-import { api, isPhone, pull, refreshUser, signOut, signedIn, uploadImage, useSync } from './sync'
+import { api, isPhone, pull, refreshUser, signOut, signedIn, syncNow, uploadImage, useSync } from './sync'
+import { API, authClient, token } from './auth-client'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker } from './ui'
@@ -42,6 +42,120 @@ async function googleSignIn(webClientId: string | null, iosClientId: string | nu
   if (r.error) throw new Error(r.error.message)
   const u = (r.data as { user?: Parameters<typeof signedIn>[0] }).user ?? (await authClient.getSession()).data?.user
   if (u) await signedIn(u)
+}
+
+// ---------- age and parental consent (DPDP Act 2023 s.9: under-18s need a parent's verifiable consent) ----------
+type Age = 'adult' | 'teen' | 'child' | null
+export const legalUrl = (page: 'privacy' | 'terms' | 'cookies' | 'delete-account') => `${import.meta.env.VITE_PUBLIC_URL || location.origin}/${page}/`
+
+async function saveAge(age: Age, guardian: string) {
+  if (age !== 'adult' && age !== 'teen') throw new Error('Tell us how old you are.')
+  await api('/api/me/age', { method: 'POST', body: JSON.stringify({ group: age, ...(age === 'teen' && { guardianEmail: guardian.trim() }) }) })
+}
+
+function AgeFields({ age, setAge, guardian, setGuardian }: { age: Age; setAge: (a: Age) => void; guardian: string; setGuardian: (g: string) => void }) {
+  return <>
+    <fieldset className="field">
+      <legend>How old are you?</legend>
+      <div className="seg" role="radiogroup" aria-label="How old are you">
+        {([['adult', '18 or older'], ['teen', '13 to 17'], ['child', 'Under 13']] as const).map(([v, label]) =>
+          <button type="button" key={v} role="radio" aria-checked={age === v} className={age === v ? 'on' : ''} onClick={() => setAge(v)}>{label}</button>)}
+      </div>
+      {age === 'child' && <small className="error">Plico is for people 13 and older. Ask a parent to add you to their group as a guest instead.</small>}
+    </fieldset>
+    {age === 'teen' && (
+      <label className="field"><span>Parent or guardian’s email</span>
+        <input type="email" value={guardian} onChange={e => setGuardian(e.target.value)} autoCapitalize="none" required />
+        <small>We’ll ask them to agree before you can use Plico. The law in India needs a parent’s consent for anyone under 18.</small>
+      </label>
+    )}
+  </>
+}
+
+/** Accounts that never said their age (Google sign-in, older accounts) answer once. */
+export function AgeGate({ s }: { s: State }) {
+  const [age, setAge] = useState<Age>(null)
+  const [guardian, setGuardian] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const go = async () => {
+    setBusy(true); setErr('')
+    try { await saveAge(age, guardian); await refreshUser(); void syncNow() } catch (e) { setErr(msg(e)) } finally { setBusy(false) }
+  }
+  return (
+    <Screen t={s.theme} title="One quick question">
+      <form className="form auth" onSubmit={e => { e.preventDefault(); void go() }}>
+        <p className="muted-p">We ask everyone once. People under 18 need a parent’s consent to use Plico.</p>
+        <AgeFields age={age} setAge={setAge} guardian={guardian} setGuardian={setGuardian} />
+        {err && <p className="error" role="alert">{err}</p>}
+        <button className="btn primary" disabled={busy || !age || age === 'child'}>Continue</button>
+        <button type="button" className="link center-link" onClick={() => void signOut()}>Sign out</button>
+      </form>
+    </Screen>
+  )
+}
+
+/** A 13-17 year old waiting for their parent. Checks back whenever the app comes to the front. */
+export function GuardianWait({ s }: { s: State }) {
+  const [email, setEmail] = useState('')
+  const [note, setNote] = useState('')
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    const check = () => void refreshUser().then(u => { if ((u as { guardianConsentAt?: unknown } | undefined)?.guardianConsentAt) void syncNow() })
+    const id = setInterval(check, 15000)
+    window.addEventListener('focus', check)
+    return () => { clearInterval(id); window.removeEventListener('focus', check) }
+  }, [])
+  const resend = async (to?: string) => {
+    setErr(''); setNote('')
+    try { await api('/api/me/guardian', { method: 'POST', body: JSON.stringify(to ? { email: to } : {}) }); await refreshUser(); setNote('Sent. Ask them to check their inbox (and spam).'); setEmail('') } catch (e) { setErr(msg(e)) }
+  }
+  return (
+    <Screen t={s.theme} title="Almost there">
+      <div className="form auth">
+        <div className="hello"><Plico mood="thinking" size={56} /><p><strong>Waiting for your parent</strong>We emailed {s.user?.guardianEmail ?? 'your parent'}. Once they agree, Plico opens up here by itself.</p></div>
+        {note && <p className="notice" role="status">{note}</p>}
+        {err && <p className="error" role="alert">{err}</p>}
+        <button className="btn secondary" onClick={() => void resend()}>Send the email again</button>
+        <label className="field"><span>Wrong email?</span><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="parent@example.com" autoCapitalize="none" /></label>
+        <button className="btn secondary" disabled={!email.trim()} onClick={() => void resend(email.trim())}>Send to this email</button>
+        <button className="link center-link" onClick={() => void signOut()}>Sign out</button>
+      </div>
+    </Screen>
+  )
+}
+
+/** The parent's side, from the email link. Public: parents don't need an account. */
+export function GuardianConsent({ token }: { token: string }) {
+  const [child, setChild] = useState<{ name: string; email: string } | null>(null)
+  const [err, setErr] = useState('')
+  const [name, setName] = useState('')
+  const [adult, setAdult] = useState(false)
+  const [done, setDone] = useState<'' | 'yes' | 'no'>('')
+  useEffect(() => { ensureFonts(['classic']); api<{ child: { name: string; email: string } }>(`/api/guardian/${token}`).then(r => setChild(r.child)).catch(e => setErr(msg(e))) }, [token])
+  const decide = async (consent: boolean) => {
+    if (!consent && !confirm(`Decline and delete ${child?.name}’s Plico account?`)) return
+    setErr('')
+    try { await api(`/api/guardian/${token}`, { method: 'POST', body: JSON.stringify({ consent, name: name.trim(), adult }) }); setDone(consent ? 'yes' : 'no') } catch (e) { setErr(msg(e)) }
+  }
+  return (
+    <Screen t="classic" title="Parental consent">
+      <div className="form auth">
+        {done === 'yes' ? <><div className="hello"><Plico mood="settled" size={56} /><p><strong>Thank you</strong>{child?.name} can use Plico now. You can withdraw consent any time by writing to privacy@plico.space; their account will then be deleted.</p></div></>
+        : done === 'no' ? <p className="notice">Declined. {child?.name}’s account and data have been deleted.</p>
+        : !child ? <p className={err ? 'error' : 'muted-p'}>{err || 'Opening…'}</p> : <>
+          <h1 className="q">{child.name} would like to use Plico</h1>
+          <p className="muted-p">{child.name} ({child.email}) signed up and said they are between 13 and 17. Plico keeps track of shared expenses with friends and family and helps settle up over UPI. It never moves money itself, shows no ads, and never sells or tracks data.</p>
+          <p className="muted-p">With your consent Plico stores {child.name}’s name, email, the groups and expenses they add, and any photos they attach. Read the <a className="link" href={legalUrl('privacy')} target="_blank" rel="noopener">Privacy Policy</a> for everything.</p>
+          <label className="field"><span>Your full name</span><input value={name} onChange={e => setName(e.target.value)} autoComplete="name" /></label>
+          <label className="check"><input type="checkbox" checked={adult} onChange={e => setAdult(e.target.checked)} />I am {child.name}’s parent or legal guardian, and I am 18 or older.</label>
+          {err && <p className="error" role="alert">{err}</p>}
+          <button className="btn primary" disabled={!adult || name.trim().length < 2} onClick={() => void decide(true)}>I agree</button>
+          <button className="btn secondary" onClick={() => void decide(false)}>Decline and delete the account</button>
+        </>}
+      </div>
+    </Screen>
+  )
 }
 
 // ---------- welcome showcase: sample groups, each in its own theme, settling in turn ----------
@@ -109,6 +223,8 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
   const [name, setName] = useState(s.me.name)
   const [email, setEmail] = useState(s.user?.email ?? '')
   const [password, setPassword] = useState('')
+  const [age, setAge] = useState<Age>(null)
+  const [guardian, setGuardian] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(sync.error)
   const invited = /^#\/(claim|join)\//.test(location.hash)
@@ -124,11 +240,14 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
       if (r.error) throw new Error(r.error.message)
       return setStep('sent')
     }
+    if (step === 'signup' && (!age || age === 'child')) throw new Error(age === 'child' ? 'Plico is for people 13 and older.' : 'Tell us how old you are.')
     const r = step === 'signup'
       ? await authClient.signUp.email({ name: name.trim(), email: email.trim(), password, callbackURL: `${origin()}#/verified` })
       : await authClient.signIn.email({ email: email.trim(), password })
     if (r.error) throw new Error(r.error.status === 401 ? 'That email and password don’t match.' : r.error.message)
+    if (step === 'signup') await saveAge(age, guardian)
     await signedIn(r.data.user)
+    if (step === 'signup') await refreshUser() // pick up the age just saved
   })
   const google = () => run(() => googleSignIn(sync.googleWebClientId, sync.googleIosClientId))
   // App Store 4.8: offering Google sign-in on iOS requires Sign in with Apple too. Until that's added, iOS is email-only.
@@ -156,6 +275,7 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
           <button className="btn primary" onClick={() => to('signup')}>Create an account</button>
           <button className="btn secondary" onClick={() => to('signin')}>I already have an account</button>
           {err && <p className="error" role="alert">{err}</p>}
+          <p className="legal-line center"><a href={legalUrl('privacy')} target="_blank" rel="noopener">Privacy</a> · <a href={legalUrl('terms')} target="_blank" rel="noopener">Terms</a></p>
         </div>
       </div>
     )
@@ -189,8 +309,10 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
                 {step === 'signup' && <small>At least 8 characters.</small>}
               </label>
             )}
+            {step === 'signup' && <AgeFields age={age} setAge={setAge} guardian={guardian} setGuardian={setGuardian} />}
+            {step === 'signup' && <p className="legal-line">By creating an account you agree to the <a href={legalUrl('terms')} target="_blank" rel="noopener">Terms</a> and <a href={legalUrl('privacy')} target="_blank" rel="noopener">Privacy Policy</a>.</p>}
             {err && <p className="error" role="alert">{err}</p>}
-            <button className="btn primary" disabled={busy}>
+            <button className="btn primary" disabled={busy || (step === 'signup' && age === 'child')}>
               {busy ? 'One moment…' : { signup: 'Create account', signin: 'Sign in', forgot: 'Send reset link' }[step]}
             </button>
           </form>
@@ -342,7 +464,8 @@ export function AccountHub({ s }: { s: State }) {
       <ol className="ledger">
         <Row icon="user" title="Profile" sub={[s.me.phone, s.me.upi].filter(Boolean).join(' · ') || 'Name, phone, UPI ID'} to="/me/profile" />
         <Row icon="settings" title="Appearance" sub={`${theme(s.theme).name} theme`} to="/me/theme" />
-        <Row icon="bell" title="Reminders" sub={`${s.tone[0].toUpperCase()}${s.tone.slice(1)} tone`} to="/me/tone" />
+        <Row icon="bell" title="Reminders" sub={`${{ normal: 'Normal', gentle: 'Friendly', shameless: 'Playful' }[s.tone]} tone`} to="/me/tone" />
+        <Row icon="lock" title="Privacy and data" sub="AI reading, download your data, policies" to="/me/privacy" />
         <Row icon="lock" title="Email and password" sub="Change email, change password" to="/me/security" />
         <Row icon="phone" title="Devices" sub="Where you’re signed in" to="/me/devices" />
       </ol>
@@ -393,6 +516,44 @@ function AvatarPicker({ s }: { s: State }) {
       </div>
       {err && <p className="error" role="alert">{err}</p>}
     </section>
+  )
+}
+
+export function PrivacyPage({ s }: { s: State }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const setAi = async (consent: boolean) => {
+    setBusy(true); setErr('')
+    try { await api('/api/me/ai', { method: 'POST', body: JSON.stringify({ consent }) }); await refreshUser() } catch (e) { setErr(msg(e)) } finally { setBusy(false) }
+  }
+  const download = async () => {
+    setBusy(true); setErr('')
+    try {
+      const res = await fetch(API + '/api/me/export', { credentials: 'include', headers: token.get() ? { Authorization: `Bearer ${token.get()}` } : {} })
+      if (!res.ok) throw new Error('Couldn’t prepare your data. Try again.')
+      const file = new File([await res.blob()], 'plico-export.json', { type: 'application/json' })
+      if (Capacitor.isNativePlatform() && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: 'Your Plico data' })
+      else { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000) }
+    } catch (e) { if ((e as Error).name !== 'AbortError') setErr(msg(e)) } finally { setBusy(false) }
+  }
+  return (
+    <Page s={s} title="Privacy and data">
+      <h2 className="form-h">AI reading</h2>
+      <label className="check"><input type="checkbox" checked={!!s.user?.ai} disabled={busy} onChange={e => void setAi(e.target.checked)} />Read receipts, screenshots and typed expenses with AI</label>
+      <p className="muted-p">When on, the photo or sentence and the first names in that group go to OpenRouter, which runs an OpenAI model to read it. Only providers that don’t store or train on it are used. When off, typing still works on your phone and nothing is sent.</p>
+      <h2 className="form-h">Your data</h2>
+      <button className="btn secondary" disabled={busy} onClick={() => void download()}>Download my data</button>
+      <p className="muted-p">A JSON file with your account, groups, expenses and sign-in history. To delete everything, use Delete account.</p>
+      {s.user?.ageGroup === 'teen' && <p className="notice">A parent or guardian gave consent for this account. They can withdraw it at privacy@plico.space.</p>}
+      {err && <p className="error" role="alert">{err}</p>}
+      <h2 className="form-h">Policies</h2>
+      <ul className="legal-links">
+        <li><a className="link" href={legalUrl('privacy')} target="_blank" rel="noopener">Privacy Policy</a></li>
+        <li><a className="link" href={legalUrl('terms')} target="_blank" rel="noopener">Terms of Use</a></li>
+        <li><a className="link" href={legalUrl('cookies')} target="_blank" rel="noopener">Cookies and storage</a></li>
+        <li><a className="link" href="mailto:privacy@plico.space">privacy@plico.space</a> (privacy questions and grievances)</li>
+      </ul>
+    </Page>
   )
 }
 

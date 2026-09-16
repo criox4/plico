@@ -4,7 +4,7 @@ import { cors } from 'hono/cors'
 import { bodyLimit } from 'hono/body-limit'
 import { secureHeaders } from 'hono/secure-headers'
 import { ORIGINS, auth } from './auth.ts'
-import { api } from './api.ts'
+import { api, publicApi } from './api.ts'
 import { BUCKET, getFile } from './storage.ts'
 import { aiReady } from './ai.ts'
 
@@ -37,6 +37,7 @@ app.get('/api/files/avatars/:uid/:name', async c => {
   if (!f) return c.notFound()
   return c.body(new Uint8Array(f.body), 200, { 'content-type': f.type, 'cache-control': 'public, max-age=31536000, immutable' })
 })
+app.route('/api', publicApi)
 app.route('/api', api)
 app.get('/health', c => c.text('ok'))
 

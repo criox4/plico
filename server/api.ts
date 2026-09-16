@@ -11,6 +11,34 @@ import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
 
 type Env = { Variables: { userId: string; userName: string } }
+// Public (no sign-in): a parent opening the consent link from their email.
+export const publicApi = new Hono()
+const guardianToken = async (token: string) => {
+  if (!/^[a-f0-9]{64}$/.test(token)) return null
+  const v = await db.verification.findFirst({ where: { value: token, identifier: { startsWith: 'guardian:' }, expiresAt: { gt: new Date() } } })
+  if (!v) return null
+  const user = await db.user.findUnique({ where: { id: v.identifier.slice(9) }, select: { id: true, name: true, email: true, guardianConsentAt: true } })
+  return user && !user.guardianConsentAt ? { v, user } : null
+}
+publicApi.get('/guardian/:token', async c => {
+  const t = await guardianToken(c.req.param('token'))
+  return t ? c.json({ child: { name: t.user.name, email: t.user.email } }) : c.json({ error: 'This link has expired or was already used' }, 404)
+})
+publicApi.post('/guardian/:token', async c => {
+  const b = z.object({ consent: z.boolean(), name: z.string().trim().min(2).max(80).optional(), adult: z.boolean().optional() }).parse(await c.req.json())
+  const t = await guardianToken(c.req.param('token'))
+  if (!t) return c.json({ error: 'This link has expired or was already used' }, 404)
+  await db.verification.delete({ where: { id: t.v.id } })
+  if (!b.consent) {
+    // Without consent we can't keep a minor's data: the account goes (shared groups keep them as a guest).
+    await db.user.delete({ where: { id: t.user.id } })
+    return c.json({ ok: true, deleted: true })
+  }
+  if (!b.name || !b.adult) return c.json({ error: 'Add your name and confirm you’re their parent or guardian, 18 or older' }, 400)
+  await db.user.update({ where: { id: t.user.id }, data: { guardianConsentAt: new Date(), guardianName: b.name } })
+  return c.json({ ok: true })
+})
+
 export const api = new Hono<Env>()
 
 const Id = z.string().regex(/^[\w:-]{1,64}$/)
@@ -44,7 +72,73 @@ api.use('*', async (c, next) => {
   if (!s) return c.json({ error: 'Sign in first' }, 401)
   c.set('userId', s.user.id)
   c.set('userName', s.user.name)
+  // Age gate (DPDP Act s.9): nobody uses Plico before saying how old they are, and 13-17 year olds wait for a parent.
+  const u = s.user as typeof s.user & { ageGroup?: string | null; guardianConsentAt?: Date | null }
+  const open = /^\/api\/me\/(age|guardian|export)$/.test(c.req.path)
+  if (!open && !u.ageGroup) return c.json({ error: 'Tell us your age first', code: 'age' }, 403)
+  if (!open && u.ageGroup === 'teen' && !u.guardianConsentAt) return c.json({ error: 'Waiting for a parent’s consent', code: 'guardian' }, 403)
   await next()
+})
+
+// ---------- age, parental consent, AI consent, data export ----------
+const GuardianEmail = z.string().trim().toLowerCase().max(254).refine(v => z.email().safeParse(v).success, 'Enter your parent’s email')
+async function askGuardian(uid: string) {
+  const u = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { name: true, email: true, guardianEmail: true } })
+  if (!u.guardianEmail) return
+  const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
+  await db.verification.deleteMany({ where: { identifier: `guardian:${uid}` } })
+  await db.verification.create({ data: { id: crypto.randomUUID(), identifier: `guardian:${uid}`, value: token, expiresAt: new Date(Date.now() + 14 * 864e5) } })
+  void mail.guardian(u.guardianEmail, u.name, u.email, `${APP}/#/guardian/${token}`).catch(console.error)
+}
+
+api.post('/me/age', async c => {
+  const b = z.object({ group: z.enum(['adult', 'teen']), guardianEmail: GuardianEmail.optional() }).parse(await c.req.json())
+  const uid = c.get('userId')
+  const u = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { ageGroup: true, email: true } })
+  if (u.ageGroup && u.ageGroup !== b.group) return c.json({ error: 'Your age is already set. If it’s wrong, write to privacy@plico.space.' }, 409)
+  if (b.group === 'teen' && !b.guardianEmail) return c.json({ error: 'Enter your parent’s email' }, 400)
+  if (b.group === 'teen' && b.guardianEmail === u.email.toLowerCase()) return c.json({ error: 'That’s your own email. We need your parent’s.' }, 400)
+  await db.user.update({ where: { id: uid }, data: { ageGroup: b.group, guardianEmail: b.group === 'teen' ? b.guardianEmail : null } })
+  if (b.group === 'teen') await askGuardian(uid)
+  return c.json({ ok: true })
+})
+
+// A teen can change the parent's email or resend the request (once a minute).
+api.post('/me/guardian', async c => {
+  const b = z.object({ email: GuardianEmail.optional() }).parse(await c.req.json().catch(() => ({})))
+  const uid = c.get('userId')
+  const u = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { ageGroup: true, guardianConsentAt: true, email: true } })
+  if (u.ageGroup !== 'teen' || u.guardianConsentAt) return c.json({ error: 'No consent needed' }, 409)
+  const last = await db.verification.findFirst({ where: { identifier: `guardian:${uid}` }, select: { createdAt: true } })
+  if (last && Date.now() - last.createdAt.getTime() < 60_000) return c.json({ error: 'Just sent. Try again in a minute.' }, 429)
+  if (b.email) {
+    if (b.email === u.email.toLowerCase()) return c.json({ error: 'That’s your own email. We need your parent’s.' }, 400)
+    await db.user.update({ where: { id: uid }, data: { guardianEmail: b.email } })
+  }
+  await askGuardian(uid)
+  return c.json({ ok: true })
+})
+
+api.post('/me/ai', async c => {
+  const { consent } = z.object({ consent: z.boolean() }).parse(await c.req.json())
+  await db.user.update({ where: { id: c.get('userId') }, data: { aiConsentAt: consent ? new Date() : null } })
+  return c.json({ ok: true })
+})
+
+// Everything we hold about you, as JSON (DPDP access right, GDPR access + portability).
+api.get('/me/export', async c => {
+  const uid = c.get('userId')
+  const user = await db.user.findUniqueOrThrow({ where: { id: uid } })
+  const sessions = await db.session.findMany({ where: { userId: uid }, select: { createdAt: true, expiresAt: true, ipAddress: true, userAgent: true } })
+  const accounts = await db.account.findMany({ where: { userId: uid }, select: { providerId: true, createdAt: true } })
+  const groups = await db.group.findMany({
+    where: { members: { some: { userId: uid } } },
+    select: { id: true, name: true, kind: true, theme: true, emoji: true, createdAt: true,
+      members: { select: { id: true, name: true, upi: true, email: true, phone: true, userId: true } },
+      expenses: { select: { id: true, title: true, cat: true, date: true, amount: true, settle: true, pending: true, rejected: true, receipt: true, createdAt: true, shares: { select: { memberId: true, paid: true, owed: true } } } } },
+  })
+  const data = { exportedAt: new Date(), note: 'Amounts are in paise (₹1 = 100 paise). Photos are listed by file name; download them from the app.', user, signIns: accounts, sessions, groups }
+  return c.body(JSON.stringify(data, null, 2), 200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="plico-export.json"' })
 })
 
 api.onError((e, c) => {
@@ -269,6 +363,8 @@ const ReadIn = z.object({
 const reads = new Map<string, number[]>() // ponytail: per-process limiter; move to the DB if we run several instances
 api.post('/ai/read', bodyLimit({ maxSize: 7 << 20, onError: c => c.json({ error: 'That photo is too large' }, 413) }), async c => {
   if (!aiReady()) return c.json({ error: 'Reading receipts isn’t set up yet' }, 503)
+  const me = await db.user.findUnique({ where: { id: c.get('userId') }, select: { aiConsentAt: true } })
+  if (!me?.aiConsentAt) return c.json({ error: 'Turn on AI reading first', code: 'ai-consent' }, 403)
   const b = ReadIn.parse(await c.req.json())
   const uid = c.get('userId'), now = Date.now()
   const recent = (reads.get(uid) ?? []).filter(t => now - t < 3600_000)

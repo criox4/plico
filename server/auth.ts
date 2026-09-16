@@ -25,6 +25,8 @@ export const auth = betterAuth({
   trustedOrigins: ORIGINS,
   // Brute-force protection on sign-in, sign-up and reset (per IP). Better Auth's own stricter per-path rules still apply.
   rateLimit: { enabled: true, window: 60, max: 60 },
+  // Behind Vercel the client IP arrives in a header the platform sets (clients can't spoof it there).
+  advanced: { ipAddress: { ipAddressHeaders: ['x-vercel-forwarded-for', 'x-forwarded-for'] } },
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,
@@ -45,6 +47,11 @@ export const auth = betterAuth({
       phone: { type: 'string', required: false },
       theme: { type: 'string', required: false, defaultValue: 'classic' },
       tone: { type: 'string', required: false, defaultValue: 'gentle' },
+      // Read-only to the client (set through /api/me/* so a teen can't un-teen themselves).
+      ageGroup: { type: 'string', required: false, input: false },
+      guardianEmail: { type: 'string', required: false, input: false },
+      guardianConsentAt: { type: 'date', required: false, input: false },
+      aiConsentAt: { type: 'date', required: false, input: false },
     },
     changeEmail: {
       enabled: true,
