@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { z } from 'zod'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
@@ -103,6 +104,9 @@ api.put('/groups/:gid/members/:mid', async c => {
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
   const m = await db.member.findUnique({ where: { id: mid } })
   if (m && m.groupId !== gid) return c.json(notFound, 404)
+  // Someone with an account owns their details. Letting others edit a joined person's UPI ID would let them
+  // redirect that person's incoming payments, so those edits are ignored (not errors: they may be stale outbox ops).
+  if (m?.userId && m.userId !== c.get('userId')) return c.json({ ok: true, ignored: true })
   const data = { name: b.name, upi: b.upi || null, email: b.email || null, phone: b.phone || null }
   if (m) await db.member.update({ where: { id: mid }, data })
   else await db.member.create({ data: { id: mid, groupId: gid, ...data } })
@@ -222,7 +226,7 @@ async function readImage(c: { req: { arrayBuffer: () => Promise<ArrayBuffer> } }
 }
 
 // Profile picture: replaces the old upload, sets user.image.
-api.post('/me/avatar', async c => {
+api.post('/me/avatar', bodyLimit({ maxSize: 3 << 20, onError: c => c.json({ error: 'Images up to 3 MB' }, 413) }), async c => {
   if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
   const img = await readImage(c, 3 << 20)
   if ('error' in img) return c.json({ error: img.error }, 400)
@@ -237,7 +241,7 @@ api.post('/me/avatar', async c => {
 })
 
 // Group files (receipts, covers): private, members only.
-api.post('/groups/:gid/files', async c => {
+api.post('/groups/:gid/files', bodyLimit({ maxSize: 6 << 20, onError: c => c.json({ error: 'Images up to 6 MB' }, 413) }), async c => {
   const gid = Id.parse(c.req.param('gid'))
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
   if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
@@ -263,7 +267,7 @@ const ReadIn = z.object({
   groupId: Id.optional(), today: Day,
 }).refine(b => b.text || b.image, 'Send a sentence or a photo')
 const reads = new Map<string, number[]>() // ponytail: per-process limiter; move to the DB if we run several instances
-api.post('/ai/read', async c => {
+api.post('/ai/read', bodyLimit({ maxSize: 7 << 20, onError: c => c.json({ error: 'That photo is too large' }, 413) }), async c => {
   if (!aiReady()) return c.json({ error: 'Reading receipts isn’t set up yet' }, 503)
   const b = ReadIn.parse(await c.req.json())
   const uid = c.get('userId'), now = Date.now()

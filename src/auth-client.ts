@@ -1,14 +1,19 @@
+import { Capacitor } from '@capacitor/core'
 import { createAuthClient } from 'better-auth/react'
 import { inferAdditionalFields } from 'better-auth/client/plugins'
 
 // Web: same origin (Vite proxies /api in dev). Native apps: set VITE_API_URL to the deployed https API.
 export const API = import.meta.env.VITE_API_URL || ''
 
-// Bearer token instead of cookies so the web app and the Capacitor apps authenticate the same way.
+// Web: the session lives in an httpOnly same-origin cookie, out of reach of scripts. Native apps can't rely on
+// cookies across origins, so they keep the bearer token (app-sandboxed storage).
+// ponytail: native token in WebView localStorage; move to Keychain/Keystore (secure-storage plugin) if the threat model grows.
 const KEY = 'splittr-token'
+const native = Capacitor.isNativePlatform()
+if (!native) localStorage.removeItem(KEY) // drop tokens stored by older web builds
 export const token = {
-  get: () => localStorage.getItem(KEY) ?? '',
-  set: (t: string) => localStorage.setItem(KEY, t),
+  get: () => (native ? localStorage.getItem(KEY) ?? '' : ''),
+  set: (t: string) => { if (native) localStorage.setItem(KEY, t) },
   clear: () => localStorage.removeItem(KEY),
 }
 

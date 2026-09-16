@@ -23,6 +23,8 @@ const google = googleIds.length && process.env.GOOGLE_CLIENT_SECRET
 export const auth = betterAuth({
   database: prismaAdapter(db, { provider: 'postgresql' }),
   trustedOrigins: ORIGINS,
+  // Brute-force protection on sign-in, sign-up and reset (per IP). Better Auth's own stricter per-path rules still apply.
+  rateLimit: { enabled: true, window: 60, max: 60 },
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,
