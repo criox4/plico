@@ -197,6 +197,7 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   const applyQuick = (q: Quick) => {
     if (q.amount) setAmt(String(q.amount / 100))
     if (q.title) setTitle(q.title.slice(0, 80))
+    if (q.cat) setCat(q.cat)
     if (q.payer) { setMulti(false); setPayer(q.payer) }
     if (q.people?.length) { setMode('equal'); setInp(Object.fromEntries(g.members.map(m => [m.id, q.people!.includes(m.id) ? '1' : '0']))) }
   }

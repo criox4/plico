@@ -78,10 +78,11 @@ console.log('splitwise ok')
 
 // quick add
 const mem = [{ id: ME, name: 'Me' }, { id: 'r', name: 'Riya Sen' }, { id: 'k', name: 'Karan' }, { id: 'a', name: 'Arjun' }]
-assert.deepEqual(parseQuick('Dinner 3200 paid by me split everyone except Riya', mem), { amount: 320000, payer: ME, people: [ME, 'k', 'a'], title: 'Dinner' })
-assert.deepEqual(parseQuick('Uber 850 me and Arjun only, Karan paid', mem), { amount: 85000, payer: 'k', people: [ME, 'a'], title: 'Uber' })
-assert.deepEqual(parseQuick('Rent 65k', mem), { amount: 6500000, title: 'Rent' })
-assert.deepEqual(parseQuick('₹1,450.50 groceries with riya', mem), { amount: 145050, people: [ME, 'r'], title: 'Groceries' })
+assert.deepEqual(parseQuick('Dinner 3200 paid by me split everyone except Riya', mem), { amount: 320000, payer: ME, people: [ME, 'k', 'a'], title: 'Dinner', cat: 'food' })
+assert.deepEqual(parseQuick('Uber 850 me and Arjun only, Karan paid', mem), { amount: 85000, payer: 'k', people: [ME, 'a'], title: 'Uber', cat: 'transport' })
+assert.deepEqual(parseQuick('Rent 65k', mem), { amount: 6500000, title: 'Rent', cat: 'rent' })
+assert.deepEqual(parseQuick('₹1,450.50 groceries with riya', mem), { amount: 145050, people: [ME, 'r'], title: 'Groceries', cat: 'groceries' })
+assert.equal(parseQuick('Blinkit 640', mem).cat, 'groceries'); assert.equal(parseQuick('BESCOM 1240', mem).cat, 'bills'); assert.equal(parseQuick('Swiggy instamart 300', mem).cat, 'groceries')
 assert.equal(parseQuick('Coffee', mem).amount, undefined)
 
 // item split: extras follow item subtotals, totals add up exactly

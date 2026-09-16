@@ -273,7 +273,8 @@ api.post('/ai/read', async c => {
   let members: string[] = []
   if (b.groupId) {
     if (!(await membership(b.groupId, uid))) return c.json(notFound, 404)
-    members = (await db.member.findMany({ where: { groupId: b.groupId, NOT: { userId: uid } }, select: { name: true } })).map(m => m.name)
+    // guests have no userId; NOT { userId } alone would drop them (SQL NULL)
+    members = (await db.member.findMany({ where: { groupId: b.groupId, OR: [{ userId: null }, { userId: { not: uid } }] }, select: { name: true } })).map(m => m.name)
   }
   try {
     return c.json(await readExpense({ text: b.text, image: b.image, members, today: b.today }))

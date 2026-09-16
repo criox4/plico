@@ -237,7 +237,21 @@ export function fromSplitwise(row: SwRow, ids: Id[]): Expense | null {
 }
 
 // ---------- quick add: "Dinner 3200 paid by Karan except Riya" ----------
-export type Quick = { title?: string; amount?: number; payer?: Id; people?: Id[] }
+export type Quick = { title?: string; amount?: number; payer?: Id; people?: Id[]; cat?: string }
+
+/** Offline category from brands and everyday words Indians actually type. Order matters: first match wins. */
+const VENDOR_CATS: [RegExp, string][] = [
+  [/\b(blinkit|zepto|big ?basket|instamart|dmart|jio ?mart|reliance (fresh|smart)|more (store|supermarket)|nature'?s basket|grocer(y|ies)|sabzi|vegetables?|kirana)\b/i, 'groceries'],
+  [/\b(swiggy|zomato|eatsure|domino'?s|mcdonald'?s|mcd|kfc|burger king|pizza hut|subway|starbucks|ccd|cafe coffee day|chai|haldiram'?s?|biryani|dinner|lunch|breakfast|brunch|snacks?|food|restaurant|dhaba|cafe|thali)\b/i, 'food'],
+  [/\b(beers?|brewpub|pub|bar|wine|whisky|drinks?|daaru|toit)\b/i, 'drinks'],
+  [/\b(uber|ola|rapido|namma yatri|blusmart|metro|auto|cab|taxi|irctc|train|redbus|bus|indigo|air india|akasa|vistara|flight|petrol|diesel|fuel|fastag|toll|parking)\b/i, 'transport'],
+  [/\b(oyo|airbnb|treebo|fabhotels?|zostel|hotel|hostel|homestay|resort|villa|stay)\b/i, 'stay'],
+  [/\b(bookmyshow|pvr|inox|movie|netflix|hotstar|prime video|spotify|concert|tickets?|bowling|games?)\b/i, 'fun'],
+  [/\b(rent|nobroker|deposit|maintenance)\b/i, 'rent'],
+  [/\b(jio|airtel|vi|bsnl|act fibernet|wifi|wi-fi|broadband|recharge|dth|tata play|electricity|bescom|msedcl|tangedco|bses|tata power|adani electricity|cesc|kseb|igl|mgl|gas|cylinder|water bill|bwssb|djb|bills?)\b/i, 'bills'],
+  [/\b(maid|cook|driver|urban company|cleaning|laundry|dhobi|help)\b/i, 'help'],
+]
+export const categoryOf = (text: string) => VENDOR_CATS.find(([re]) => re.test(text))?.[1]
 /** Offline, rule-based: an amount (3200, 3,200, ₹3.2k, 65k), who paid ("paid by X", "X paid", "I paid"),
  *  who's in ("with A and B", "A, B only", "except C", "everyone"). Names match group members by prefix. */
 /** A spoken or written name → a member: "me", a full name, a first name, or a prefix of 3+ letters. */
@@ -281,6 +295,8 @@ export function parseQuick(text: string, members: { id: Id; name: string }[]): Q
   }
   t = t.replace(/\b(everyone|everybody|all|split|equally|evenly|only)\b/gi, ' ').replace(/\s+/g, ' ').replace(/^[\s,.;:-]+|[\s,.;:-]+$/g, '').replace(/\s+,/g, ',')
   if (t) out.title = t[0].toUpperCase() + t.slice(1)
+  const cat = categoryOf(text)
+  if (cat) out.cat = cat
   return out
 }
 
