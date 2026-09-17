@@ -44,6 +44,22 @@ async function googleSignIn(webClientId: string | null, iosClientId: string | nu
   if (u) await signedIn(u)
 }
 
+// ---------- Apple (iOS only: the system sheet, then its ID token) ----------
+async function appleSignIn() {
+  const { SocialLogin } = await import('@capgo/capacitor-social-login')
+  await SocialLogin.initialize({ apple: { clientId: 'app.plico' } })
+  const nonce = crypto.randomUUID() // replay guard: the server checks it against the token
+  const login = await SocialLogin.login({ provider: 'apple', options: { scopes: ['email', 'name'], nonce } })
+  const res = login.result as { idToken?: string | null; profile?: { givenName: string | null; familyName: string | null } }
+  if (!res.idToken) throw new Error('Apple didn’t return a sign-in token.')
+  // Apple sends the name only on the very first sign-in, so pass it along.
+  const name = { firstName: res.profile?.givenName ?? undefined, lastName: res.profile?.familyName ?? undefined }
+  const r = await authClient.signIn.social({ provider: 'apple', idToken: { token: res.idToken, nonce, user: { name } } })
+  if (r.error) throw new Error(r.error.message)
+  const u = (r.data as { user?: Parameters<typeof signedIn>[0] }).user ?? (await authClient.getSession()).data?.user
+  if (u) await signedIn(u)
+}
+
 // ---------- age and parental consent (DPDP Act 2023 s.9: under-18s need a parent's verifiable consent) ----------
 type Age = 'adult' | 'teen' | 'child' | null
 export const legalUrl = (page: 'privacy' | 'terms' | 'cookies' | 'delete-account') =>
@@ -251,8 +267,14 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
     if (step === 'signup') await refreshUser() // pick up the age just saved
   })
   const google = () => run(() => googleSignIn(sync.googleWebClientId, sync.googleIosClientId))
-  // App Store 4.8: offering Google sign-in on iOS requires Sign in with Apple too. Until that's added, iOS is email-only.
-  const showGoogle = sync.google && Capacitor.getPlatform() !== 'ios'
+  const apple = () => run(appleSignIn)
+  // App Store 4.8: an iOS app offering Google sign-in must offer Sign in with Apple too, at least as prominently.
+  const showApple = Capacitor.getPlatform() === 'ios'
+  const social = <>
+    {showApple && <button className="btn apple" disabled={busy} onClick={() => void apple()}><AppleLogo />Sign in with Apple</button>}
+    {sync.google && <button className="btn google" disabled={busy} onClick={() => void google()}><GoogleG />Continue with Google</button>}
+  </>
+  const hasSocial = showApple || sync.google
   const to = (next: Step) => { setStep(next); setErr('') }
 
   useEffect(() => ensureFonts(['classic']), [])
@@ -272,7 +294,7 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
           </ul>
         </div>
         <div className="welcome-actions">
-          {showGoogle && <button className="btn google" disabled={busy} onClick={() => void google()}><GoogleG />Continue with Google</button>}
+          {social}
           <button className="btn primary" onClick={() => to('signup')}>Create an account</button>
           <button className="btn secondary" onClick={() => to('signin')}>I already have an account</button>
           {err && <p className="error" role="alert">{err}</p>}
@@ -290,8 +312,8 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
           <p className="muted-p">If <strong>{email}</strong> has a Plico account, a link to choose a new password is on its way. It works for one hour.</p>
           <button className="btn secondary" onClick={() => to('signin')}>Back to sign in</button>
         </> : <>
-          {showGoogle && step !== 'forgot' && <>
-            <button className="btn google" disabled={busy} onClick={() => void google()}><GoogleG />Continue with Google</button>
+          {hasSocial && step !== 'forgot' && <>
+            {social}
             <p className="or"><span>or with email</span></p>
           </>}
           {step === 'forgot' && <p className="muted-p">Enter the email you signed up with and we’ll send a reset link.</p>}
@@ -326,6 +348,12 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
     </Screen>
   )
 }
+
+const AppleLogo = () => (
+  <svg width="18" height="20" viewBox="0 0 814 1000" aria-hidden fill="currentColor">
+    <path d="M788 341c-6 4-108 62-108 190 0 149 131 201 135 203-1 3-21 72-69 142-43 62-88 124-156 124s-86-40-164-40c-76 0-104 41-166 41s-106-57-156-127C46 792 0 666 0 546c0-193 125-295 249-295 66 0 121 43 162 43 40 0 102-46 177-46 29 0 131 3 200 93zM555 161c31-37 53-88 53-139 0-7-1-14-2-20-51 2-111 34-147 76-28 32-55 83-55 135 0 8 1 15 2 18 3 1 9 2 14 2 45 0 103-31 135-72z" />
+  </svg>
+)
 
 const GoogleG = () => (
   <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
@@ -623,7 +651,7 @@ export function SecurityPage({ s }: { s: State }) {
         <button className="btn secondary">Change email</button>
       </form>
       <h2 className="form-h">Password</h2>
-      {hasPassword === false ? <p className="muted-p">You sign in with Google, so there’s no Plico password to change.</p> : (
+      {hasPassword === false ? <p className="muted-p">You sign in with Apple or Google, so there’s no Plico password to change.</p> : (
         <form className="form" onSubmit={e => { e.preventDefault(); void changePassword() }}>
           <label className="field"><span>Current password</span><input type="password" value={cur} onChange={e => setCur(e.target.value)} autoComplete="current-password" required /></label>
           <label className="field"><span>New password</span><input type="password" value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" minLength={8} required /><small>At least 8 characters. Other devices will be signed out.</small></label>

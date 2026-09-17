@@ -19,6 +19,9 @@ const APP = process.env.PUBLIC_URL || 'http://localhost:5173'
 export const googleIds = [process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_ANDROID_CLIENT_ID, process.env.GOOGLE_IOS_CLIENT_ID].filter(Boolean) as string[]
 const google = googleIds.length && process.env.GOOGLE_CLIENT_SECRET
   ? { google: { clientId: googleIds, clientSecret: process.env.GOOGLE_CLIENT_SECRET } } : undefined
+// Sign in with Apple, iOS only: the app sends Apple's ID token, checked against Apple's keys with our bundle id as audience.
+// No secret needed for that; the web redirect flow (Services ID + .p8 key) isn't offered.
+const apple = { apple: { clientId: 'app.plico', clientSecret: '', appBundleIdentifier: 'app.plico' } }
 
 export const auth = betterAuth({
   database: prismaAdapter(db, { provider: 'postgresql' }),
@@ -39,8 +42,8 @@ export const auth = betterAuth({
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }) => { void mail.verify(user.email, user.name, url).catch(console.error) },
   },
-  socialProviders: google,
-  account: { accountLinking: { enabled: true, trustedProviders: ['google'] } },
+  socialProviders: { ...google, ...apple },
+  account: { accountLinking: { enabled: true, trustedProviders: ['google', 'apple'] } },
   user: {
     additionalFields: {
       upi: { type: 'string', required: false },
