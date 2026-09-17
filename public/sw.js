@@ -1,6 +1,6 @@
 // Offline-first: serve from cache, refresh in the background (stale-while-revalidate).
 // ponytail: one cache that grows with each deploy's hashed assets; bump C (or prune by age) if size matters.
-const C = 'plico-v4' // v4: share target; v3 Plico rebrand; v2 dropped API responses v1 wrongly cached
+const C = 'plico-v5' // v5: legal pages aren't the app shell; v4: share target; v3 Plico rebrand; v2 dropped API responses v1 wrongly cached
 const SHARE = 'plico-share' // a screenshot shared into the installed app, waiting for the add screen
 
 self.addEventListener('install', e => {
@@ -29,7 +29,9 @@ self.addEventListener('fetch', e => {
   }
   // Only the app shell and static assets are cached. API data must always be live (sync.ts owns offline data).
   if (r.method !== 'GET' || !r.url.startsWith('http') || new URL(r.url).pathname.startsWith('/api/')) return
-  const key = r.mode === 'navigate' ? '/' : r // every route is the same SPA shell
+  const path = new URL(r.url).pathname
+  // The app lives at / (hash routes). Other pages (legal) are real documents: serve them as themselves.
+  const key = r.mode === 'navigate' && (path === '/' || path === '/index.html') ? '/' : r
   e.respondWith((async () => {
     const c = await caches.open(C)
     const hit = await c.match(key)

@@ -46,7 +46,8 @@ async function googleSignIn(webClientId: string | null, iosClientId: string | nu
 
 // ---------- age and parental consent (DPDP Act 2023 s.9: under-18s need a parent's verifiable consent) ----------
 type Age = 'adult' | 'teen' | 'child' | null
-export const legalUrl = (page: 'privacy' | 'terms' | 'cookies' | 'delete-account') => `${import.meta.env.VITE_PUBLIC_URL || location.origin}/${page}/`
+export const legalUrl = (page: 'privacy' | 'terms' | 'cookies' | 'delete-account') =>
+  `${import.meta.env.VITE_PUBLIC_URL || location.origin}/${page}/${import.meta.env.DEV ? 'index.html' : ''}` // dev server doesn't serve folder index pages
 
 async function saveAge(age: Age, guardian: string) {
   if (age !== 'adult' && age !== 'teen') throw new Error('Tell us how old you are.')
