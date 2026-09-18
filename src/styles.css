@@ -669,6 +669,11 @@ fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--mute
 .welcome-actions .btn:first-child { margin-top: 0; }
 .btn.apple { background: #000; color: #fff; } /* Apple's HIG: black or white button */
 .btn.google { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.ways { list-style: none; padding: 0; margin: 4px 0 8px; display: grid; gap: 8px; }
+.ways li { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.ways li > span { flex: 1; min-width: 0; display: grid; }
+.ways small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ways .btn { width: auto; margin: 0; padding: 8px 14px; min-height: 40px; }
 .or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: .875rem; margin: 16px 0 4px; }
 .or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .notice { padding: 12px 14px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--ink); font-size: .9375rem; }

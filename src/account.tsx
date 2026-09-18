@@ -24,28 +24,22 @@ export function Splash() {
   )
 }
 
-// ---------- Google (web redirect, native ID token) ----------
-async function googleSignIn(webClientId: string | null, iosClientId: string | null) {
-  if (!Capacitor.isNativePlatform()) {
-    // Leaves the page; the boot session check signs us in when Google sends us back.
-    const r = await authClient.signIn.social({ provider: 'google', callbackURL: `${origin()}#/` })
-    if (r.error) throw new Error(r.error.message)
-    return
-  }
-  // Google blocks its sign-in page inside WebViews, so native apps use the platform SDK and hand the ID token over.
+// ---------- Google and Apple: sign in, or connect to the signed-in account ----------
+type Provider = 'google' | 'apple'
+type Token = { token: string; nonce?: string; user?: { name: { firstName?: string; lastName?: string } } }
+
+// Google blocks its sign-in page inside WebViews, so native apps use the platform SDK and hand the ID token over.
+async function googleToken(webClientId: string | null, iosClientId: string | null): Promise<Token> {
   const { SocialLogin } = await import('@capgo/capacitor-social-login')
   await SocialLogin.initialize({ google: { webClientId: webClientId ?? undefined, iOSClientId: iosClientId ?? undefined, iOSServerClientId: webClientId ?? undefined, mode: 'online' } })
   const login = await SocialLogin.login({ provider: 'google', options: { scopes: ['email', 'profile'] } })
   const idToken = (login.result as { idToken?: string | null }).idToken
   if (!idToken) throw new Error('Google didn’t return a sign-in token.')
-  const r = await authClient.signIn.social({ provider: 'google', idToken: { token: idToken } })
-  if (r.error) throw new Error(r.error.message)
-  const u = (r.data as { user?: Parameters<typeof signedIn>[0] }).user ?? (await authClient.getSession()).data?.user
-  if (u) await signedIn(u)
+  return { token: idToken }
 }
 
-// ---------- Apple (iOS only: the system sheet, then its ID token) ----------
-async function appleSignIn() {
+// Apple: iOS only, the system sheet.
+async function appleToken(): Promise<Token> {
   const { SocialLogin } = await import('@capgo/capacitor-social-login')
   await SocialLogin.initialize({ apple: { clientId: 'app.plico' } })
   const nonce = crypto.randomUUID() // replay guard: the server checks it against the token
@@ -53,11 +47,33 @@ async function appleSignIn() {
   const res = login.result as { idToken?: string | null; profile?: { givenName: string | null; familyName: string | null } }
   if (!res.idToken) throw new Error('Apple didn’t return a sign-in token.')
   // Apple sends the name only on the very first sign-in, so pass it along.
-  const name = { firstName: res.profile?.givenName ?? undefined, lastName: res.profile?.familyName ?? undefined }
-  const r = await authClient.signIn.social({ provider: 'apple', idToken: { token: res.idToken, nonce, user: { name } } })
+  return { token: res.idToken, nonce, user: { name: { firstName: res.profile?.givenName ?? undefined, lastName: res.profile?.familyName ?? undefined } } }
+}
+
+const providerToken = (p: Provider, sync: { googleWebClientId: string | null; googleIosClientId: string | null }) =>
+  p === 'apple' ? appleToken() : googleToken(sync.googleWebClientId, sync.googleIosClientId)
+
+async function socialSignIn(p: Provider, sync: { googleWebClientId: string | null; googleIosClientId: string | null }) {
+  if (!Capacitor.isNativePlatform()) {
+    // Leaves the page; the boot session check signs us in when Google sends us back.
+    const r = await authClient.signIn.social({ provider: p, callbackURL: `${origin()}#/` })
+    if (r.error) throw new Error(r.error.message)
+    return
+  }
+  const r = await authClient.signIn.social({ provider: p, idToken: await providerToken(p, sync) })
   if (r.error) throw new Error(r.error.message)
   const u = (r.data as { user?: Parameters<typeof signedIn>[0] }).user ?? (await authClient.getSession()).data?.user
   if (u) await signedIn(u)
+}
+
+/** Adds Google or Apple to the account you're signed in to, whatever email it uses (e.g. Apple's Hide My Email). */
+async function socialLink(p: Provider, sync: { googleWebClientId: string | null; googleIosClientId: string | null }) {
+  const r = Capacitor.isNativePlatform()
+    ? await authClient.linkSocial({ provider: p, idToken: await providerToken(p, sync) })
+    : await authClient.linkSocial({ provider: p, callbackURL: `${origin()}#/me/security`, errorCallbackURL: `${origin()}#/me/security` }) // web: leaves the page
+  if (r.error) throw new Error(/already|another|different user/i.test(r.error.message ?? '')
+    ? `That ${p === 'apple' ? 'Apple ID' : 'Google account'} already opens a different Plico account. Sign in there and delete it first, then connect it here.`
+    : r.error.message)
 }
 
 // ---------- age and parental consent (DPDP Act 2023 s.9: under-18s need a parent's verifiable consent) ----------
@@ -269,8 +285,8 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
     await signedIn(r.data.user)
     if (step === 'signup') await refreshUser() // pick up the age just saved
   })
-  const google = () => run(() => googleSignIn(sync.googleWebClientId, sync.googleIosClientId))
-  const apple = () => run(appleSignIn)
+  const google = () => run(() => socialSignIn('google', sync))
+  const apple = () => run(() => socialSignIn('apple', sync))
   // App Store 4.8: an iOS app offering Google sign-in must offer Sign in with Apple too, at least as prominently.
   const showApple = Capacitor.getPlatform() === 'ios'
   const social = <>
@@ -498,7 +514,7 @@ export function AccountHub({ s }: { s: State }) {
         <Row icon="settings" title="Appearance" sub={`${theme(s.theme).name} theme`} to="/me/theme" />
         <Row icon="bell" title="Reminders" sub={`${{ normal: 'Normal', gentle: 'Friendly', shameless: 'Playful' }[s.tone]} tone`} to="/me/tone" />
         <Row icon="lock" title="Privacy and data" sub="AI reading, download your data, policies" to="/me/privacy" />
-        <Row icon="lock" title="Email and password" sub="Change email, change password" to="/me/security" />
+        <Row icon="lock" title="Sign-in and security" sub="Google, Apple, email and password" to="/me/security" />
         <Row icon="phone" title="Devices" sub="Where you’re signed in" to="/me/devices" />
       </ol>
       <SyncLine />
@@ -628,13 +644,29 @@ export function RemindersPage({ s }: { s: State }) {
 }
 
 export function SecurityPage({ s }: { s: State }) {
-  const [ways, setWays] = useState<string[] | null>(null) // how this account can sign in: credential, google, apple
+  const sync = useSync()
+  const [accts, setAccts] = useState<{ id: string; providerId: string }[] | null>(null) // how this account can sign in: credential, google, apple
+  const ways = accts?.map(a => a.providerId) ?? null
+  const [busy, setBusy] = useState('')
   const hasPassword = ways && ways.includes('credential')
+  const loadWays = () => authClient.listAccounts().then(r => setAccts(r.data ?? []), () => setAccts([{ id: '', providerId: 'credential' }]))
+  const connect = async (p: Provider, on: boolean) => {
+    setBusy(p); setNote(null)
+    try {
+      if (on) await socialLink(p, sync)
+      else { const r = await authClient.unlinkAccount({ accountId: accts!.find(a => a.providerId === p)!.id }); if (r.error) throw new Error(r.error.message) }
+      await loadWays()
+      setNote({ ok: true, text: on ? `Connected. ${p === 'apple' ? 'Sign in with Apple' : 'Continue with Google'} now opens this account.` : 'Removed. Your other ways to sign in still work.' })
+    } catch (e) { setNote({ ok: false, text: msg(e) }) } finally { setBusy('') }
+  }
+  // Apple only exists on iPhone; still show it elsewhere if it's connected, so it can be removed.
+  const methods = ([['google', 'Google', sync.google], ['apple', 'Apple', Capacitor.getPlatform() === 'ios']] as const)
+    .filter(([id, , offered]) => offered || ways?.includes(id))
   const [newEmail, setNewEmail] = useState('')
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null)
-  useEffect(() => { authClient.listAccounts().then(r => setWays(r.data?.map(a => a.providerId) ?? ['credential']), () => setWays(['credential'])) }, [])
+  useEffect(() => { void loadWays() }, [])
   const setPassword = async () => {
     const r = await authClient.requestPasswordReset({ email: s.user!.email, redirectTo: `${origin()}#/reset` }).catch(e => ({ error: { message: msg(e) } }))
     setNote(r.error ? { ok: false, text: r.error.message || 'Couldn’t send the link.' } : { ok: true, text: `We emailed ${s.user!.email} a link to set a password.` })
@@ -651,7 +683,18 @@ export function SecurityPage({ s }: { s: State }) {
     if (!r.error) { setCur(''); setNext('') }
   }
   return (
-    <Page s={s} title="Email and password">
+    <Page s={s} title="Sign-in and security">
+      <h2 className="form-h">Ways to sign in</h2>
+      <p className="muted-p">Each one opens this same account, even if it uses a different email (like Apple’s Hide My Email).</p>
+      {ways && <ul className="ways">
+        <li><Icon n="lock" /><span><strong>Email and password</strong><small>{hasPassword ? s.user?.email : 'Not set up'}</small></span></li>
+        {methods.map(([id, label]) => {
+          const on = ways.includes(id)
+          return <li key={id}>{id === 'google' ? <GoogleG /> : <AppleLogo />}<span><strong>{label}</strong><small>{on ? 'Connected' : 'Not connected'}</small></span>
+            <button className="btn secondary" disabled={!!busy || (on && ways.length < 2)} title={on && ways.length < 2 ? 'Your only way in: add another first' : undefined}
+              onClick={() => void connect(id, !on)}>{busy === id ? 'One moment…' : on ? 'Remove' : 'Connect'}</button></li>
+        })}
+      </ul>}
       <h2 className="form-h">Email</h2>
       <p>{s.user?.email}</p>
       <form className="form" onSubmit={e => { e.preventDefault(); void changeEmail() }}>
@@ -659,7 +702,6 @@ export function SecurityPage({ s }: { s: State }) {
         <button className="btn secondary">Change email</button>
       </form>
       <h2 className="form-h">Password</h2>
-      {ways && <p className="muted-p">You can sign in with {[...ways.includes('credential') ? ['your password'] : [], ...ways.includes('google') ? ['Google'] : [], ...ways.includes('apple') ? ['Apple'] : []].join(', ').replace(/, ([^,]*)$/, ' or $1')}. Any of them opens this same account, as long as it uses {s.user?.email}.</p>}
       {ways && !hasPassword ? <>
         <p className="muted-p">No Plico password yet. Want one, to sign in with just your email too?</p>
         <button className="btn secondary" onClick={() => void setPassword()}>Email me a link to set a password</button>

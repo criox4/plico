@@ -45,7 +45,9 @@ export const auth = betterAuth({
   socialProviders: { ...google, ...apple },
   // One account per email, however you sign in: Google or Apple with the same (verified) email joins the existing account.
   // requireLocalEmailVerified is off so an unverified email sign-up can still be joined; the account hook below makes that safe.
-  account: { accountLinking: { enabled: true, trustedProviders: ['google', 'apple'], requireLocalEmailVerified: false } },
+  account: { accountLinking: { enabled: true, trustedProviders: ['google', 'apple'], requireLocalEmailVerified: false,
+    // Connecting from inside the app (signed in already) may use another email, e.g. Apple's Hide My Email.
+    allowDifferentEmails: true } },
   user: {
     additionalFields: {
       upi: { type: 'string', required: false },
@@ -71,10 +73,13 @@ export const auth = betterAuth({
   databaseHooks: {
     account: {
       create: {
-        after: async acc => {
+        after: async (acc, ctx) => {
           if (acc.providerId !== 'google' && acc.providerId !== 'apple') return
           const u = await db.user.findUnique({ where: { id: acc.userId } })
           if (!u || u.emailVerified) return
+          // Connected from inside the app by the signed-in owner: nothing to clean up.
+          const me = ctx?.headers && await auth.api.getSession({ headers: ctx.headers }).catch(() => null)
+          if (me?.user.id === u.id) return
           // Google/Apple just proved this email is theirs, but the account was an unverified email sign-up:
           // anyone could have made it. Drop that password and its sessions so it can't be used to get in, then trust the email.
           await db.account.deleteMany({ where: { userId: u.id, providerId: 'credential' } })
