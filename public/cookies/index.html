@@ -20,7 +20,7 @@
 <table>
 <tr><th>Name</th><th>Where</th><th>Why</th><th>How long</th></tr>
 <tr><td><code>better-auth.session_token</code></td><td>Cookie (plico.space, secure, httpOnly)</td><td>Keeps you signed in on the web</td><td>7 days, renewed while you use Plico; removed when you sign out</td></tr>
-<tr><td><code>better-auth.state</code> and similar</td><td>Cookie, during Google sign-in only</td><td>Protects the Google sign-in step</td><td>Minutes</td></tr>
+<tr><td><code>better-auth.state</code> and similar</td><td>Cookie, during Google sign-in on the web only</td><td>Protects the Google sign-in step</td><td>Minutes</td></tr>
 <tr><td><code>splittr</code>, <code>splittr-outbox</code></td><td>Local storage on your device</td><td>A copy of your groups and changes not yet synced, so Plico works offline</td><td>Until you sign out or clear site data</td></tr>
 <tr><td><code>splittr-token</code></td><td>App storage (Android and iOS apps only)</td><td>Keeps you signed in in the app</td><td>Until you sign out</td></tr>
 <tr><td>App files</td><td>Service worker cache</td><td>Lets Plico open without a connection</td><td>Replaced on each update</td></tr>

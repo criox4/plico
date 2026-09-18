@@ -17,7 +17,7 @@ Method: indie-apple-stack `release-review` (security, privacy, UX, distribution 
 | # | Priority | Finding | Status |
 |---|---|---|---|
 | 1 | High | Any group member could change a *joined* member's UPI ID, email or phone, redirecting that person's incoming payments. | Fixed `16be08f`: only the person can change their own details; server ignores others' edits. |
-| 2 | High | App Store 4.8: Google sign-in offered on iOS without Sign in with Apple. | Fixed `06f6f11`: Google hidden on iOS. Add Sign in with Apple to bring it back. |
+| 2 | High | App Store 4.8: Google sign-in offered on iOS without Sign in with Apple. | Fixed `06f6f11`, then `1b94f44`: Sign in with Apple added on iOS (shown first) and Google brought back. |
 | 3 | High | DPDP Act s.9: no age check; minors' data processed without a parent's consent. | Fixed `e3a4a14`: age at sign-up (13+), parent consent by email for 13–17, API blocks until consent, decline deletes the account. |
 | 4 | High | App Store 5.1.2(i) / DPDP: photos and sentences sent to a third-party AI without explicit consent. | Fixed `e3a4a14`: one-time consent before the first AI read, switch in Privacy and data; OpenRouter `data_collection: deny`. |
 | 5 | Medium | No privacy manifest (App, ShareExtension, PlicoWidget use UserDefaults and an App Group). | Fixed `06f6f11`: `PrivacyInfo.xcprivacy` × 3 (CA92.1, 1C8F.1; no tracking). |
@@ -37,11 +37,12 @@ Also checked and clean: no secrets in git history (41 commits scanned for Supaba
 
 ## Before you publish (needs you)
 
-1. **Postal address (optional but recommended)** for the operator in the Privacy Policy and Terms, and a city for jurisdiction if you want one (currently "courts in India").
+1. ~~Postal address~~ Done: Bengaluru, Karnataka in the Privacy Policy and Terms; courts at Bengaluru for disputes.
 2. **Create `privacy@plico.space`** at Hostinger (or a forward). Every legal page and email points to it.
-3. **Pick an open-source licence** (MIT, Apache-2.0 or AGPL-3.0) and add `LICENSE`; the Terms reference it. Update the GitHub link from `github.com/criox4` to the repo URL.
+3. **Pick an open-source licence** (MIT, Apache-2.0 or AGPL-3.0) and add `LICENSE`; the Terms reference it. Once the repo is pushed, link it from the Privacy Policy (section 1) and Terms (licence section); the links were removed until it exists.
 4. **Parental consent strength:** email + a declaration meets the basic bar; DPDP Rules 2025 (Rule 10) expect "verifiable" consent, e.g. checking the parent's identity/age against records or a DigiLocker token. Consider adding DigiLocker before marketing to teens, and get a lawyer's read.
-5. **Sign in with Apple** if you want social login on iOS (then re-enable Google there).
+5. **Sign in with Apple, Apple side:** in the Apple Developer account enable the *Sign in with Apple* capability on the `app.plico` App ID (the entitlement is already in `App.entitlements`). To email users who hide their address, register `plico.space` and the sending address under *Services → Sign in with Apple for Email Communication*, or mail to `@privaterelay.appleid.com` bounces.
+9. **Apple token revocation on account deletion (guideline 5.1.1(v)):** Apple asks apps using Sign in with Apple to revoke the user's Apple tokens when they delete their account. That needs a Sign in with Apple key (.p8, Key ID, Team ID) to exchange the sign-in code and call Apple's revoke endpoint. Not built yet; deleting the account already removes all Plico data, and users can also remove Plico under Settings → Apple ID → Sign in with Apple. Add it when you create the key, or if review asks.
 6. **Rotate keys** that were pasted in chat (Supabase password, service_role and secret keys, storage keys, Resend and OpenRouter keys).
 7. **Store forms:** fill them from `store-privacy.md`.
 8. **iOS in Xcode:** set the team for App, ShareExtension and PlicoWidget; enable the `group.app.plico` App Group; confirm the three privacy manifests are in each target's resources.
