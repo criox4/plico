@@ -43,7 +43,9 @@ export const auth = betterAuth({
     sendVerificationEmail: async ({ user, url }) => { void mail.verify(user.email, user.name, url).catch(console.error) },
   },
   socialProviders: { ...google, ...apple },
-  account: { accountLinking: { enabled: true, trustedProviders: ['google', 'apple'] } },
+  // One account per email, however you sign in: Google or Apple with the same (verified) email joins the existing account.
+  // requireLocalEmailVerified is off so an unverified email sign-up can still be joined; the account hook below makes that safe.
+  account: { accountLinking: { enabled: true, trustedProviders: ['google', 'apple'], requireLocalEmailVerified: false } },
   user: {
     additionalFields: {
       upi: { type: 'string', required: false },
@@ -67,6 +69,21 @@ export const auth = betterAuth({
     },
   },
   databaseHooks: {
+    account: {
+      create: {
+        after: async acc => {
+          if (acc.providerId !== 'google' && acc.providerId !== 'apple') return
+          const u = await db.user.findUnique({ where: { id: acc.userId } })
+          if (!u || u.emailVerified) return
+          // Google/Apple just proved this email is theirs, but the account was an unverified email sign-up:
+          // anyone could have made it. Drop that password and its sessions so it can't be used to get in, then trust the email.
+          await db.account.deleteMany({ where: { userId: u.id, providerId: 'credential' } })
+          await db.session.deleteMany({ where: { userId: u.id } })
+          await db.user.update({ where: { id: u.id }, data: { emailVerified: true } })
+          await linkByEmail(u.id, u.email)
+        },
+      },
+    },
     user: {
       // Verified email (Google sign-up, or a clicked verification link): groups friends added this email to appear.
       create: { after: async u => { if (u.emailVerified) await linkByEmail(u.id, u.email) } },

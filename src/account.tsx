@@ -261,7 +261,10 @@ export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
     const r = step === 'signup'
       ? await authClient.signUp.email({ name: name.trim(), email: email.trim(), password, callbackURL: `${origin()}#/verified` })
       : await authClient.signIn.email({ email: email.trim(), password })
-    if (r.error) throw new Error(r.error.status === 401 ? 'That email and password don’t match.' : r.error.message)
+    if (r.error) throw new Error(
+      r.error.status === 401 ? 'That email and password don’t match. If you used Google or Apple before, continue with it, or reset your password to add one.'
+      : r.error.status === 422 ? 'This email already has a Plico account. Sign in instead, with Google, Apple or your password (or reset it to set one).'
+      : r.error.message)
     if (step === 'signup') await saveAge(age, guardian)
     await signedIn(r.data.user)
     if (step === 'signup') await refreshUser() // pick up the age just saved
@@ -625,12 +628,17 @@ export function RemindersPage({ s }: { s: State }) {
 }
 
 export function SecurityPage({ s }: { s: State }) {
-  const [hasPassword, setHasPassword] = useState<boolean | null>(null)
+  const [ways, setWays] = useState<string[] | null>(null) // how this account can sign in: credential, google, apple
+  const hasPassword = ways && ways.includes('credential')
   const [newEmail, setNewEmail] = useState('')
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null)
-  useEffect(() => { authClient.listAccounts().then(r => setHasPassword(!!r.data?.some(a => a.providerId === 'credential')), () => setHasPassword(true)) }, [])
+  useEffect(() => { authClient.listAccounts().then(r => setWays(r.data?.map(a => a.providerId) ?? ['credential']), () => setWays(['credential'])) }, [])
+  const setPassword = async () => {
+    const r = await authClient.requestPasswordReset({ email: s.user!.email, redirectTo: `${origin()}#/reset` }).catch(e => ({ error: { message: msg(e) } }))
+    setNote(r.error ? { ok: false, text: r.error.message || 'Couldn’t send the link.' } : { ok: true, text: `We emailed ${s.user!.email} a link to set a password.` })
+  }
   const changeEmail = async () => {
     const r = await authClient.changeEmail({ newEmail: newEmail.trim(), callbackURL: `${origin()}#/verified` }).catch(e => ({ error: { message: msg(e) } }))
     setNote(r.error ? { ok: false, text: r.error.message || 'Couldn’t change email.' }
@@ -651,7 +659,11 @@ export function SecurityPage({ s }: { s: State }) {
         <button className="btn secondary">Change email</button>
       </form>
       <h2 className="form-h">Password</h2>
-      {hasPassword === false ? <p className="muted-p">You sign in with Apple or Google, so there’s no Plico password to change.</p> : (
+      {ways && <p className="muted-p">You can sign in with {[...ways.includes('credential') ? ['your password'] : [], ...ways.includes('google') ? ['Google'] : [], ...ways.includes('apple') ? ['Apple'] : []].join(', ').replace(/, ([^,]*)$/, ' or $1')}. Any of them opens this same account, as long as it uses {s.user?.email}.</p>}
+      {ways && !hasPassword ? <>
+        <p className="muted-p">No Plico password yet. Want one, to sign in with just your email too?</p>
+        <button className="btn secondary" onClick={() => void setPassword()}>Email me a link to set a password</button>
+      </> : (
         <form className="form" onSubmit={e => { e.preventDefault(); void changePassword() }}>
           <label className="field"><span>Current password</span><input type="password" value={cur} onChange={e => setCur(e.target.value)} autoComplete="current-password" required /></label>
           <label className="field"><span>New password</span><input type="password" value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" minLength={8} required /><small>At least 8 characters. Other devices will be signed out.</small></label>
