@@ -103,6 +103,10 @@ model Group {
   createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
   members     Member[]
   expenses    Expense[]
+  audit       AuditEvent[]
+  auditSeq    Int       @default(0) /// head of the audit chain
+  auditHash   String    @default("0000000000000000000000000000000000000000000000000000000000000000")
+  directKey   String?   @unique /// two-person "friends" groups: one per pair of emails
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -154,7 +158,6 @@ model Expense {
   deletedAt   DateTime? /// soft delete: kept for history, restore and delta pulls; excluded from balances
   updatedById String?
   shares      ExpenseShare[]
-  events      ExpenseEvent[]
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
@@ -164,24 +167,31 @@ model Expense {
   @@schema("splittr")
 }
 
-/// Edit history: one row per change to an expense, written in the same transaction as the change.
-model ExpenseEvent {
+/// The money audit: an append-only, hash-chained log per group. One row per change to an expense, a person
+/// or the group, written in the same transaction as the change, under a lock on the group row.
+model AuditEvent {
   id        String   @id @default(uuid())
-  expenseId String
-  expense   Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   groupId   String
-  version   Int /// the expense's version after this change
-  action    String /// created | edited | deleted | restored | reverted
-  revertOf  Int? /// for "reverted": the version restored
-  byId      String? /// no relation: history outlives the account
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  seq       Int /// 1, 2, 3… per group, no gaps
+  kind      String /// expense.created|edited|deleted|restored|reverted, member.invited|joined|removed|edited, group.created|edited
+  expenseId String? /// no relation: the log outlives what it describes
+  memberId  String?
+  version   Int? /// expense entries: the expense's version after this change
+  revertOf  Int?
+  byId      String?
   byName    String /// who, as they were named then
   at        DateTime @default(now())
-  before    Json? /// the expense before (null when created)
-  after     Json? /// the expense after (null when deleted)
+  before    Json?
+  after     Json?
+  effect    Json /// change in each member's balance, in paise: { memberId: delta }. Sums to 0.
+  prevHash  String
+  hash      String /// sha256(prevHash + canonical JSON of this entry)
 
+  @@unique([groupId, seq])
   @@index([groupId, at])
   @@index([expenseId, version])
-  @@map("expense_event")
+  @@map("audit_event")
   @@schema("splittr")
 }
 

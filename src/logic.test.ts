@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -122,3 +122,31 @@ const pay: Snap = { title: 'Settlement', cat: 'check', date: '2026-09-26', amoun
 assert.deepEqual(changes(pay, { ...pay, pending: false }, nm), ['confirmed the payment arrived'])
 assert.equal(summary(pay, nm), '₹50 from Bala to Asha')
 console.log('sync ok')
+
+// friends: pairwise balances follow who paid for whom
+const trio: Group = { id: 't', name: 'T', kind: 'trip', theme: 'goa', members: [{ id: ME, name: 'Me' }, { id: 'r', name: 'R' }, { id: 'k', name: 'K' }], expenses: [
+  { id: '1', title: 'Hotel', cat: 'stay', date: '2026-09-01', amount: 9000, paid: { [ME]: 9000 }, owed: { [ME]: 3000, r: 3000, k: 3000 } },
+  { id: '2', title: 'Cab', cat: 'transport', date: '2026-09-01', amount: 600, paid: { r: 600 }, owed: { [ME]: 300, r: 300 } },
+  { id: '3', title: 'Paid back', cat: 'check', date: '2026-09-02', amount: 1000, paid: { k: 1000 }, owed: { [ME]: 1000 }, settle: true, pending: true },
+] }
+assert.equal(pairwise(trio, ME, 'r'), 2700)   // R owes me 3000 for the hotel, I owe R 300 for the cab
+assert.equal(pairwise(trio, 'r', ME), -2700)
+assert.equal(pairwise(trio, ME, 'k'), 3000)   // the pending settlement doesn't count yet
+assert.equal(pairwise(trio, 'r', 'k'), 0)
+// the pairwise balances add up to the group balance
+const bb = balances(trio)
+assert.equal(pairwise(trio, ME, 'r') + pairwise(trio, ME, 'k'), bb[ME])
+
+// audit: canonical JSON ignores key order; effects sum to zero and follow confirmations
+assert.equal(canon({ b: 1, a: { d: [2, { y: 1, x: null }], c: 'x' } }), canon({ a: { c: 'x', d: [2, { x: null, y: 1 }] }, b: 1 }))
+assert.equal(canon({ a: undefined, b: 1 }), '{"b":1}')
+const s1: Snap = { title: 'D', cat: 'food', date: '2026-09-01', amount: 1200, shares: [{ memberId: 'a', paid: 1200, owed: 600 }, { memberId: 'b', paid: 0, owed: 600 }] }
+assert.deepEqual(effectOf(null, s1), { a: 600, b: -600 })
+assert.deepEqual(effectOf(s1, null), { a: -600, b: 600 })
+assert.deepEqual(effectOf(s1, { ...s1, amount: 1500, shares: [{ memberId: 'a', paid: 1500, owed: 750 }, { memberId: 'b', paid: 0, owed: 750 }] }), { a: 150, b: -150 })
+const st: Snap = { title: 'S', cat: 'check', date: '2026-09-01', amount: 500, settle: true, pending: true, shares: [{ memberId: 'b', paid: 500, owed: 0 }, { memberId: 'a', paid: 0, owed: 500 }] }
+assert.deepEqual(effectOf(null, st), {})
+assert.deepEqual(effectOf(st, { ...st, pending: false }), { a: -500, b: 500 })
+const ent = { groupId: 'g', seq: 1, kind: 'expense.created', byName: 'A', at: '2026-09-01T00:00:00.000Z', effect: { b: -1, a: 1 }, prevHash: '0' }
+assert.equal(auditPayload(ent), auditPayload({ ...ent, effect: { a: 1, b: -1 } }))
+console.log('friends + audit ok')

@@ -4,13 +4,15 @@
 import assert from 'node:assert/strict'
 import { auth } from '../server/auth.ts'
 import { db } from '../server/db.ts'
+import { createHash } from 'node:crypto'
+import { auditPayload, GENESIS } from '../src/logic.ts'
 
 const API = process.env.RACE_API ?? 'http://localhost:8787'
 const run = Date.now()
 
 async function phone(name: string) {
   const r = await auth.api.signUpEmail({ body: { name, email: `race-${name.toLowerCase()}-${run}@splittr.test`, password: 'password123' }, returnHeaders: true })
-  await db.user.update({ where: { id: r.response.user.id }, data: { ageGroup: 'adult' } })
+  await db.user.update({ where: { id: r.response.user.id }, data: { ageGroup: 'adult', emailVerified: true } })
   const token = r.headers.get('set-auth-token')!
   const call = async (method: string, path: string, body?: unknown) => {
     const res = await fetch(API + path, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body && JSON.stringify(body) })
@@ -70,7 +72,8 @@ try {
   // (d) three phones add 20 expenses each at the same time; then 10 rounds of B and C racing on one expense
   const adds = [A, B, C].flatMap(p => Array.from({ length: 20 }, (_, i) => p.call('PUT', `/api/groups/${gid}/expenses/${crypto.randomUUID()}`, exp(`${p.name} ${i}`, 300 + i, null))))
   const res = await Promise.all(adds)
-  assert.ok(res.every(x => x.status === 200), 'all 60 adds land')
+  const badAdds = res.filter(x => x.status !== 200); if (badAdds.length) console.log(badAdds.length, JSON.stringify(badAdds.slice(0, 2)))
+  assert.ok(!badAdds.length, 'all 60 adds land')
   let wins = 0
   for (let i = 0; i < 10; i++) {
     const v = (await A.call('GET', `${path}/history`)).body.at(-1).version
@@ -109,12 +112,59 @@ try {
 
   // (g) history tells who did what
   const h = (await C.call('GET', `${path}/history`)).body
-  assert.deepEqual(h.slice(0, 9).map((e: any) => `${e.version}:${e.action}:${e.byName}`),
-    ['1:created:Asha', '2:edited:Asha', '3:edited:Bala', '4:deleted:Asha', '5:restored:Bala', '6:edited:Bala', '7:edited:Asha', '8:deleted:Asha', '9:restored:Chitra'])
+  assert.deepEqual(h.slice(0, 9).map((e: any) => `${e.version}:${e.kind}:${e.byName}`),
+    ['1:expense.created:Asha', '2:expense.edited:Asha', '3:expense.edited:Bala', '4:expense.deleted:Asha', '5:expense.restored:Bala', '6:expense.edited:Bala', '7:expense.edited:Asha', '8:expense.deleted:Asha', '9:expense.restored:Chitra'])
   assert.equal(h[1].before.amount, 120000); assert.equal(h[1].after.amount, 150000)
-  const feed = (await B.call('GET', `/api/groups/${gid}/activity`)).body
-  assert.equal(feed.length, 40, 'activity is paged')
-  console.log('✓ history: every version with who and what; activity feed pages')
+  console.log('✓ history: every version with who and what')
+
+  // (h) the audit chain survived all of that concurrency: no gaps, every hash checks, every entry's effect sums to 0,
+  // and replaying the effects gives exactly today's balances
+  const { head, events } = (await B.call('GET', `/api/groups/${gid}/audit`)).body
+  let prev = GENESIS
+  events.forEach((e: any, i: number) => {
+    assert.equal(e.seq, i + 1, 'no gaps'); assert.equal(e.prevHash, prev, `entry ${e.seq} links to the one before`)
+    assert.equal(createHash('sha256').update(prev + auditPayload({ ...e, at: new Date(e.at).toISOString() })).digest('hex'), e.hash, `entry ${e.seq} hash checks`)
+    assert.equal(Object.values(e.effect as Record<string, number>).reduce((a, b) => a + b, 0), 0, `entry ${e.seq} effects sum to 0`)
+    prev = e.hash
+  })
+  assert.equal(head.auditHash, prev); assert.equal(head.auditSeq, events.length)
+  const replay: Record<string, number> = {}
+  for (const e of events) for (const [k, v] of Object.entries(e.effect as Record<string, number>)) replay[k] = (replay[k] ?? 0) + v
+  const live = (await A.call('GET', '/api/groups')).body.groups.find((g: { id: string }) => g.id === gid).expenses
+  const bal: Record<string, number> = {}
+  for (const e of live) if (!e.pending && !e.rejected) for (const x of e.shares) bal[x.memberId] = (bal[x.memberId] ?? 0) + x.paid - x.owed
+  for (const k of new Set([...Object.keys(bal), ...Object.keys(replay)])) assert.equal(replay[k] ?? 0, bal[k] ?? 0, `replayed balance for ${k}`)
+  console.log(`✓ audit: ${events.length} entries, chain unbroken, effects balance, replay = live balances`)
+
+  // (i) tampering shows: change one old amount and the chain breaks there
+  const victim = events[5]
+  await db.auditEvent.update({ where: { groupId_seq: { groupId: gid, seq: victim.seq } }, data: { effect: { [selfA]: 1 } } })
+  const t = (await B.call('GET', `/api/groups/${gid}/audit`)).body.events[5]
+  assert.notEqual(createHash('sha256').update(t.prevHash + auditPayload({ ...t, at: new Date(t.at).toISOString() })).digest('hex'), t.hash)
+  console.log('✓ a rewritten entry no longer matches its hash')
+
+  // (j) people: no email, no spot; no duplicates; group links join as yourself
+  assert.equal((await A.call('PUT', `/api/groups/${gid}/members/${crypto.randomUUID()}`, { name: 'Nameless' })).status, 400, 'email required')
+  const ghost = crypto.randomUUID()
+  assert.equal((await A.call('PUT', `/api/groups/${gid}/members/${ghost}`, { name: 'Dev', email: `dev-${run}@splittr.test` })).status, 200)
+  assert.equal((await A.call('PUT', `/api/groups/${gid}/members/${crypto.randomUUID()}`, { name: 'Dev again', email: `DEV-${run}@splittr.test` })).status, 409, 'same email twice')
+  assert.equal((await A.call('PUT', `/api/groups/${gid}/members/${crypto.randomUUID()}`, { name: 'Bala 2', email: `race-bala-${run}@splittr.test` })).status, 409, 'a member’s account email counts too')
+  const kinds = (await B.call('GET', `/api/groups/${gid}/audit`)).body.events.map((e: any) => e.kind)
+  assert.ok(kinds.includes('member.invited') && kinds.filter((k: string) => k === 'member.joined').length === 2)
+  console.log('✓ people: email required, no duplicates, joins and invites on the record')
+
+  // (k) friends: one two-person group per pair, whoever adds whom; no third person
+  const f1 = (await A.call('POST', '/api/friends', { email: `race-chitra-${run}@splittr.test`, name: 'Chitra' })).body.id
+  const f2 = (await C.call('POST', '/api/friends', { email: `RACE-asha-${run}@splittr.test`, name: 'Asha' })).body.id
+  assert.ok(f1 && f1 === f2, 'same friends group from both sides')
+  const fg = (await C.call('GET', '/api/groups')).body.groups.find((g: { id: string }) => g.id === f1)
+  assert.equal(fg.kind, 'direct'); assert.equal(fg.members.filter((m: any) => m.userId).length, 2, 'Chitra already had an account: linked at once')
+  assert.equal((await A.call('PUT', `/api/groups/${f1}/members/${crypto.randomUUID()}`, { name: 'X', email: `x-${run}@splittr.test` })).status, 400, 'no third person')
+  assert.equal((await A.call('DELETE', `/api/groups/${f1}`)).status, 403)
+  assert.equal((await A.call('POST', '/api/friends', { email: `race-asha-${run}@splittr.test`, name: 'Me' })).status, 400, 'not yourself')
+  await db.group.deleteMany({ where: { id: f1 } })
+  console.log('✓ friends: one balance per pair from either side, two people only')
+
   console.log('\nall sync race checks passed')
 } finally {
   await db.group.deleteMany({ where: { id: gid } })

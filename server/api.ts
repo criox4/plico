@@ -7,6 +7,8 @@ import { mail } from './email.ts'
 import { aiReady, readExpense } from './ai.ts'
 import { BUCKET, deleteFile, getFile, imageType, putFile, storageReady } from './storage.ts'
 import { Prisma } from './generated/prisma/client.ts'
+import { audit, changed } from './audit.ts'
+import { createHash } from 'node:crypto'
 import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
 
@@ -42,7 +44,7 @@ publicApi.post('/guardian/:token', async c => {
 export const api = new Hono<Env>()
 
 const Id = z.string().regex(/^[\w:-]{1,64}$/)
-const Kind = z.enum(['trip', 'home', 'couple', 'friends', 'office', 'family'])
+const Kind = z.enum(['trip', 'home', 'couple', 'friends', 'office', 'family', 'direct'])
 const Theme = z.enum(THEMES.map(t => t.id) as [string, ...string[]])
 const Upi = z.string().trim().max(256).refine(v => !v || isVpa(v), 'Not a valid UPI ID').nullish()
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -140,7 +142,7 @@ api.get('/me/export', async c => {
       members: { select: { id: true, name: true, upi: true, email: true, phone: true, userId: true } },
       expenses: { select: { id: true, title: true, cat: true, date: true, amount: true, settle: true, pending: true, rejected: true, receipt: true, createdAt: true, version: true, deletedAt: true, shares: { select: { memberId: true, paid: true, owed: true } } } } },
   })
-  const history = await db.expenseEvent.findMany({ where: { byId: uid }, orderBy: { at: 'asc' }, select: { groupId: true, expenseId: true, version: true, action: true, at: true, before: true, after: true } })
+  const history = await db.auditEvent.findMany({ where: { byId: uid }, orderBy: { at: 'asc' }, select: { groupId: true, seq: true, kind: true, expenseId: true, memberId: true, at: true, before: true, after: true, effect: true } })
   const data = { exportedAt: new Date(), note: 'Amounts are in paise (₹1 = 100 paise). Photos are listed by file name; download them from the app. "history" lists the changes you made.', user, signIns: accounts, sessions, groups, history }
   return c.body(JSON.stringify(data, null, 2), 200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="plico-export.json"' })
 })
@@ -172,9 +174,9 @@ class Stale extends Error {}
 async function conflict(c: { json: (b: unknown, s: 409) => Response }, eid: string) {
   const [theirs, last] = await Promise.all([
     db.expense.findUnique({ where: { id: eid }, include: withShares }),
-    db.expenseEvent.findFirst({ where: { expenseId: eid }, orderBy: { version: 'desc' }, select: { byName: true, at: true, action: true } }),
+    db.auditEvent.findFirst({ where: { expenseId: eid }, orderBy: { seq: 'desc' }, select: { byName: true, at: true, kind: true } }),
   ])
-  return c.json({ error: 'Someone else changed this first', code: 'conflict', theirs, by: last?.byName ?? 'Someone', at: last?.at ?? theirs?.updatedAt, action: last?.action }, 409)
+  return c.json({ error: 'Someone else changed this first', code: 'conflict', theirs, by: last?.byName ?? 'Someone', at: last?.at ?? theirs?.updatedAt, action: last?.kind.split('.')[1] }, 409)
 }
 
 // Groups for this user. `since` + `known` (group ids this phone already has) = only what changed, including deletions;
@@ -201,36 +203,64 @@ api.get('/groups', async c => {
   return c.json({ now, groups: groups.map(g => ({ ...g, full: !delta.includes(g.id), expenses: byGroup.get(g.id) ?? [] })) })
 })
 
-// A group's activity feed, newest first (paged by `before`).
-api.get('/groups/:gid/activity', async c => {
+// A group's whole audit log, oldest first, so the phone can check the hash chain end to end and export it.
+// ponytail: one response per group; page it (with a verified checkpoint) when logs reach many thousands of entries.
+api.get('/groups/:gid/audit', async c => {
   const gid = Id.parse(c.req.param('gid'))
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
-  const before = c.req.query('before')
-  const events = await db.expenseEvent.findMany({
-    where: { groupId: gid, ...(before && { at: { lt: new Date(before) } }) }, orderBy: { at: 'desc' }, take: 40,
-  })
-  return c.json(events)
+  const [events, head] = await Promise.all([
+    db.auditEvent.findMany({ where: { groupId: gid }, orderBy: { seq: 'asc' }, omit: { id: true } }),
+    db.group.findUniqueOrThrow({ where: { id: gid }, select: { auditSeq: true, auditHash: true } }),
+  ])
+  return c.json({ head, events })
 })
 
 // Every version of one expense, oldest first.
 api.get('/groups/:gid/expenses/:eid/history', async c => {
   const [gid, eid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('eid'))]
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
-  return c.json(await db.expenseEvent.findMany({ where: { groupId: gid, expenseId: eid }, orderBy: { version: 'asc' } }))
+  return c.json(await db.auditEvent.findMany({ where: { groupId: gid, expenseId: eid }, orderBy: { seq: 'asc' } }))
+})
+
+// My money log: entries across all my groups that moved my balance, newest first (paged by `before`, an ISO time).
+api.get('/me/audit', async c => {
+  const uid = c.get('userId')
+  const mine = await db.member.findMany({ where: { userId: uid }, select: { id: true, groupId: true, group: { select: { name: true, kind: true } } } })
+  const me = new Map(mine.map(m => [m.groupId, m]))
+  const before = c.req.query('before')
+  const rows = await db.auditEvent.findMany({
+    where: { groupId: { in: [...me.keys()] }, kind: { startsWith: 'expense.' }, ...(before && { at: { lt: new Date(before) } }) },
+    orderBy: { at: 'desc' }, take: 300,
+  })
+  const events = rows.filter(e => (e.effect as Record<string, number>)[me.get(e.groupId)!.id])
+    .map(e => ({ ...e, memberOf: me.get(e.groupId)!.id, group: me.get(e.groupId)!.group }))
+  return c.json({ events, more: rows.length === 300, last: rows.at(-1)?.at ?? null })
 })
 
 api.put('/groups/:id', async c => {
   const id = Id.parse(c.req.param('id'))
   const b = GroupIn.parse(await c.req.json())
   const uid = c.get('userId')
-  const exists = await db.group.findUnique({ where: { id }, select: { id: true } })
-  if (exists) {
+  const by = { byId: uid, byName: c.get('userName') }
+  const cur = await db.group.findUnique({ where: { id } })
+  if (cur) {
     if (!(await membership(id, uid))) return c.json(notFound, 404)
-    await db.group.update({ where: { id }, data: { name: b.name, kind: b.kind, theme: b.theme, track: !!b.track, emoji: b.emoji ?? null, cover: b.cover ?? null } })
+    // A friends (direct) group keeps its kind and has no name of its own; the rest any member may change, on the record.
+    const next = cur.kind === 'direct' ? { theme: b.theme, emoji: b.emoji ?? null, cover: b.cover ?? null }
+      : { name: b.name, kind: b.kind === 'direct' ? cur.kind : b.kind, theme: b.theme, track: !!b.track, emoji: b.emoji ?? null, cover: b.cover ?? null }
+    const diff = changed(cur as unknown as Record<string, unknown>, next)
+    if (diff) await db.$transaction(async tx => {
+      await tx.group.update({ where: { id }, data: next })
+      await audit(tx, id, { kind: 'group.edited', ...by, ...diff })
+    })
   } else {
-    await db.group.create({
-      data: { id, name: b.name, kind: b.kind, theme: b.theme, track: !!b.track, emoji: b.emoji ?? null, cover: b.cover ?? null, inviteCode: inviteCode(), createdById: uid,
-        members: { create: { id: b.selfId, name: c.get('userName'), userId: uid } } },
+    if (b.kind === 'direct') return c.json({ error: 'Add friends from the Friends tab' }, 400)
+    await db.$transaction(async tx => {
+      await tx.group.create({
+        data: { id, name: b.name, kind: b.kind, theme: b.theme, track: !!b.track, emoji: b.emoji ?? null, cover: b.cover ?? null, inviteCode: inviteCode(), createdById: uid,
+          members: { create: { id: b.selfId, name: c.get('userName'), userId: uid } } },
+      })
+      await audit(tx, id, { kind: 'group.created', memberId: b.selfId, ...by, after: { name: b.name, kind: b.kind, theme: b.theme } })
     })
   }
   return c.json({ ok: true })
@@ -239,6 +269,7 @@ api.put('/groups/:id', async c => {
 api.delete('/groups/:id', async c => {
   const g = await db.group.findUnique({ where: { id: Id.parse(c.req.param('id')) } })
   if (!g) return c.json({ ok: true }) // idempotent: already gone
+  if (g.kind === 'direct') return c.json({ error: 'Friends can’t be deleted' }, 403)
   if (g.createdById !== c.get('userId')) return c.json({ error: 'Only the person who made the group can delete it' }, 403)
   await db.group.delete({ where: { id: g.id } })
   return c.json({ ok: true })
@@ -254,17 +285,42 @@ api.get('/groups/:id/invite', async c => {
 api.put('/groups/:gid/members/:mid', async c => {
   const [gid, mid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('mid'))]
   const b = MemberIn.parse(await c.req.json())
-  if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
+  const uid = c.get('userId'), by = { byId: uid, byName: c.get('userName') }
+  if (!(await membership(gid, uid))) return c.json(notFound, 404)
   const m = await db.member.findUnique({ where: { id: mid } })
   if (m && m.groupId !== gid) return c.json(notFound, 404)
   // Someone with an account owns their details. Letting others edit a joined person's UPI ID would let them
   // redirect that person's incoming payments, so those edits are ignored (not errors: they may be stale outbox ops).
-  if (m?.userId && m.userId !== c.get('userId')) return c.json({ ok: true, ignored: true })
-  const data = { name: b.name, upi: b.upi || null, email: b.email || null, phone: b.phone || null }
-  if (m) await db.member.update({ where: { id: mid }, data })
-  else await db.member.create({ data: { id: mid, groupId: gid, ...data } })
-  // A new email on a guest: link now if that person already has a verified account, otherwise email an invite.
-  if (data.email && data.email !== m?.email && !m?.userId) await inviteByEmail(gid, mid, data.email, c.get('userName'))
+  if (m?.userId && m.userId !== uid) return c.json({ ok: true, ignored: true })
+  const email = b.email?.toLowerCase() || null
+  const data = { name: b.name, upi: b.upi || null, email: m?.userId ? m.email : email, phone: b.phone || null }
+  // Everyone in a group is a real person: an account, or an email that becomes one when they join.
+  if (!m?.userId && !email) return c.json({ error: 'Add their email so they can join Plico and see this group.' }, 400)
+  if (!m) {
+    const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { kind: true } })
+    if (g.kind === 'direct') return c.json({ error: 'A friends balance is just the two of you. Make a group to add more people.' }, 400)
+  }
+  if (email && email !== m?.email) {
+    const dup = await db.member.findFirst({ where: { groupId: gid, id: { not: mid }, OR: [{ email: { equals: email, mode: 'insensitive' } }, { user: { email: { equals: email, mode: 'insensitive' } } }] } })
+    if (dup) return c.json({ error: `${dup.name} is already in this group with that email.` }, 409)
+  }
+  if (!m) {
+    await db.$transaction(async tx => {
+      await tx.member.create({ data: { id: mid, groupId: gid, ...data } })
+      await audit(tx, gid, { kind: 'member.invited', memberId: mid, ...by, after: { name: data.name, email } })
+    })
+  } else {
+    const diff = changed({ name: m.name, upi: m.upi, email: m.email, phone: m.phone }, data)
+    if (!diff) return c.json({ ok: true })
+    // A corrected email retires the old personal link: it may have gone to the wrong person.
+    const retire = !m.userId && email !== m.email ? { inviteToken: null, invitedAt: null } : {}
+    await db.$transaction(async tx => {
+      await tx.member.update({ where: { id: mid }, data: { ...data, ...retire } })
+      await audit(tx, gid, { kind: 'member.edited', memberId: mid, ...by, ...diff })
+    })
+  }
+  // A new email: link now if that person already has a verified account, otherwise email an invite.
+  if (email && email !== m?.email && !m?.userId) await inviteByEmail(gid, mid, email, c.get('userName'))
   return c.json({ ok: true })
 })
 
@@ -272,8 +328,10 @@ async function inviteByEmail(gid: string, mid: string, email: string, inviter: s
   const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { name: true } })
   const user = await db.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, emailVerified: true } })
   if (user) {
-    const { count } = await db.member.updateMany({
-      where: { id: mid, userId: null, group: { members: { none: { userId: user.id } } } }, data: { userId: user.id, inviteToken: null },
+    const count = await db.$transaction(async tx => {
+      const { count } = await tx.member.updateMany({ where: { id: mid, userId: null, group: { members: { none: { userId: user.id } } } }, data: { userId: user.id, inviteToken: null } })
+      if (count) await audit(tx, gid, { kind: 'member.joined', memberId: mid, byId: user.id, byName: user.name, after: { email, how: 'email' } })
+      return count
     })
     if (count) void mail.added(user.email, inviter, g.name).catch(console.error)
     return
@@ -312,7 +370,10 @@ api.delete('/groups/:gid/members/:mid', async c => {
   const m = await db.member.findUnique({ where: { id: mid }, include: { _count: { select: { shares: true } } } })
   if (!m || m.groupId !== gid) return c.json({ ok: true })
   if (m.userId || m._count.shares) return c.json({ error: 'People with expenses or an account can’t be removed' }, 409)
-  await db.member.delete({ where: { id: mid } })
+  await db.$transaction(async tx => {
+    await tx.member.delete({ where: { id: mid } })
+    await audit(tx, gid, { kind: 'member.removed', memberId: mid, byId: c.get('userId'), byName: c.get('userName'), before: { name: m.name, email: m.email } })
+  })
   return c.json({ ok: true })
 })
 
@@ -355,7 +416,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
     await db.$transaction(async tx => {
       if (!existing) {
         await tx.expense.create({ data: { id: eid, groupId: gid, createdById: uid, updatedById: uid, ...data } })
-        await tx.expenseEvent.create({ data: { expenseId: eid, groupId: gid, version, action: 'created', ...by, after } })
+        await audit(tx, gid, { kind: 'expense.created', expenseId: eid, version, ...by, after })
       } else {
         // Compare-and-set on the version: of two edits racing from the same base, only one gets through.
         const { count } = await tx.expense.updateMany({ where: { id: eid, version: existing.version }, data: { ...data, deletedAt: null, updatedById: uid, version: { increment: 1 } } })
@@ -363,7 +424,8 @@ api.put('/groups/:gid/expenses/:eid', async c => {
         await tx.expenseShare.deleteMany({ where: { expenseId: eid } })
         version = existing.version + 1
         const action = existing.deletedAt ? 'restored' : b.revertOf ? 'reverted' : 'edited'
-        await tx.expenseEvent.create({ data: { expenseId: eid, groupId: gid, version, action, revertOf: b.revertOf, ...by, before: snapOf(existing), after } })
+        // A deleted expense counts for nothing, so bringing it back starts from nothing.
+        await audit(tx, gid, { kind: `expense.${action}`, expenseId: eid, version, revertOf: b.revertOf, ...by, before: existing.deletedAt ? null : snapOf(existing), after })
       }
       await tx.expenseShare.createMany({ data: shares.map(s => ({ expenseId: eid, ...s })) })
     })
@@ -403,7 +465,7 @@ api.delete('/groups/:gid/expenses/:eid', async c => {
     await db.$transaction(async tx => {
       const { count } = await tx.expense.updateMany({ where: { id: eid, version: e.version }, data: { deletedAt: new Date(), updatedById: uid, version: { increment: 1 } } })
       if (!count) throw new Stale()
-      await tx.expenseEvent.create({ data: { expenseId: eid, groupId: gid, version: e.version + 1, action: 'deleted', byId: uid, byName: c.get('userName'), before: snapOf(e) } })
+      await audit(tx, gid, { kind: 'expense.deleted', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), before: snapOf(e) })
     })
   } catch (err) { if (err instanceof Stale) return conflict(c, eid); throw err }
   return c.json({ ok: true, version: e.version + 1 })
@@ -417,9 +479,12 @@ api.post('/groups/:gid/expenses/:eid/restore', async c => {
   const e = await db.expense.findUnique({ where: { id: eid }, include: withShares })
   if (!e || e.groupId !== gid) return c.json(notFound, 404)
   if (!e.deletedAt) return c.json({ ok: true, version: e.version })
-  const { count } = await db.expense.updateMany({ where: { id: eid, version: e.version }, data: { deletedAt: null, updatedById: uid, version: { increment: 1 } } })
-  if (!count) return conflict(c, eid)
-  await db.expenseEvent.create({ data: { expenseId: eid, groupId: gid, version: e.version + 1, action: 'restored', byId: uid, byName: c.get('userName'), after: snapOf(e) } })
+  const ok = await db.$transaction(async tx => {
+    const { count } = await tx.expense.updateMany({ where: { id: eid, version: e.version }, data: { deletedAt: null, updatedById: uid, version: { increment: 1 } } })
+    if (count) await audit(tx, gid, { kind: 'expense.restored', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), after: snapOf(e) })
+    return count
+  })
+  if (!ok) return conflict(c, eid)
   return c.json({ ok: true, version: e.version + 1 })
 })
 
@@ -511,34 +576,66 @@ api.post('/claim/:token', async c => {
   const m = await db.member.findUnique({ where: { inviteToken: Token.parse(c.req.param('token')) } })
   if (!m || m.userId) return c.json({ error: 'This invite was already used or is no longer valid' }, 404)
   if (await membership(m.groupId, uid)) return c.json({ id: m.groupId }) // already in via another spot
-  const { count } = await db.member.updateMany({ where: { id: m.id, userId: null }, data: { userId: uid, inviteToken: null } })
+  const count = await db.$transaction(async tx => {
+    const { count } = await tx.member.updateMany({ where: { id: m.id, userId: null }, data: { userId: uid, inviteToken: null } })
+    if (count) await audit(tx, m.groupId, { kind: 'member.joined', memberId: m.id, byId: uid, byName: c.get('userName'), after: { name: m.name, email: m.email, how: 'invite link' } })
+    return count
+  })
   if (!count) return c.json({ error: 'Someone already claimed this invite' }, 409)
   return c.json({ id: m.groupId })
 })
 
-// ---------- group invite links: a friend signs in and picks their guest profile ----------
+// ---------- group invite links: anyone with the link joins as themselves ----------
+// A spot someone was invited to by email is only theirs: claimed by its personal link, or here when the email matches.
 api.get('/invites/:code', async c => {
-  const g = await db.group.findUnique({ where: { inviteCode: z.string().max(40).parse(c.req.param('code')) }, include: { members: true } })
-  if (!g) return c.json({ error: 'This invite link is no longer valid' }, 404)
-  return c.json({
-    id: g.id, name: g.name, kind: g.kind, theme: g.theme,
-    joined: g.members.some(m => m.userId === c.get('userId')),
-    guests: g.members.filter(m => !m.userId).map(m => ({ id: m.id, name: m.name })),
-  })
+  const g = await db.group.findUnique({ where: { inviteCode: z.string().max(40).parse(c.req.param('code')) }, include: { members: { select: { userId: true } } } })
+  if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
+  return c.json({ id: g.id, name: g.name, kind: g.kind, theme: g.theme, people: g.members.length, joined: g.members.some(m => m.userId === c.get('userId')) })
 })
 
 api.post('/invites/:code/join', async c => {
   const g = await db.group.findUnique({ where: { inviteCode: z.string().max(40).parse(c.req.param('code')) }, include: { members: true } })
-  if (!g) return c.json({ error: 'This invite link is no longer valid' }, 404)
+  if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
   const uid = c.get('userId')
   if (g.members.some(m => m.userId === uid)) return c.json({ id: g.id })
-  const { memberId } = JoinIn.parse(await c.req.json().catch(() => ({})))
-  if (memberId) {
-    // Claim only an unclaimed guest; the conditional update makes a race between two claimers safe.
-    const { count } = await db.member.updateMany({ where: { id: memberId, groupId: g.id, userId: null }, data: { userId: uid } })
-    if (!count) return c.json({ error: 'Someone already claimed that name' }, 409)
-  } else {
-    await db.member.create({ data: { id: crypto.randomUUID(), groupId: g.id, name: c.get('userName'), userId: uid } })
-  }
+  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, emailVerified: true, name: true } })
+  const spot = me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined
+  await db.$transaction(async tx => {
+    if (spot) {
+      const { count } = await tx.member.updateMany({ where: { id: spot.id, userId: null }, data: { userId: uid, inviteToken: null } })
+      if (count) return audit(tx, g.id, { kind: 'member.joined', memberId: spot.id, byId: uid, byName: me.name, after: { name: spot.name, email: spot.email, how: 'group link' } })
+    }
+    const id = crypto.randomUUID()
+    await tx.member.create({ data: { id, groupId: g.id, name: me.name, email: me.email.toLowerCase(), userId: uid } })
+    await audit(tx, g.id, { kind: 'member.joined', memberId: id, byId: uid, byName: me.name, after: { name: me.name, how: 'group link' } })
+  })
+  return c.json({ id: g.id })
+})
+
+// ---------- friends: a two-person group per pair, for expenses outside any group ----------
+const directKey = (a: string, b: string) => createHash('sha256').update([a.toLowerCase(), b.toLowerCase()].sort().join('\n')).digest('hex')
+api.post('/friends', async c => {
+  const b = z.object({ email: z.email().max(254), name: z.string().trim().min(1).max(60) }).parse(await c.req.json())
+  const uid = c.get('userId'), email = b.email.trim().toLowerCase()
+  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, name: true } })
+  if (email === me.email.toLowerCase()) return c.json({ error: 'That’s your own email.' }, 400)
+  // ponytail: keyed by both emails; if someone changes their email a second friends balance can appear. Merge when that's reported.
+  const key = directKey(me.email, email)
+  const found = await db.group.findUnique({ where: { directKey: key }, select: { id: true } })
+  if (found) return c.json({ id: found.id })
+  const id = crypto.randomUUID(), selfId = crypto.randomUUID(), friendId = crypto.randomUUID()
+  const by = { byId: uid, byName: me.name }
+  await db.$transaction(async tx => {
+    await tx.group.create({ data: { id, name: b.name, kind: 'direct', theme: 'classic', directKey: key, inviteCode: inviteCode(), createdById: uid,
+      members: { create: [{ id: selfId, name: me.name, userId: uid, email: me.email.toLowerCase() }, { id: friendId, name: b.name, email }] } } })
+    await audit(tx, id, { kind: 'group.created', memberId: selfId, ...by, after: { kind: 'direct' } })
+    await audit(tx, id, { kind: 'member.invited', memberId: friendId, ...by, after: { name: b.name, email } })
+  }).catch(async e => {
+    // Both added each other at the same moment: the other request made it first.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return
+    throw e
+  })
+  const g = await db.group.findUniqueOrThrow({ where: { directKey: key }, select: { id: true } })
+  if (g.id === id) await inviteByEmail(id, friendId, email, me.name)
   return c.json({ id: g.id })
 })

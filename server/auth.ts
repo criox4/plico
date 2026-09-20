@@ -3,7 +3,7 @@ import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { bearer } from 'better-auth/plugins'
 import { db } from './db.ts'
 import { mail } from './email.ts'
-import { linkByEmail } from './links.ts'
+import { linkByEmail } from './audit.ts'
 import { isVpa } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
 

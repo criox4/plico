@@ -3,7 +3,7 @@ import type { ThemeId as Theme } from './themes'
 export type { Theme }
 export type Id = string
 export type SplitMode = 'equal' | 'exact' | 'percent' | 'shares'
-export type Kind = 'trip' | 'home' | 'couple' | 'friends' | 'family' | 'office'
+export type Kind = 'trip' | 'home' | 'couple' | 'friends' | 'family' | 'office' | 'direct' // direct: two friends, no group
 export type Tone = 'gentle' | 'normal' | 'shameless'
 
 export type Member = {
@@ -93,6 +93,19 @@ export function balances(g: Group): Record<Id, number> {
     for (const k in e.owed) b[k] = (b[k] ?? 0) - e.owed[k]
   }
   return b
+}
+
+/**
+ * What a owes b (negative) or b owes a (positive) from the expenses themselves, not the simplified group debts:
+ * each person's share is owed to the payers in proportion to what they paid. This is the friend-to-friend balance.
+ */
+export function pairwise(g: Group, a: Id, b: Id): number {
+  let n = 0
+  for (const e of g.expenses) {
+    if (e.pending || e.rejected || !e.amount) continue
+    n += ((e.owed[b] ?? 0) * (e.paid[a] ?? 0) - (e.owed[a] ?? 0) * (e.paid[b] ?? 0)) / e.amount
+  }
+  return Math.round(n)
 }
 
 /** A settlement waits for the payee unless the payee recorded it or can't confirm (a guest without an account). */
@@ -372,3 +385,36 @@ export function summary(s: Snap, name: (id: Id) => string): string {
   return s.settle ? `${inr(s.amount)} from ${payers} to ${list(owe.map(x => name(x.memberId)))}`
     : `${inr(s.amount)}, paid by ${payers}, split between ${owe.length === 1 ? name(owe[0].memberId) : owe.length}`
 }
+
+// ---------- the money audit ----------
+/** JSON with keys sorted at every level: the same bytes on phone and server, whatever order jsonb stored them in. */
+export function canon(v: unknown): string {
+  if (v === undefined || v === null) return 'null'
+  if (Array.isArray(v)) return `[${v.map(canon).join(',')}]`
+  if (typeof v === 'object') return `{${Object.keys(v).sort().filter(k => (v as Record<string, unknown>)[k] !== undefined).map(k => `${JSON.stringify(k)}:${canon((v as Record<string, unknown>)[k])}`).join(',')}}`
+  return JSON.stringify(v)
+}
+
+/** Change in each member's balance from one version of an expense to the next (null = didn't exist / deleted). Sums to 0. */
+export function effectOf(before: Snap | null, after: Snap | null): Record<Id, number> {
+  const net = (x: Snap | null) => {
+    const out: Record<Id, number> = {}
+    if (!x || x.pending || x.rejected) return out // unconfirmed settlements don't move balances yet
+    for (const s of x.shares) out[s.memberId] = (out[s.memberId] ?? 0) + s.paid - s.owed
+    return out
+  }
+  const a = net(before), b = net(after), fx: Record<Id, number> = {}
+  for (const k of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) { const d = (b[k] ?? 0) - (a[k] ?? 0); if (d) fx[k] = d }
+  return fx
+}
+
+export type AuditEntry = {
+  groupId: string; seq: number; kind: string; expenseId?: string | null; memberId?: string | null; version?: number | null; revertOf?: number | null
+  byId?: string | null; byName: string; at: string; before?: unknown; after?: unknown; effect: Record<Id, number>; prevHash: string; hash?: string
+}
+/** What the hash covers: every field of the entry except the hash itself. */
+export const auditPayload = (e: AuditEntry) => canon({
+  groupId: e.groupId, seq: e.seq, kind: e.kind, expenseId: e.expenseId ?? null, memberId: e.memberId ?? null, version: e.version ?? null,
+  revertOf: e.revertOf ?? null, byId: e.byId ?? null, byName: e.byName, at: e.at, before: e.before ?? null, after: e.after ?? null, effect: e.effect,
+})
+export const GENESIS = '0'.repeat(64)
