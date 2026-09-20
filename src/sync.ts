@@ -212,7 +212,7 @@ export type ServerExpense = Snap & {
 }
 type ServerGroup = {
   id: string; name: string; kind: Group['kind']; theme: Group['theme']; track: boolean; emoji: string | null; cover: string | null; createdById: string
-  members: { id: string; name: string; upi: string | null; userId: string | null; email: string | null; phone: string | null; invitedAt: string | null; user?: { image: string | null } | null }[]
+  members: { id: string; name: string; upi: string | null; userId: string | null; email: string | null; phone: string | null; invitedAt: string | null; user?: { image: string | null; email: string } | null }[]
   expenses: ServerExpense[]
   full: boolean // false: `expenses` holds only what changed since the cursor, deletions included
 }
@@ -245,7 +245,7 @@ export function toClient(sg: ServerGroup, userId: string): Group {
   return {
     id: sg.id, name: sg.name, kind: sg.kind, theme: sg.theme, track: sg.track || undefined, emoji: sg.emoji ?? undefined, cover: sg.cover ?? undefined, selfId: self?.id, mine: sg.createdById === userId,
     members: sg.members.map(m => (m.id === self?.id ? { id: ME, name: 'Me' } : {
-      id: m.id, name: m.name, upi: m.upi ?? undefined, email: m.email ?? undefined, phone: m.phone ?? undefined,
+      id: m.id, name: m.name, upi: m.upi ?? undefined, email: (m.email ?? m.user?.email)?.toLowerCase() || undefined, phone: m.phone ?? undefined,
       joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined, image: m.user?.image ?? undefined,
     })),
     expenses: sg.expenses.filter(e => !e.deletedAt).map(e => expenseFromServer(e, self?.id)),

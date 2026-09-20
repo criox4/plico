@@ -37,7 +37,8 @@ export async function linkByEmail(userId: string, email: string) {
   const spots = await db.member.findMany({ where: { email: { equals: email.trim(), mode: 'insensitive' }, userId: null, group: { members: { none: { userId } } } } })
   for (const m of spots) {
     await db.$transaction(async tx => {
-      const { count } = await tx.member.updateMany({ where: { id: m.id, userId: null }, data: { userId, inviteToken: null } })
+      // Their account's own name replaces whatever the inviter typed.
+      const { count } = await tx.member.updateMany({ where: { id: m.id, userId: null }, data: { userId, inviteToken: null, ...(user?.name && { name: user.name }) } })
       if (count) await audit(tx, m.groupId, { kind: 'member.joined', memberId: m.id, byId: userId, byName: user?.name ?? m.name, after: { name: m.name, email: m.email, how: 'email' } })
     })
   }

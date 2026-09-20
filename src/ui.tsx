@@ -29,8 +29,13 @@ export const KINDS: Record<Kind, { label: string; theme: ThemeId; hint: string }
   friends: { label: 'Friends', theme: 'cyber', hint: 'Weekend gang' },
   office: { label: 'Office', theme: 'mono', hint: 'Team lunch' },
   family: { label: 'Family', theme: 'khata', hint: 'Sharma family' },
+  direct: { label: 'Friend', theme: 'classic', hint: '' }, // two friends, no group: made from the Friends tab
 }
+/** The kinds you can pick when making a group. */
+export const GROUP_KINDS = (Object.keys(KINDS) as Kind[]).filter(k => k !== 'direct')
 export const PUBLIC = import.meta.env.VITE_PUBLIC_URL || location.origin
+/** A group's display name: a friends (direct) group is called by the other person's name. */
+export const groupTitle = (g: Group) => (g.kind === 'direct' ? g.members.find(m => m.id !== ME)?.name ?? 'Friend' : g.name)
 export const who = (g: Group, id: Id) => (id === ME ? 'You' : g.members.find(m => m.id === id)?.name ?? 'Someone')
 export const realName = (s: State, g: Group, id: Id) => (id === ME ? s.me.name || 'Me' : who(g, id))
 export const upiOf = (s: State, g: Group, id: Id) => (id === ME ? s.me.upi : g.members.find(m => m.id === id)?.upi) ?? ''
@@ -52,9 +57,9 @@ export const TONES = {
   shameless: (a: string, to: string, g: string) => `${g} is over. The ${a} subplot continues. It goes to ${to}.`,
 }
 export const shareLink = (s: State, g: Group, t: Transfer) =>
-  `${PUBLIC}/#/s/${encodeShare({ g: g.name, f: realName(s, g, t.from), t: realName(s, g, t.to), v: upiOf(s, g, t.to) || undefined, a: t.amount })}`
+  `${PUBLIC}/#/s/${encodeShare({ g: groupTitle(g), f: realName(s, g, t.from), t: realName(s, g, t.to), v: upiOf(s, g, t.to) || undefined, a: t.amount })}`
 export const reminder = (s: State, g: Group, t: Transfer) =>
-  `${TONES[s.tone](inr(t.amount), realName(s, g, t.to), g.name)}\nPay here: ${shareLink(s, g, t)}`
+  `${TONES[s.tone](inr(t.amount), realName(s, g, t.to), groupTitle(g))}\nPay here: ${shareLink(s, g, t)}`
 export const wa = (text: string) => 'https://wa.me/?text=' + encodeURIComponent(text)
 
 // ---------- ornaments (crisp vector geometry, not pictures) ----------
@@ -177,7 +182,9 @@ export function Screen({ t, title, back, action, fab, children }: {
       {fab && (
         <nav className="dock" aria-label="Main">
           <button className="dock-item" onClick={() => go('/')}><Icon n="home" />Home</button>
+          <button className="dock-item" onClick={() => go('/friends')}><Icon n="direct" />Friends</button>
           <button className="fab" onClick={() => go(fab)} aria-label="Add expense"><Icon n="plus" size={28} /></button>
+          <button className="dock-item" onClick={() => go('/log')}><Icon n="log" />Log</button>
           <button className="dock-item" onClick={() => go('/me')}><Icon n="user" />You</button>
         </nav>
       )}
@@ -246,7 +253,7 @@ export function Converge({ s, g, e }: { s: State; g: Group; e: Expense }) {
         })}
         <p className="cv-num">{line}</p>
       </div>
-      <p className="cv-title">{e.title} · {g.name}</p>
+      <p className="cv-title">{e.title} · {groupTitle(g)}</p>
     </div>
   )
 }
@@ -335,7 +342,7 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
         <span className={`cat ${e.settle && !e.pending && !e.rejected ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
         <span className="lr-body">
           <strong>{e.settle ? `${by} paid ${lower(who(g, Object.keys(e.owed)[0]))}` : e.title}</strong>
-          <small><span className="serial">{no} · </span>{e.rejected ? 'not received' : e.pending ? 'waiting to confirm' : e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${g.name}` : ''}</small>
+          <small><span className="serial">{no} · </span>{e.rejected ? 'not received' : e.pending ? 'waiting to confirm' : e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${groupTitle(g)}` : ''}</small>
         </span>
         {e.settle ? <span className="lr-amt"><span className={`money ${e.pending || e.rejected ? 'muted-ink' : 'settled-ink'}`}>{inr(e.amount)}</span></span>
           : <span className="lr-amt"><Money p={mine} sign /><small>{mine > 0 ? 'you lent' : mine < 0 ? 'your share' : 'not in it'}</small></span>}
@@ -365,7 +372,7 @@ export function NotReceivedCard({ g, e, showGroup }: { g: Group; e: Expense; sho
   return (
     <li className="confirm-card warn">
       <p><strong>{who(g, to)} hasn’t got your <span className="money">{inr(e.amount)}</span> yet</strong>
-        <small>{showGroup ? `${g.name} · ` : ''}Check your UPI app. If it went through, send them the transaction ID.</small></p>
+        <small>{showGroup ? `${groupTitle(g)} · ` : ''}Check your UPI app. If it went through, send them the transaction ID.</small></p>
       <span className="debt-actions">
         <button className="btn-sm" onClick={() => { drop(g.id, e.id); go(`/g/${g.id}/pay/${ME}/${to}/${e.amount}`) }}>Pay again</button>
         <button className="btn-sm ghost" onClick={() => drop(g.id, e.id)}>Dismiss</button>
@@ -380,7 +387,7 @@ export function ConfirmCard({ g, e, showGroup }: { g: Group; e: Expense; showGro
   return (
     <li className="confirm-card">
       <p><strong>{who(g, from)} marked <span className="money">{inr(e.amount)}</span> as paid to you</strong>
-        <small>{showGroup ? `${g.name} · ` : ''}Check your UPI app first.</small></p>
+        <small>{showGroup ? `${groupTitle(g)} · ` : ''}Check your UPI app first.</small></p>
       <span className="debt-actions">
         <button className="btn-sm" onClick={() => setPending(g.id, e.id, true)}><Icon n="check" size={16} />Got it</button>
         <button className="btn-sm ghost" onClick={() => setPending(g.id, e.id, false)}>Not yet</button>
@@ -398,7 +405,7 @@ function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean 
 }
 
 export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNode }) {
-  const rows = s.groups.map(g => ({ g, net: balances(g)[ME] ?? 0 }))
+  const rows = s.groups.filter(g => g.kind !== 'direct').map(g => ({ g, net: balances(g)[ME] ?? 0 }))
   const live = rows.filter(r => !r.g.track)
   const total = live.reduce((a, r) => a + r.net, 0)
   const collect = live.reduce((a, r) => a + Math.max(r.net, 0), 0)
@@ -471,9 +478,9 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
   const cover = useGroupImage(g.id, g.cover)
   const waiting = (d: Transfer) => g.expenses.find(e => e.pending && ends(e).from === d.from && ends(e).to === d.to)
   const list = g.expenses.map((e, i) => ({ e, i })).sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
-  const remindAll = `Tiny reminder from ${g.name}:\n` + toMe.map(d => `${realName(s, g, d.from)}: ${inr(d.amount)} → ${shareLink(s, g, d)}`).join('\n')
+  const remindAll = `Tiny reminder from ${groupTitle(g)}:\n` + toMe.map(d => `${realName(s, g, d.from)}: ${inr(d.amount)} → ${shareLink(s, g, d)}`).join('\n')
   return (
-    <Screen t={t} back title={g.name} fab={`/g/${g.id}/add`}
+    <Screen t={t} back title={groupTitle(g)} fab={`/g/${g.id}/add`}
       action={<button className="iconbtn" aria-label="Group settings" onClick={() => go(`/g/${g.id}/edit`)}><Icon n="settings" /></button>}>
       {g.cover && <div className="group-cover">{cover.url && <img src={cover.url} alt="" />}</div>}
       <Denomination t={t} amount={net} line={g.track ? 'Tracking only, no nudges' : verb(g, net)}
@@ -504,7 +511,7 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
           ))}
         </ol>
       </>}
-      <SectionHead title="Expenses" action={<button className="link" onClick={() => go(`/g/${g.id}/activity`)}>Activity</button>} />
+      <SectionHead title="Expenses" action={<button className="link" onClick={() => go(`/g/${g.id}/audit`)}>Audit log</button>} />
       {list.length ? <ol className="ledger">{list.map(({ e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} />)}</ol>
         : <Peaceful />}
     </Screen>
@@ -517,7 +524,7 @@ export function Settle({ s, g, from, to, amount, t = g.theme, onRecord }: {
   const payee = realName(s, g, to)
   const vpa = upiOf(s, g, to)
   const [asked, setAsked] = useState(false)
-  const note = `${g.name} settlement`
+  const note = g.kind === 'direct' ? 'Plico settlement' : `${g.name} settlement`
   const link = isVpa(vpa) ? upiLink(vpa, payee, amount, note) : ''
   const qr = useQr(link)
   return (

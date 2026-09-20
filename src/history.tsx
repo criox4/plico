@@ -1,9 +1,12 @@
-// Sync issues (conflicts, refused changes), the group activity feed and one expense's history.
+// Sync issues (conflicts, refused changes), the money audit (group log, my money log, CSV) and one expense's history.
 import { useEffect, useState } from 'react'
-import { changes, inr, summary, type Group, type Id, type Snap } from './logic'
+import { Capacitor } from '@capacitor/core'
+import { GENESIS, ME, auditPayload, balances, changes, inr, summary, type Group, type Id, type Snap } from './logic'
+import { theme, type ThemeId } from './themes'
+import { groupTitle } from './people'
 import type { State } from './store'
 import { api, bodySnap, resolveIssue, restoreExpense, revertExpense, useSync, type Issue, type ServerExpense } from './sync'
-import { Avatar, Screen, count, go } from './ui'
+import { Avatar, Denomination, Screen, count, go } from './ui'
 import { Icon } from './icons'
 
 const when = (at: string) => {
@@ -12,6 +15,15 @@ const when = (at: string) => {
   return d.toDateString() === new Date().toDateString() ? `today, ${t}` : `${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${t}`
 }
 /** Server member id → a name in sentences ("paid by you"). */
+/** One version in the expense history: who did what, the changes, and the money it moved. */
+function VersionLine({ s, g, e }: { s: State; g: Group; e: Event }) {
+  const d = describe(e, g, s.user?.id)
+  return <>
+    <p><strong>{d.line.replace(/ “.*”$/, '')}</strong></p>
+    {d.details.length > 0 && <ul className="changes">{d.details.map(w => <li key={w}>{cap(w)}</li>)}</ul>}
+    {d.moves.length > 0 && <p className="moves">{d.moves.join(' · ')}</p>}
+  </>
+}
 const namer = (g: Group | undefined) => (id: Id) => (id === g?.selfId ? 'you' : g?.members.find(m => m.id === id)?.name ?? 'someone')
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
@@ -86,67 +98,169 @@ function Compare({ mine, theirs, name }: { mine: Snap; theirs: Snap; name: (id: 
   )
 }
 
-// ---------- activity feed ----------
-type Event = { id: string; expenseId: string; version: number; action: string; revertOf: number | null; byId: string | null; byName: string; at: string
-  before: (Snap & Partial<ServerExpense>) | null; after: (Snap & Partial<ServerExpense>) | null }
-const VERB: Record<string, string> = { created: 'added', edited: 'changed', deleted: 'deleted', restored: 'restored', reverted: 'put back an older version of' }
-
+// ---------- the money audit ----------
+type Event = {
+  seq: number; groupId: string; kind: string; expenseId: string | null; memberId: string | null; version: number; revertOf: number | null
+  byId: string | null; byName: string; at: string; before: (Snap & Record<string, unknown>) | null; after: (Snap & Record<string, unknown>) | null
+  effect: Record<string, number>; prevHash: string; hash: string
+}
+const actionOf = (e: Event) => e.kind.split('.')[1]
 function useFetch<T>(path: string, dep: unknown = null) {
   const [data, setData] = useState<T | null>(null)
   const [err, setErr] = useState('')
   useEffect(() => { api<T>(path).then(setData, () => setErr(navigator.onLine ? 'Couldn’t load this. Try again.' : 'History needs a connection. Come back online to see it.')) }, [path, dep])
-  return { data, err, setData }
+  return { data, err }
 }
+const signed = (n: number) => `${n > 0 ? '+' : '−'}${inr(n)}`
+const FIELD: Record<string, string> = { name: 'name', upi: 'UPI ID', email: 'email', phone: 'phone', kind: 'type', theme: 'theme', emoji: 'emoji', cover: 'cover photo', track: 'tracking only' }
+const show = (k: string, v: unknown) => (v === null || v === '' ? 'none' : k === 'theme' ? theme(v as ThemeId).name : k === 'track' ? (v ? 'on' : 'off') : k === 'cover' ? 'a photo' : String(v))
 
-function EventLine({ s, g, e, detail = true }: { s: State; g: Group; e: Event; detail?: boolean }) {
+/** One entry in words: the headline, what changed, and who it moved money for. Used on screen and in the CSV. */
+function describe(e: Event, g: Group | undefined, meId?: string) {
   const name = namer(g)
-  const actor = e.byId && e.byId === s.user?.id ? 'You' : e.byName
+  const actor = e.byId && e.byId === meId ? 'You' : e.byName
+  const [area, a] = e.kind.split('.')
   const snap = e.after ?? e.before
-  const what = e.action === 'edited' || e.action === 'reverted' ? (e.before && e.after ? changes(e.before, e.after, name) : [])
-    : snap ? [summary(snap, name)] : []
-  return <>
-    <p><strong>{actor}</strong> {e.action === 'reverted' && e.revertOf ? `put back version ${e.revertOf} of` : VERB[e.action] ?? e.action} {detail && <strong>{snap?.title}</strong>}</p>
-    {what.length > 0 && <ul className="changes">{what.map(w => <li key={w}>{cap(w)}</li>)}</ul>}
-  </>
+  let line: string, details: string[] = []
+  if (area === 'expense') {
+    const verb = a === 'reverted' && e.revertOf ? `put back version ${e.revertOf} of` : ({ created: 'added', edited: 'changed', deleted: 'deleted', restored: 'restored' } as Record<string, string>)[a] ?? a
+    line = `${actor} ${verb} “${snap?.title ?? 'an expense'}”`
+    details = (a === 'edited' || a === 'reverted') && e.before && e.after ? changes(e.before, e.after, name) : snap ? [summary(snap, name)] : []
+  } else if (area === 'member') {
+    const who = String((e.after ?? e.before)?.name ?? (e.memberId ? name(e.memberId) : 'someone'))
+    const email = (e.after ?? e.before)?.email ? ` (${(e.after ?? e.before)!.email})` : ''
+    line = a === 'invited' ? `${actor} invited ${who}${email}` : a === 'joined' ? `${actor} joined${who !== actor && who !== 'you' ? ` as ${who}` : ''}`
+      : a === 'removed' ? `${actor} removed ${who}${email}` : `${actor} changed ${e.memberId === g?.selfId && actor === 'You' ? 'your' : `${e.memberId ? name(e.memberId) : who}’s`} details`
+    if (a === 'edited' && e.before && e.after) details = Object.keys(e.after).map(k => `${FIELD[k] ?? k}: ${show(k, e.before![k])} → ${show(k, e.after![k])}`)
+  } else {
+    line = a === 'created' ? (e.after?.kind === 'direct' ? `${actor} started keeping track together` : `${actor} created the group`) : `${actor} changed the group`
+    if (a === 'edited' && e.before && e.after) details = Object.keys(e.after).map(k => `${FIELD[k] ?? k}: ${show(k, e.before![k])} → ${show(k, e.after![k])}`)
+  }
+  const moves = Object.entries(e.effect ?? {}).map(([id, n]) => `${cap(name(id))} ${signed(n)}`)
+  return { line, details, moves }
 }
 
-export function Activity({ s, g }: { s: State; g: Group }) {
-  const [pages, setPages] = useState<Event[][]>([])
+async function sha256(text: string) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+/** Re-check the whole chain on this phone: each entry links to the one before and matches its own hash. */
+async function verify(events: Event[], head: { auditSeq: number; auditHash: string }) {
+  let prev = GENESIS
+  for (const [i, e] of events.entries()) {
+    if (e.seq !== i + 1 || e.prevHash !== prev) return { ok: false, at: e.seq }
+    const h = await sha256(prev + auditPayload({ ...e, at: new Date(e.at).toISOString() }))
+    if (h !== e.hash) return { ok: false, at: e.seq }
+    prev = h
+  }
+  return prev === head.auditHash && events.length === head.auditSeq ? { ok: true, at: 0 } : { ok: false, at: events.length + 1 }
+}
+
+function saveCsv(file: string, rows: (string | number)[][]) {
+  const cell = (c: string | number) => (/[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : String(c))
+  const blob = new Blob(['\ufeff' + rows.map(r => r.map(cell).join(',')).join('\n')], { type: 'text/csv' })
+  const f = new File([blob], file, { type: 'text/csv' })
+  // Phones: the share sheet (save to Files, send to yourself). Web: a download.
+  if (Capacitor.isNativePlatform() && navigator.canShare?.({ files: [f] })) return void navigator.share({ files: [f], title: file }).catch(() => {})
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob); a.download = file; a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000)
+}
+const stamp = (at: string) => new Date(at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+const rupees = (n: number) => (n / 100).toFixed(2)
+
+function Entry({ s, g, e, onRestore, busy, mine, label }: { s: State; g?: Group; e: Event; onRestore?: () => void; busy?: boolean; mine?: string; label?: string }) {
+  const d = describe(e, g, s.user?.id)
+  const go2 = e.expenseId && g ? () => go(`/g/${g.id}/e/${e.expenseId}/history`) : undefined
+  return (
+    <li>
+      <Avatar name={e.byName} size={32} />
+      <button className="feed-body" onClick={go2} disabled={!go2}>
+        {label && <small className="log-group">{label}</small>}
+        <p><strong>{d.line}</strong></p>
+        {d.details.length > 0 && <ul className="changes">{d.details.map(w => <li key={w}>{cap(w)}</li>)}</ul>}
+        {!mine && d.moves.length > 0 && <p className="moves">{d.moves.join(' · ')}</p>}
+        <small>#{e.seq} · {cap(when(e.at))}</small>
+      </button>
+      {mine ? <span className={`money ${e.effect[mine] > 0 ? 'pos' : 'neg'}`}>{signed(e.effect[mine])}</span>
+        : onRestore && <button className="btn-sm" disabled={busy} onClick={onRestore}>{busy ? '…' : 'Restore'}</button>}
+    </li>
+  )
+}
+
+export function AuditLog({ s, g }: { s: State; g: Group }) {
+  const [log, setLog] = useState<{ head: { auditSeq: number; auditHash: string }; events: Event[] } | null>(null)
+  const [check, setCheck] = useState<{ ok: boolean; at: number } | null>(null)
   const [err, setErr] = useState('')
-  const [end, setEnd] = useState(false)
-  const load = (before?: string) => api<Event[]>(`/api/groups/${g.id}/activity${before ? `?before=${encodeURIComponent(before)}` : ''}`)
-    .then(p => { setPages(x => (before ? [...x, p] : [p])); setEnd(p.length < 40) },
-      () => setErr(navigator.onLine ? 'Couldn’t load activity. Try again.' : 'Activity needs a connection. Come back online to see it.'))
-  useEffect(() => { void load() }, [g.id, g.expenses.length])
-  const events = pages.flat()
-  const live = new Set(g.expenses.map(e => e.id))
+  const [shown, setShown] = useState(50)
   const [busy, setBusy] = useState('')
+  const load = () => api<{ head: { auditSeq: number; auditHash: string }; events: Event[] }>(`/api/groups/${g.id}/audit`)
+    .then(l => { setLog(l); setCheck(null); void verify(l.events, l.head).then(setCheck) },
+      () => setErr(navigator.onLine ? 'Couldn’t load the audit log. Try again.' : 'The audit log needs a connection. Come back online to see it.'))
+  useEffect(() => { void load() }, [g.id, g.expenses.length])
+  const live = new Set(g.expenses.map(e => e.id))
+  const lastOf = new Map((log?.events ?? []).filter(e => e.expenseId).map(e => [e.expenseId!, e.seq]))
   const restore = async (eid: string) => {
     setBusy(eid)
     await restoreExpense(g.id, eid).catch(e => setErr((e as Error).message))
     setBusy(''); void load()
   }
+  const csv = () => log && saveCsv(`plico-${groupTitle(g).replace(/\W+/g, '-').toLowerCase()}-audit.csv`, [
+    ['#', 'When', 'Who', 'What', 'Details', ...g.members.map(m => `${m.id === 'me' ? s.me.name || 'You' : m.name} (₹)`), 'Hash'],
+    ...log.events.map(e => {
+      const d = describe(e, g, s.user?.id)
+      const idOf = (m: Group['members'][number]) => (m.id === 'me' ? g.selfId! : m.id)
+      return [e.seq, stamp(e.at), e.byName, d.line, d.details.join('; '), ...g.members.map(m => (e.effect[idOf(m)] ? rupees(e.effect[idOf(m)]) : '')), e.hash]
+    }),
+  ])
+  const events = [...(log?.events ?? [])].reverse()
   return (
-    <Screen t={g.theme} back title="Activity">
+    <Screen t={g.theme} back title="Audit log">
+      {check && (check.ok
+        ? <p className="verified"><Icon n="shield" size={20} /><span><strong>Verified: {count(log!.events.length, 'entry', 'entries')}, unbroken</strong><small>Checked on this phone. Every entry is sealed to the one before it, so no past record can be changed or removed without it showing here.</small></span></p>
+        : <p className="error" role="alert">Entry #{check.at} doesn’t match its seal. The log may have been altered after it was written. Please report this to privacy@plico.space.</p>)}
       {err && <p className="error" role="alert">{err}</p>}
-      {!err && !pages.length && <p className="muted-p">Loading…</p>}
-      {pages.length > 0 && !events.length && <p className="muted-p">Nothing yet. Every expense added, changed or deleted in {g.name} shows up here, with who did it.</p>}
+      {!err && !log && <p className="muted-p">Loading…</p>}
+      {log && <div className="row"><button className="btn secondary" onClick={csv}><Icon n="copy" size={18} />Export CSV</button></div>}
       <ol className="feed">
-        {events.map(e => {
-          const gone = e.action === 'deleted' && !live.has(e.expenseId)
-          return (
-            <li key={e.id}>
-              <Avatar name={e.byName} size={32} />
-              <button className="feed-body" onClick={() => go(`/g/${g.id}/e/${e.expenseId}/history`)} aria-label={`History of ${(e.after ?? e.before)?.title}`}>
-                <EventLine s={s} g={g} e={e} />
-                <small>{cap(when(e.at))}</small>
-              </button>
-              {gone && <button className="btn-sm" disabled={!!busy} onClick={() => void restore(e.expenseId)}>{busy === e.expenseId ? '…' : 'Restore'}</button>}
-            </li>
-          )
-        })}
+        {events.slice(0, shown).map(e => (
+          <Entry key={e.seq} s={s} g={g} e={e} busy={busy === e.expenseId}
+            onRestore={e.kind === 'expense.deleted' && !live.has(e.expenseId!) && lastOf.get(e.expenseId!) === e.seq ? () => void restore(e.expenseId!) : undefined} />
+        ))}
       </ol>
-      {events.length > 0 && !end && <button className="btn secondary" onClick={() => void load(events.at(-1)!.at)}>Show older</button>}
+      {events.length > shown && <button className="btn secondary" onClick={() => setShown(shown + 50)}>Show older</button>}
+    </Screen>
+  )
+}
+
+// ---------- My money log: everything that moved my balance, across groups ----------
+type Mine = Event & { memberOf: string; group: { name: string; kind: string } }
+export function MoneyLog({ s }: { s: State }) {
+  const [rows, setRows] = useState<Mine[]>([])
+  const [more, setMore] = useState<string | null>(null)
+  const [err, setErr] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  const load = (before?: string) => api<{ events: Mine[]; more: boolean; last: string | null }>(`/api/me/audit${before ? `?before=${encodeURIComponent(before)}` : ''}`)
+    .then(r => { setRows(x => (before ? [...x, ...r.events] : r.events)); setMore(r.more ? r.last : null); setLoaded(true) },
+      () => setErr(navigator.onLine ? 'Couldn’t load your money log. Try again.' : 'Your money log needs a connection. Come back online to see it.'))
+  useEffect(() => { void load() }, [])
+  const total = s.groups.reduce((a, g) => a + (balances(g)[ME] ?? 0), 0)
+  const gOf = (id: string) => s.groups.find(g => g.id === id)
+  const title = (e: Mine) => (gOf(e.groupId) ? groupTitle(gOf(e.groupId)!) : e.group.name)
+  const csv = () => saveCsv('plico-my-money-log.csv', [
+    ['When', 'Group', 'Who', 'What', 'Details', 'My balance change (₹)', 'Group entry #', 'Hash'],
+    ...rows.map(e => { const d = describe(e, gOf(e.groupId), s.user?.id); return [stamp(e.at), title(e), e.byName, d.line, d.details.join('; '), rupees(e.effect[e.memberOf]), e.seq, e.hash] }),
+  ])
+  return (
+    <Screen t={s.theme} fab="/add" title="Money log">
+      <Denomination t={s.theme} amount={total} line={total > 0 ? 'You’re owed overall' : total < 0 ? 'You owe overall' : 'All even'} caption="Every change to your balance, newest first" />
+      {err && <p className="error" role="alert">{err}</p>}
+      {loaded && !rows.length && <p className="muted-p">Nothing has moved your balance yet. Expenses and settlements you’re part of show up here, with who made each change.</p>}
+      {rows.length > 0 && <div className="row"><button className="btn secondary" onClick={csv}><Icon n="copy" size={18} />Export CSV</button></div>}
+      <ol className="feed">
+        {rows.map(e => <Entry key={e.groupId + e.seq} s={s} g={gOf(e.groupId)} e={e} mine={e.memberOf} label={title(e)} />)}
+      </ol>
+      {more && <button className="btn secondary" onClick={() => void load(more)}>Show older</button>}
     </Screen>
   )
 }
@@ -158,7 +272,7 @@ export function ExpenseHistory({ s, g, eid }: { s: State; g: Group; eid: Id }) {
   const [busy, setBusy] = useState(0)
   const [note, setNote] = useState('')
   const latest = data?.at(-1)
-  const deleted = latest?.action === 'deleted'
+  const deleted = latest ? actionOf(latest) === 'deleted' : false
   const title = (latest?.after ?? latest?.before)?.title ?? local?.title ?? 'Expense'
   const act = async (v: number, fn: () => Promise<void>) => {
     setBusy(v); setNote('')
@@ -177,9 +291,9 @@ export function ExpenseHistory({ s, g, eid }: { s: State; g: Group; eid: Id }) {
         {[...(data ?? [])].reverse().map(e => {
           const current = e === latest && !deleted
           return (
-            <li key={e.id} className={current ? 'current' : ''}>
+            <li key={e.seq} className={current ? 'current' : ''}>
               <p className="ver-head"><span className="ver-n">v{e.version}</span><small>{cap(when(e.at))}</small>{current && <span className="tag">Current</span>}</p>
-              <EventLine s={s} g={g} e={e} detail={false} />
+              <VersionLine s={s} g={g} e={e} />
               {!current && !deleted && e.after && latest && (
                 <button className="link" disabled={!!busy} onClick={() => void act(e.version, () => revertExpense(g.id, eid, e.after!, e.version, latest.version))}>
                   <Icon n="back" size={16} />{busy === e.version ? 'Restoring…' : 'Restore this version'}

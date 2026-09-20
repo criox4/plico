@@ -189,7 +189,7 @@ api.get('/groups', async c => {
   const known = new Set((c.req.query('known') ?? '').split(',').filter(Boolean))
   const groups = await db.group.findMany({
     where: { members: { some: { userId: uid } } },
-    include: { members: { orderBy: { createdAt: 'asc' }, omit: { inviteToken: true }, include: { user: { select: { image: true } } } } },
+    include: { members: { orderBy: { createdAt: 'asc' }, omit: { inviteToken: true }, include: { user: { select: { image: true, email: true } } } } },
     orderBy: { createdAt: 'desc' },
   })
   const delta = since && !isNaN(+since) ? groups.filter(g => known.has(g.id)).map(g => g.id) : []
@@ -329,7 +329,7 @@ async function inviteByEmail(gid: string, mid: string, email: string, inviter: s
   const user = await db.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, emailVerified: true } })
   if (user) {
     const count = await db.$transaction(async tx => {
-      const { count } = await tx.member.updateMany({ where: { id: mid, userId: null, group: { members: { none: { userId: user.id } } } }, data: { userId: user.id, inviteToken: null } })
+      const { count } = await tx.member.updateMany({ where: { id: mid, userId: null, group: { members: { none: { userId: user.id } } } }, data: { userId: user.id, inviteToken: null, name: user.name } })
       if (count) await audit(tx, gid, { kind: 'member.joined', memberId: mid, byId: user.id, byName: user.name, after: { email, how: 'email' } })
       return count
     })
@@ -577,7 +577,7 @@ api.post('/claim/:token', async c => {
   if (!m || m.userId) return c.json({ error: 'This invite was already used or is no longer valid' }, 404)
   if (await membership(m.groupId, uid)) return c.json({ id: m.groupId }) // already in via another spot
   const count = await db.$transaction(async tx => {
-    const { count } = await tx.member.updateMany({ where: { id: m.id, userId: null }, data: { userId: uid, inviteToken: null } })
+    const { count } = await tx.member.updateMany({ where: { id: m.id, userId: null }, data: { userId: uid, inviteToken: null, name: c.get('userName') } })
     if (count) await audit(tx, m.groupId, { kind: 'member.joined', memberId: m.id, byId: uid, byName: c.get('userName'), after: { name: m.name, email: m.email, how: 'invite link' } })
     return count
   })
@@ -602,7 +602,7 @@ api.post('/invites/:code/join', async c => {
   const spot = me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined
   await db.$transaction(async tx => {
     if (spot) {
-      const { count } = await tx.member.updateMany({ where: { id: spot.id, userId: null }, data: { userId: uid, inviteToken: null } })
+      const { count } = await tx.member.updateMany({ where: { id: spot.id, userId: null }, data: { userId: uid, inviteToken: null, name: me.name } })
       if (count) return audit(tx, g.id, { kind: 'member.joined', memberId: spot.id, byId: uid, byName: me.name, after: { name: spot.name, email: spot.email, how: 'group link' } })
     }
     const id = crypto.randomUUID()
