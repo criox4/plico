@@ -1,6 +1,6 @@
 # Plico: architecture and technical decisions
 
-Status as of 2026-09-27. What Plico is built with, why, where it's weak, and how it compares with Splitwise and the rest of the market. The plan for the next sync changes is in `PLAN.md` → *Sync v2*.
+Status as of 2026-09-27 (Sync v2 shipped). What Plico is built with, why, where it's weak, and how it compares with Splitwise and the rest of the market. The plan for the next sync changes is in `PLAN.md` → *Sync v2*.
 
 ## Shape of the system
 
@@ -88,40 +88,22 @@ See *Sync* below.
 
 ## Sync
 
-### Today
+### How it works (Sync v2, shipped 2026-09-27)
 
 | Piece | How |
 |---|---|
-| Local data | Whole state as JSON in one `localStorage` key (`splittr`), saved on every edit |
-| Outbox | `localStorage` key `splittr-outbox`: an ordered list of `{method, path, body}` |
-| Making ops | Debounced diff of current state vs last synced snapshot → PUT/DELETE per changed group, member, expense. Order: profile, groups, members, expenses, then deletes in reverse |
-| Sending | One op at a time, in order. Network error → stop, retry on `online`, on app focus, every 30 s. 5xx → keep and retry. 401 → signed out. Other 4xx → dropped, the next pull restores the server's version |
-| Pulling | `GET /api/groups` returns every group in full. Skipped while ops are queued (local edits must land first); after a flush, the server copy replaces the local one |
-| Server write | Each expense PUT is one transaction: upsert the expense, replace its shares. Idempotent: the same op twice gives the same row |
-| IDs | UUIDs made on the phone; recurring copies use `<id>:<date>`, so two phones generating the same monthly copy write the same row |
+| Local data | Whole state in IndexedDB (`plico` → `kv`), saved on every edit; localStorage only as a fallback where IndexedDB fails. `navigator.storage.persist()` asks the browser not to evict it |
+| Outbox | Ordered list of `{method, path, body, base}` in localStorage, mirrored to native Preferences on Android/iOS (not evicted by the OS) and restored at boot if the WebView copy is gone. An owner id stops one account's queue reaching another |
+| Making ops | Debounced diff of current state vs last synced snapshot → PUT/DELETE per changed group, member, expense. Expense ops carry `base`, the version the edit started from. A newer edit to a queued expense replaces it (keeping its base) and moves behind anything it depends on |
+| Sending | One op at a time, in order. Network error → stop, retry on `online`, focus, every 30 s. 5xx → keep. 401 → signed out. **409 conflict → an issue** (yours vs theirs). **Other 4xx → an issue** (try again / discard). Group gone → its queued ops dropped, one notice |
+| Server write | Compare-and-set on `version` inside a transaction: of two edits from the same base exactly one lands. Identical content = 200 with no new version (safe retries, same recurring copy from two phones). Deletes are soft (`deletedAt`) and restorable |
+| History | Every change writes an `expense_event` (version, action, who, when, before/after snapshot) in the same transaction. Group **Activity** feed and per-expense **History**; any version can be restored (logged as "put back version n") |
+| Pulling | `GET /api/groups?since=<cursor>&known=<ids>`: only what changed, tombstones included; unknown groups in full. Full pull at launch and after any issue. Skipped while ops are queued |
+| IDs | UUIDs made on the phone; recurring copies use `<id>:<date>` |
 
-**What's safe:**
-- Concurrent *adds* never collide.
-- Balances can't drift.
-- A half-written expense can't exist.
-- Retries don't duplicate.
-- Each person's own profile can only be written by them.
+Tested by `scripts/sync-race.mts` (three API clients: edit vs edit, edit vs delete both ways, lost-response retry, 60 concurrent adds, 10 simultaneous edit races, duplicate recurring copies, delta pulls, history) and a two-browser end-to-end run (both offline, both edit, conflict card, keep mine, delete vs edit, activity, restore, restore a version, reload from IndexedDB).
 
-**What isn't (the reason for Sync v2):**
-- Edits to the *same* expense are last-write-wins with no warning.
-- An offline edit resurrects an expense someone deleted.
-- Refused changes are dropped silently.
-- WebView storage can be evicted by the OS.
-- Every pull is a full download.
-
-### Sync v2 (planned, `PLAN.md`)
-- A version number per expense, sent with every edit as `base`.
-- The server refuses stale edits with **409** and returns the other version; the user picks *keep mine* / *keep theirs*.
-- Soft deletes with **restore**.
-- Delta pulls with tombstones.
-- Coalesced outbox ops.
-- Refused changes shown, not dropped.
-- Outbox in native Preferences, group cache in IndexedDB.
+**Still last-write-wins, by choice:** group settings (name, theme, emoji, cover) and guest details. Low stakes, and your own profile is only writable by you.
 
 ### Why not SQLite, CRDTs or a sync engine
 - **SQLite** on the phone (`@capacitor-community/sqlite`) adds a native dependency and a second schema to keep in step, and there's no web version without WASM. Our local data is small and read whole. IndexedDB + native Preferences gives durability without that. SQLite earns its place only if we need on-device queries over large history (search across years of expenses).
@@ -141,7 +123,7 @@ See *Sync* below.
 - **Conflicts.**
   - Their public API has `updated_at`, `updated_after` and `deleted_at`, but no ETag, version or conflict mechanism is documented ([dev.splitwise.com](https://dev.splitwise.com/)). Concurrent edits are effectively last-write-wins, like Plico today.
   - What they add on top is **transparency**: an edit history on each expense and an activity feed that says what changed ([App Store listing](https://apps.apple.com/us/app/splitwise/id458023433)).
-- **Deletes:** soft deletes with **Undelete expense** from the activity feed ([Splitwise help](https://feedback.splitwise.com/knowledgebase/articles/298437-how-do-i-restore-un-delete-an-expense)). Plico hard-deletes today; Sync v2 adds soft delete + restore.
+- **Deletes:** soft deletes with **Undelete expense** from the activity feed ([Splitwise help](https://feedback.splitwise.com/knowledgebase/articles/298437-how-do-i-restore-un-delete-an-expense)). Plico now does the same, plus restoring any earlier version.
 - **Retries:** `create_expense` isn't documented as idempotent, and a 200 can still carry errors ([dev.splitwise.com](https://dev.splitwise.com/)). Plico's PUT-by-client-ID is idempotent by design.
 - **Balances:** returned by the server per friend and per group, with `original_debts`, `simplified_debts` and `simplify_by_default`, multi-currency. Plico derives balances from expenses on both client and server, INR only for now.
 - **India and payments:**
@@ -158,8 +140,8 @@ See *Sync* below.
 | Client tech | One React codebase → PWA + Android + iOS (Capacitor) | Native Kotlin + native iOS + web | Native apps + web | Native apps + web | Native apps, no web |
 | Backend | Hono + Postgres (Supabase, Mumbai) | Ruby on Rails | Proprietary | Firebase Realtime Database ([api.settleup.io](https://api.settleup.io/)) | Proprietary |
 | Offline | Everything, including new groups and people | Add/remove expenses in existing groups | Yes | Yes (Firebase offline cache) | Yes, a headline feature |
-| Same-record conflicts | Last write wins (v2: 409 + "keep mine / theirs") | Last write wins + edit history | Not documented | Firebase last write wins per field | Not documented |
-| Deleted expenses | Hard delete (v2: soft + restore) | Soft delete + undelete | Not documented | Not documented | Not documented |
+| Same-record conflicts | Detected: 409 + "keep mine / keep theirs" | Last write wins + edit history | Not documented | Firebase last write wins per field | Not documented |
+| Deleted expenses | Soft delete + restore, full version history | Soft delete + undelete | Not documented | Not documented | Not documented |
 | Account needed | Yes (free) | Yes | Yes | Yes | No |
 | UPI settle-up | Native: intent link, QR, payee confirms | Paytm-only (Android) | No | No | No |
 | Receipt / screenshot capture | AI, free, opt-in, with line items | Pro only | No | No | No |
@@ -184,7 +166,7 @@ Sources: [Hippo Split comparison](https://hipposplit.com/blog/splitwise-vs-trico
 
 | Where Splitwise is ahead | Our plan |
 |---|---|
-| Edit history and activity feed, undelete | Sync v2 (undelete), then the activity log |
+| ~~Edit history and activity feed, undelete~~ | Done in Sync v2, with per-version restore on top |
 | Push notifications | Server push after Sync v2 |
 | Multi-currency | Not planned yet: INR-first by product choice |
 | 14 years of scale and polish | — |
@@ -196,8 +178,7 @@ Sources: [Hippo Split comparison](https://hipposplit.com/blog/splitwise-vs-trico
 
 | Ceiling | Upgrade path |
 |---|---|
-| `localStorage` ~5 MB for all groups | IndexedDB (Sync v2 step 7) |
-| Full pull every 30 s | Delta pulls (Sync v2 step 3), then server push |
+| Polling every 30 s (deltas only) | Server push (SSE) when groups get busy |
 | AI rate limit is in-memory per server process (40/hour/user) | Move it to Postgres or Redis when the server runs more than one instance (Vercel does) |
 | No per-user write rate limits on uploads, members or expenses | Add alongside the AI limiter |
 | Native auth token in app preferences, not Keychain/Keystore | Secure-storage plugin |
