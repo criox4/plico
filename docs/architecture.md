@@ -66,6 +66,10 @@ See *Sync* below.
 - Add a guest by name; optionally add an email (auto-links when that email is verified) or a phone (WhatsApp claim link; phones are never auto-linked).
 - A group link/QR lets people join and pick which guest they are.
 
+**People are real accounts.** Everyone in a group is an account or an email placeholder that becomes one when they join (verified email match or their personal link). No name-only guests. Friends are keyed by email; the balance between two friends is pairwise across all shared groups, and expenses outside groups live in a two-person `direct` group (one per pair of emails).
+
+**The money audit.** `audit_event` is an append-only log per group: every expense, settlement, person and group change, written in the same transaction as the change under a `FOR NO KEY UPDATE` lock on the group row (strict order, no deadlock with the FK key-share locks). Each entry stores its effect on every member's balance (sums to zero; replaying all effects reproduces the live balances, checked in `scripts/sync-race.mts`) and `hash = sha256(prevHash + canon(entry))`. The phone re-checks the whole chain with WebCrypto and shows it as verified; group log and personal money log export to CSV.
+
 **Privacy and compliance by default.**
 - India's DPDP Act 2023: age gate; 13–17 need a parent's consent by email; under-13 blocked.
 - Explicit opt-in before any photo goes to AI.
