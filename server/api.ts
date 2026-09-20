@@ -61,6 +61,9 @@ const ExpenseIn = z.object({
   paid: z.record(Id, Paise), owed: z.record(Id, Paise),
   mode: z.enum(['equal', 'exact', 'percent', 'shares']).nullish(), input: z.record(Id, z.number()).nullish(),
   settle: z.boolean().optional(), pending: z.boolean().optional(), rejected: z.boolean().optional(), receipt: FileName.nullish(), repeat: z.object({ next: Day, day: z.number().int().min(1).max(31) }).nullish(),
+  // The version this edit started from: null for a new expense. Absent only from pre-versioning clients (last write wins).
+  base: z.number().int().min(0).nullish(),
+  revertOf: z.number().int().min(1).optional(), // "restore this version" from the history screen
 })
 const JoinIn = z.object({ memberId: Id.optional() })
 
@@ -135,9 +138,10 @@ api.get('/me/export', async c => {
     where: { members: { some: { userId: uid } } },
     select: { id: true, name: true, kind: true, theme: true, emoji: true, createdAt: true,
       members: { select: { id: true, name: true, upi: true, email: true, phone: true, userId: true } },
-      expenses: { select: { id: true, title: true, cat: true, date: true, amount: true, settle: true, pending: true, rejected: true, receipt: true, createdAt: true, shares: { select: { memberId: true, paid: true, owed: true } } } } },
+      expenses: { select: { id: true, title: true, cat: true, date: true, amount: true, settle: true, pending: true, rejected: true, receipt: true, createdAt: true, version: true, deletedAt: true, shares: { select: { memberId: true, paid: true, owed: true } } } } },
   })
-  const data = { exportedAt: new Date(), note: 'Amounts are in paise (₹1 = 100 paise). Photos are listed by file name; download them from the app.', user, signIns: accounts, sessions, groups }
+  const history = await db.expenseEvent.findMany({ where: { byId: uid }, orderBy: { at: 'asc' }, select: { groupId: true, expenseId: true, version: true, action: true, at: true, before: true, after: true } })
+  const data = { exportedAt: new Date(), note: 'Amounts are in paise (₹1 = 100 paise). Photos are listed by file name; download them from the app. "history" lists the changes you made.', user, signIns: accounts, sessions, groups, history }
   return c.body(JSON.stringify(data, null, 2), 200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="plico-export.json"' })
 })
 
@@ -151,13 +155,68 @@ api.onError((e, c) => {
 /** The caller's membership in a group, or null. Every group route goes through this. */
 const membership = (groupId: string, userId: string) => db.member.findFirst({ where: { groupId, userId } })
 
+// ---------- expenses: versions, soft deletes, history ----------
+const withShares = { shares: { select: { memberId: true, paid: true, owed: true } } } as const
+type Stored = Prisma.ExpenseGetPayload<{ include: typeof withShares }>
+const sortKeys = (o: unknown) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b))) : o ?? null)
+/** An expense as history and conflict checks see it (key order normalised: jsonb reorders keys). */
+const snapOf = (e: Omit<Stored, 'id' | 'groupId' | 'createdById' | 'createdAt' | 'updatedAt' | 'version' | 'deletedAt' | 'updatedById'>) => ({
+  title: e.title, cat: e.cat, date: e.date, amount: e.amount, mode: e.mode, input: sortKeys(e.input), settle: e.settle, pending: e.pending, rejected: e.rejected,
+  receipt: e.receipt, repeatNext: e.repeatNext, repeatDay: e.repeatDay,
+  shares: [...e.shares].filter(x => x.paid || x.owed).sort((a, b) => a.memberId.localeCompare(b.memberId)).map(x => ({ memberId: x.memberId, paid: x.paid, owed: x.owed })),
+})
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+class Stale extends Error {}
+
+/** 409: someone changed (or deleted) it after the version this edit started from. Carries their version and who made it. */
+async function conflict(c: { json: (b: unknown, s: 409) => Response }, eid: string) {
+  const [theirs, last] = await Promise.all([
+    db.expense.findUnique({ where: { id: eid }, include: withShares }),
+    db.expenseEvent.findFirst({ where: { expenseId: eid }, orderBy: { version: 'desc' }, select: { byName: true, at: true, action: true } }),
+  ])
+  return c.json({ error: 'Someone else changed this first', code: 'conflict', theirs, by: last?.byName ?? 'Someone', at: last?.at ?? theirs?.updatedAt, action: last?.action }, 409)
+}
+
+// Groups for this user. `since` + `known` (group ids this phone already has) = only what changed, including deletions;
+// groups it doesn't know yet come in full. No `since` = everything (first launch, new device).
 api.get('/groups', async c => {
+  const uid = c.get('userId')
+  // ponytail: 10s overlap covers transactions that commit after we read; re-sending a few rows is harmless (merges are idempotent).
+  const now = new Date(Date.now() - 10_000)
+  const sinceQ = c.req.query('since'), since = sinceQ ? new Date(sinceQ) : null
+  const known = new Set((c.req.query('known') ?? '').split(',').filter(Boolean))
   const groups = await db.group.findMany({
-    where: { members: { some: { userId: c.get('userId') } } },
-    include: { members: { orderBy: { createdAt: 'asc' }, omit: { inviteToken: true }, include: { user: { select: { image: true } } } }, expenses: { include: { shares: true }, orderBy: { createdAt: 'asc' } } },
+    where: { members: { some: { userId: uid } } },
+    include: { members: { orderBy: { createdAt: 'asc' }, omit: { inviteToken: true }, include: { user: { select: { image: true } } } } },
     orderBy: { createdAt: 'desc' },
   })
-  return c.json(groups)
+  const delta = since && !isNaN(+since) ? groups.filter(g => known.has(g.id)).map(g => g.id) : []
+  const full = groups.map(g => g.id).filter(id => !delta.includes(id))
+  const expenses = await db.expense.findMany({
+    where: { OR: [{ groupId: { in: full }, deletedAt: null }, ...(delta.length ? [{ groupId: { in: delta }, updatedAt: { gt: since! } }] : [])] },
+    include: withShares, orderBy: { createdAt: 'asc' },
+  })
+  const byGroup = new Map<string, typeof expenses>()
+  for (const e of expenses) (byGroup.get(e.groupId) ?? byGroup.set(e.groupId, []).get(e.groupId)!).push(e)
+  return c.json({ now, groups: groups.map(g => ({ ...g, full: !delta.includes(g.id), expenses: byGroup.get(g.id) ?? [] })) })
+})
+
+// A group's activity feed, newest first (paged by `before`).
+api.get('/groups/:gid/activity', async c => {
+  const gid = Id.parse(c.req.param('gid'))
+  if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
+  const before = c.req.query('before')
+  const events = await db.expenseEvent.findMany({
+    where: { groupId: gid, ...(before && { at: { lt: new Date(before) } }) }, orderBy: { at: 'desc' }, take: 40,
+  })
+  return c.json(events)
+})
+
+// Every version of one expense, oldest first.
+api.get('/groups/:gid/expenses/:eid/history', async c => {
+  const [gid, eid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('eid'))]
+  if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
+  return c.json(await db.expenseEvent.findMany({ where: { groupId: gid, expenseId: eid }, orderBy: { version: 'asc' } }))
 })
 
 api.put('/groups/:id', async c => {
@@ -266,7 +325,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   const all = await db.member.findMany({ where: { groupId: gid }, select: { id: true, name: true, userId: true, user: { select: { email: true } } } })
   const bad = sharesError(b.amount, b.paid, b.owed, new Set(all.map(m => m.id)))
   if (bad) return c.json({ error: bad }, 400)
-  const existing = await db.expense.findUnique({ where: { id: eid }, select: { groupId: true, pending: true, rejected: true, amount: true } })
+  const existing = await db.expense.findUnique({ where: { id: eid }, include: withShares })
   if (existing && existing.groupId !== gid) return c.json(notFound, 404)
 
   // Only the payee can confirm a settlement (or nobody can, when the payee is a guest). Anyone else's
@@ -283,11 +342,39 @@ api.put('/groups/:gid/expenses/:eid', async c => {
     title: b.title, cat: b.cat, date: b.date, amount: b.amount, mode: b.mode ?? null, input: b.input ?? Prisma.DbNull,
     settle: !!b.settle, pending: pending && !rejected, rejected, receipt: b.receipt ?? null, repeatNext: b.repeat?.next ?? null, repeatDay: b.repeat?.day ?? null,
   }
-  await db.$transaction([
-    db.expense.upsert({ where: { id: eid }, create: { id: eid, groupId: gid, createdById: uid, ...data }, update: data }),
-    db.expenseShare.deleteMany({ where: { expenseId: eid } }),
-    db.expenseShare.createMany({ data: shares.map(s => ({ expenseId: eid, ...s })) }),
-  ])
+  const after = snapOf({ ...data, input: b.input ?? null, shares })
+  if (existing) {
+    // Already exactly this (a retry whose first response got lost, or the same edit twice): nothing to do.
+    if (!existing.deletedAt && same(snapOf(existing), after)) return c.json({ ok: true, version: existing.version, pending: existing.pending })
+    // Stale edit: started from an older version. A deleted expense only comes back from its current version (a deliberate restore).
+    if (existing.deletedAt ? b.base !== existing.version : b.base !== undefined && b.base !== existing.version) return conflict(c, eid)
+  }
+  const by = { byId: uid, byName: c.get('userName') }
+  let version = 1
+  try {
+    await db.$transaction(async tx => {
+      if (!existing) {
+        await tx.expense.create({ data: { id: eid, groupId: gid, createdById: uid, updatedById: uid, ...data } })
+        await tx.expenseEvent.create({ data: { expenseId: eid, groupId: gid, version, action: 'created', ...by, after } })
+      } else {
+        // Compare-and-set on the version: of two edits racing from the same base, only one gets through.
+        const { count } = await tx.expense.updateMany({ where: { id: eid, version: existing.version }, data: { ...data, deletedAt: null, updatedById: uid, version: { increment: 1 } } })
+        if (!count) throw new Stale()
+        await tx.expenseShare.deleteMany({ where: { expenseId: eid } })
+        version = existing.version + 1
+        const action = existing.deletedAt ? 'restored' : b.revertOf ? 'reverted' : 'edited'
+        await tx.expenseEvent.create({ data: { expenseId: eid, groupId: gid, version, action, revertOf: b.revertOf, ...by, before: snapOf(existing), after } })
+      }
+      await tx.expenseShare.createMany({ data: shares.map(s => ({ expenseId: eid, ...s })) })
+    })
+  } catch (e) {
+    const raced = e instanceof Stale || (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')
+    if (!raced) throw e
+    // Lost a race: identical content is fine (two phones making the same monthly repeat), anything else is a conflict.
+    const now = await db.expense.findUnique({ where: { id: eid }, include: withShares })
+    if (now && !now.deletedAt && same(snapOf(now), after)) return c.json({ ok: true, version: now.version, pending: now.pending })
+    return conflict(c, eid)
+  }
   if (rejected && !existing?.rejected) {
     const payer = all.find(m => m.id === Object.keys(b.paid)[0])
     const g = await db.group.findUnique({ where: { id: gid }, select: { name: true } })
@@ -300,14 +387,40 @@ api.put('/groups/:gid/expenses/:eid', async c => {
     const by = payer?.userId === uid ? c.get('userName') : (payer?.name ?? c.get('userName'))
     void mail.paid(payee.user.email, by, g?.name ?? 'your group', b.amount).catch(console.error)
   }
-  return c.json({ ok: true, pending })
+  return c.json({ ok: true, version, pending })
 })
 
+// Soft delete: the expense leaves balances but stays in history, can be restored, and reaches other phones as a tombstone.
 api.delete('/groups/:gid/expenses/:eid', async c => {
   const [gid, eid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('eid'))]
-  if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
-  await db.expense.deleteMany({ where: { id: eid, groupId: gid } })
-  return c.json({ ok: true })
+  const uid = c.get('userId')
+  if (!(await membership(gid, uid))) return c.json(notFound, 404)
+  const q = c.req.query('base'), base = q === undefined || q === '' ? undefined : Number(q)
+  const e = await db.expense.findUnique({ where: { id: eid }, include: withShares })
+  if (!e || e.groupId !== gid || e.deletedAt) return c.json({ ok: true, version: e?.version }) // gone already: deleting twice is fine
+  if (base !== undefined && base !== e.version) return conflict(c, eid) // they changed it since you last saw it
+  try {
+    await db.$transaction(async tx => {
+      const { count } = await tx.expense.updateMany({ where: { id: eid, version: e.version }, data: { deletedAt: new Date(), updatedById: uid, version: { increment: 1 } } })
+      if (!count) throw new Stale()
+      await tx.expenseEvent.create({ data: { expenseId: eid, groupId: gid, version: e.version + 1, action: 'deleted', byId: uid, byName: c.get('userName'), before: snapOf(e) } })
+    })
+  } catch (err) { if (err instanceof Stale) return conflict(c, eid); throw err }
+  return c.json({ ok: true, version: e.version + 1 })
+})
+
+// Undelete (from the activity feed or history).
+api.post('/groups/:gid/expenses/:eid/restore', async c => {
+  const [gid, eid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('eid'))]
+  const uid = c.get('userId')
+  if (!(await membership(gid, uid))) return c.json(notFound, 404)
+  const e = await db.expense.findUnique({ where: { id: eid }, include: withShares })
+  if (!e || e.groupId !== gid) return c.json(notFound, 404)
+  if (!e.deletedAt) return c.json({ ok: true, version: e.version })
+  const { count } = await db.expense.updateMany({ where: { id: eid, version: e.version }, data: { deletedAt: null, updatedById: uid, version: { increment: 1 } } })
+  if (!count) return conflict(c, eid)
+  await db.expenseEvent.create({ data: { expenseId: eid, groupId: gid, version: e.version + 1, action: 'restored', byId: uid, byName: c.get('userName'), after: snapOf(e) } })
+  return c.json({ ok: true, version: e.version + 1 })
 })
 
 // ---------- files: images only, sniffed, stored under our names ----------

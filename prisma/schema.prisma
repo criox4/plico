@@ -150,12 +150,38 @@ model Expense {
   repeatNext  String?
   repeatDay   Int?
   createdById String?
+  version     Int            @default(1) /// bumped on every change; writes must name the version they started from
+  deletedAt   DateTime? /// soft delete: kept for history, restore and delta pulls; excluded from balances
+  updatedById String?
   shares      ExpenseShare[]
+  events      ExpenseEvent[]
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   @@index([groupId])
+  @@index([groupId, updatedAt])
   @@map("expense")
+  @@schema("splittr")
+}
+
+/// Edit history: one row per change to an expense, written in the same transaction as the change.
+model ExpenseEvent {
+  id        String   @id @default(uuid())
+  expenseId String
+  expense   Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  groupId   String
+  version   Int /// the expense's version after this change
+  action    String /// created | edited | deleted | restored | reverted
+  revertOf  Int? /// for "reverted": the version restored
+  byId      String? /// no relation: history outlives the account
+  byName    String /// who, as they were named then
+  at        DateTime @default(now())
+  before    Json? /// the expense before (null when created)
+  after     Json? /// the expense after (null when deleted)
+
+  @@index([groupId, at])
+  @@index([expenseId, version])
+  @@map("expense_event")
   @@schema("splittr")
 }
 
