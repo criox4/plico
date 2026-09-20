@@ -1,34 +1,69 @@
 // Offline-first sync. Every local edit is saved at once (store.ts); a debounced diff against the last
 // synced snapshot turns edits into idempotent PUT/DELETE ops in a persisted outbox, flushed in order.
-// When the outbox is empty we pull the server's truth. No coalescing: order is causal, ops are upserts.
+// Expense ops carry the version they started from, so the server can refuse a stale edit (409): that becomes
+// an "issue" the person resolves (keep mine / keep theirs), never a silent overwrite. Refused changes become
+// issues too. When the outbox is empty we pull what changed since the last pull (a full pull at boot).
 import { useSyncExternalStore } from 'react'
-import { ME, isVpa, runRecurring, uid, type Expense, type Group, type Theme, type Tone } from './logic'
+import { Capacitor } from '@capacitor/core'
+import { Preferences } from '@capacitor/preferences'
+import { ME, enqueue, isVpa, rebase, runRecurring, uid, type Expense, type Group, type Op, type Snap, type Theme, type Tone } from './logic'
 import { blank, getState, onLocalChange, setRemote, update, type State } from './store'
 import { API, authClient, token } from './auth-client'
 
-type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown }
+/** A change the server wouldn't take as-is. Conflict: someone changed it first. Failed: refused outright. */
+export type Issue = {
+  id: string; kind: 'conflict' | 'failed'; gid: string; eid?: string; title: string; op: Op; at: string
+  message?: string // failed: why
+  theirs?: ServerExpense | null // conflict: the version on the server now
+  by?: string; action?: string // conflict: who changed it, and how (edited, deleted, ...)
+}
 type Status = {
-  authed: boolean; booting: boolean; pending: number; offline: boolean; error: string
+  authed: boolean; booting: boolean; pending: number; offline: boolean; error: string; issues: Issue[]
   google: boolean; googleWebClientId: string | null; googleIosClientId: string | null; ai: boolean
 }
 
-const OKEY = 'splittr-outbox'
-let outbox: Op[] = (() => { try { return JSON.parse(localStorage.getItem(OKEY) || '[]') } catch { return [] } })()
+// Unsynced work must survive the OS clearing WebView storage: on phones it's mirrored to native preferences
+// (SharedPreferences / UserDefaults), which aren't evicted, and restored at boot if the WebView copy is gone.
+const OKEY = 'splittr-outbox', IKEY = 'plico-issues', WKEY = 'plico-outbox-owner', CKEY = 'plico-cursor'
+const native = Capacitor.isNativePlatform()
+const read = <T>(k: string, empty: T): T => { try { return JSON.parse(localStorage.getItem(k) ?? '') ?? empty } catch { return empty } }
+const keep = (k: string, v: unknown) => {
+  const s = JSON.stringify(v)
+  try { localStorage.setItem(k, s) } catch { /* full or blocked: the native copy still holds it */ }
+  if (native) void Preferences.set({ key: k, value: s }).catch(() => {})
+}
+async function restoreDurable() {
+  if (!native) return
+  let restored = false
+  for (const k of [OKEY, IKEY, WKEY]) {
+    if (localStorage.getItem(k) !== null) continue
+    const { value } = await Preferences.get({ key: k }).catch(() => ({ value: null }))
+    if (value) { localStorage.setItem(k, value); restored = true }
+  }
+  if (restored) { outbox = [...read<Op[]>(OKEY, []), ...outbox]; issues = read(IKEY, []) }
+}
+
+let outbox: Op[] = read(OKEY, [])
+let issues: Issue[] = read(IKEY, [])
+let cursor: string | null = localStorage.getItem(CKEY) // last pull's server time; null = next pull is a full one
 let snap: State = getState()
 let timer: ReturnType<typeof setTimeout> | undefined
 let flushing = false
+let sending = false // outbox[0] is on the wire: don't fold newer edits into it
 let missedPull = false // a pull was skipped because an edit was pending
 
 // Signed in = we know the user. A dead session is only concluded from the server (never from being offline).
 let status: Status = {
-  authed: !!getState().user, booting: true, pending: outbox.length, offline: !navigator.onLine, error: '',
+  authed: !!getState().user, booting: true, pending: outbox.length, offline: !navigator.onLine, error: '', issues,
   google: false, googleWebClientId: null, googleIosClientId: null, ai: false,
 }
 const subs = new Set<() => void>()
-const setStatus = (p: Partial<Status>) => { status = { ...status, ...p, pending: outbox.length }; subs.forEach(f => f()) }
+const setStatus = (p: Partial<Status>) => { status = { ...status, ...p, pending: outbox.length, issues }; subs.forEach(f => f()) }
 export const useSync = () => useSyncExternalStore(f => (subs.add(f), () => subs.delete(f)), () => status)
 
-const saveOutbox = () => localStorage.setItem(OKEY, JSON.stringify(outbox))
+const saveOutbox = () => { keep(OKEY, outbox); if (getState().user) keep(WKEY, getState().user!.id) }
+const saveIssues = () => keep(IKEY, issues)
+const setCursor = (c: string | null) => { cursor = c; c ? localStorage.setItem(CKEY, c) : localStorage.removeItem(CKEY) }
 
 // ---------- local state -> server ops ----------
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
@@ -74,9 +109,10 @@ export function diff(prev: State, next: State): Op[] {
     const oe = new Map((o?.expenses ?? []).map(e => [e.id, e]))
     for (const e of g.expenses) {
       const was = oe.get(e.id)
-      if (!was || !same(expenseBody(g, was), expenseBody(g, e))) expenses.push({ m: 'PUT', path: `${base}/expenses/${e.id}`, body: expenseBody(g, e) })
+      // base: the version this edit started from (a copy put back after a conflict carries its own).
+      if (!was || !same(expenseBody(g, was), expenseBody(g, e))) expenses.push({ m: 'PUT', path: `${base}/expenses/${e.id}`, body: expenseBody(g, e), base: was?.v ?? e.v ?? null })
     }
-    for (const e of o?.expenses ?? []) if (!g.expenses.some(x => x.id === e.id)) delExp.push({ m: 'DELETE', path: `${base}/expenses/${e.id}` })
+    for (const e of o?.expenses ?? []) if (!g.expenses.some(x => x.id === e.id)) delExp.push({ m: 'DELETE', path: `${base}/expenses/${e.id}`, base: e.v ?? null })
   }
   for (const o of prev.groups) if (!next.groups.some(g => g.id === o.id)) delGroups.push({ m: 'DELETE', path: `/api/groups/${o.id}` })
   // Creation order is always valid: groups, then members, then expenses; deletes run in reverse.
@@ -94,7 +130,7 @@ function queueNow() {
     if (missedPull) void pull()
     return
   }
-  outbox.push(...ops)
+  for (const op of ops) outbox = enqueue(outbox, op, sending)
   saveOutbox()
   setStatus({})
   void flush()
@@ -108,25 +144,58 @@ const req = (path: string, init: RequestInit = {}) => fetch(API + path, { ...ini
 /** Push queued changes now (e.g. right after a parent's consent unlocks the account). */
 export const syncNow = () => flush()
 
+const opIds = (path: string) => path.match(/^\/api\/groups\/([^/?]+)(?:\/expenses\/([^/?]+))?/) ?? []
+const groupName = (gid: string) => snap.groups.find(g => g.id === gid)?.name ?? getState().groups.find(g => g.id === gid)?.name
+
+/** Record the server's version for an expense locally (state and snapshot alike, so nothing gets queued). */
+function setVersion(gid: string, eid: string, v: number) {
+  const bump = (st: State) => { const e = st.groups.find(g => g.id === gid)?.expenses.find(x => x.id === eid); if (e) e.v = v }
+  setRemote(bump)
+  snap = structuredClone(snap); bump(snap)
+}
+
+function addIssue(i: Omit<Issue, 'id' | 'at'>) {
+  issues = [...issues, { ...i, id: uid(), at: new Date().toISOString() }]
+  saveIssues()
+  setCursor(null) // what's on this phone no longer matches the server: the next pull fetches everything
+}
+
 async function flush() {
   if (flushing || !status.authed) return
   flushing = true
   try {
     while (outbox.length) {
       const op = outbox[0]
+      const url = op.m === 'DELETE' && op.base != null ? `${op.path}?base=${op.base}` : op.path
+      const body = op.body ? JSON.stringify('base' in op && op.m === 'PUT' ? { ...(op.body as object), base: op.base } : op.body) : undefined
       let res: Response
+      sending = true
       try {
-        res = await req(op.path, { method: op.m, body: op.body ? JSON.stringify(op.body) : undefined })
+        res = await req(url, { method: op.m, body })
       } catch {
         return setStatus({ offline: true })
-      }
+      } finally { sending = false }
       if (res.status === 401) return expired()
       if (res.status >= 500) return setStatus({ error: 'The server had trouble. Your changes are safe and will retry.' })
+      const out = await res.json().catch(() => ({})) as { version?: number; code?: string; error?: string; theirs?: ServerExpense | null; by?: string; action?: string }
       // Waiting on the age question or a parent's consent: keep everything and try again once it's sorted.
-      if (res.status === 403 && /"code":"(age|guardian)"/.test(await res.clone().text())) return
-      // The server refused this change (validation, permissions). Drop it; the pull below restores the truth.
-      if (!res.ok) console.warn('Server rejected change', op, await res.text())
+      if (res.status === 403 && (out.code === 'age' || out.code === 'guardian')) return
       outbox.shift()
+      const [, gid, eid] = opIds(op.path)
+      const title = (op.body as { title?: string })?.title ?? snap.groups.find(g => g.id === gid)?.expenses.find(e => e.id === eid)?.title ?? groupName(gid) ?? 'A change'
+      if (res.status === 409 && out.code === 'conflict') {
+        // Someone changed it first: keep both versions and ask. Their version shows here after the pull.
+        addIssue({ kind: 'conflict', gid, eid, title, op, theirs: out.theirs, by: out.by, action: out.action })
+      } else if (res.status === 404 && gid) {
+        // The group is gone (deleted, or we were removed): everything else queued for it would fail the same way.
+        outbox = outbox.filter(o => opIds(o.path)[1] !== gid)
+        addIssue({ kind: 'failed', gid, title: groupName(gid) ?? 'A group', op, message: 'This group was deleted, or you were removed from it, so changes you made there couldn’t be saved.' })
+      } else if (!res.ok) {
+        addIssue({ kind: 'failed', gid, eid, title, op, message: out.error || 'The server didn’t accept this change.' })
+      } else if (eid && typeof out.version === 'number') {
+        outbox = rebase(outbox, op.path, out.version)
+        if (op.m === 'PUT') setVersion(gid, eid, out.version)
+      }
       saveOutbox()
       setStatus({ offline: false, error: '' })
     }
@@ -137,52 +206,137 @@ async function flush() {
   }
 }
 
+export type ServerExpense = Snap & {
+  id: string; mode: Expense['mode'] | null; input: Record<string, number> | null; repeatDay: number | null
+  version: number; deletedAt: string | null; updatedAt: string
+}
 type ServerGroup = {
   id: string; name: string; kind: Group['kind']; theme: Group['theme']; track: boolean; emoji: string | null; cover: string | null; createdById: string
   members: { id: string; name: string; upi: string | null; userId: string | null; email: string | null; phone: string | null; invitedAt: string | null; user?: { image: string | null } | null }[]
-  expenses: {
-    id: string; title: string; cat: string; date: string; amount: number; mode: Expense['mode'] | null; input: Record<string, number> | null
-    settle: boolean; pending: boolean; rejected: boolean; receipt: string | null; repeatNext: string | null; repeatDay: number | null; shares: { memberId: string; paid: number; owed: number }[]
-  }[]
+  expenses: ServerExpense[]
+  full: boolean // false: `expenses` holds only what changed since the cursor, deletions included
+}
+
+/** A server expense (or a history snapshot) in the phone's shape: my member id becomes ME. */
+export function expenseFromServer(e: Omit<ServerExpense, 'version' | 'deletedAt' | 'updatedAt' | 'mode' | 'input' | 'repeatDay'> & Partial<ServerExpense>, selfId?: string): Expense {
+  const id = (m: string) => (m === selfId ? ME : m)
+  const paid: Record<string, number> = {}, owed: Record<string, number> = {}
+  for (const s of e.shares) {
+    if (s.paid) paid[id(s.memberId)] = s.paid
+    if (s.owed) owed[id(s.memberId)] = s.owed
+  }
+  return {
+    id: e.id, title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid, owed,
+    mode: e.mode ?? undefined, input: e.input ? Object.fromEntries(Object.entries(e.input).map(([k, v]) => [id(k), v])) : undefined,
+    settle: e.settle || undefined, pending: e.pending || undefined, rejected: e.rejected || undefined, receipt: e.receipt ?? undefined,
+    repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay } : undefined, v: e.version,
+  }
+}
+
+/** A queued edit's body (server member ids) as a history-style snapshot, to compare with theirs. */
+export function bodySnap(b: ReturnType<typeof expenseBody>): Snap {
+  const ids = [...new Set([...Object.keys(b.paid ?? {}), ...Object.keys(b.owed ?? {})])].sort()
+  return { title: b.title, cat: b.cat, date: b.date, amount: b.amount, settle: b.settle, pending: b.pending, rejected: b.rejected, receipt: b.receipt, repeatNext: b.repeat?.next ?? null,
+    shares: ids.map(memberId => ({ memberId, paid: b.paid?.[memberId] ?? 0, owed: b.owed?.[memberId] ?? 0 })) }
 }
 
 export function toClient(sg: ServerGroup, userId: string): Group {
   const self = sg.members.find(m => m.userId === userId)
-  const id = (m: string) => (m === self?.id ? ME : m)
   return {
     id: sg.id, name: sg.name, kind: sg.kind, theme: sg.theme, track: sg.track || undefined, emoji: sg.emoji ?? undefined, cover: sg.cover ?? undefined, selfId: self?.id, mine: sg.createdById === userId,
     members: sg.members.map(m => (m.id === self?.id ? { id: ME, name: 'Me' } : {
       id: m.id, name: m.name, upi: m.upi ?? undefined, email: m.email ?? undefined, phone: m.phone ?? undefined,
       joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined, image: m.user?.image ?? undefined,
     })),
-    expenses: sg.expenses.map(e => {
-      const paid: Record<string, number> = {}, owed: Record<string, number> = {}
-      for (const s of e.shares) {
-        if (s.paid) paid[id(s.memberId)] = s.paid
-        if (s.owed) owed[id(s.memberId)] = s.owed
-      }
-      return {
-        id: e.id, title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid, owed,
-        mode: e.mode ?? undefined, input: e.input ? Object.fromEntries(Object.entries(e.input).map(([k, v]) => [id(k), v])) : undefined,
-        settle: e.settle || undefined, pending: e.pending || undefined, rejected: e.rejected || undefined, receipt: e.receipt ?? undefined, repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay } : undefined,
-      }
-    }),
+    expenses: sg.expenses.filter(e => !e.deletedAt).map(e => expenseFromServer(e, self?.id)),
   }
 }
 
 export async function pull() {
   const user = getState().user
   if (outbox.length || !user || !status.authed) return
+  const known = getState().groups.map(g => g.id)
+  const q = cursor ? `?since=${encodeURIComponent(cursor)}&known=${known.join(',')}` : ''
   let res: Response
-  try { res = await req('/api/groups') } catch { return setStatus({ offline: true }) }
+  try { res = await req('/api/groups' + q) } catch { return setStatus({ offline: true }) }
   if (res.status === 401) return expired()
   if (!res.ok) return
-  const data = (await res.json()) as ServerGroup[]
+  const data = (await res.json()) as { now: string; groups: ServerGroup[] }
   if (outbox.length || timer) { missedPull = true; return } // local edits pending: they win, and we pull again after
   missedPull = false
-  setRemote(d => { d.groups = data.map(g => toClient(g, user.id)) })
+  let gap = false
+  setRemote(d => {
+    const old = new Map(d.groups.map(g => [g.id, g]))
+    // Groups not in the answer are gone for us (deleted, or we were removed).
+    d.groups = data.groups.map(sg => {
+      const fresh = toClient(sg, user.id)
+      if (sg.full) return fresh
+      const was = old.get(sg.id)
+      if (!was) { gap = true; return fresh } // shouldn't happen (we said we knew it): fetch everything next time
+      const byId = new Map(was.expenses.map(e => [e.id, e]))
+      for (const e of sg.expenses) e.deletedAt ? byId.delete(e.id) : byId.set(e.id, expenseFromServer(e, fresh.selfId))
+      return { ...fresh, expenses: [...byId.values()] }
+    })
+  })
+  setCursor(gap ? null : data.now)
   snap = getState()
   setStatus({ offline: false })
+}
+
+// ---------- issues: conflicts and refused changes ----------
+/** Put one expense in place locally, as-if from the server (state and snapshot alike, so it isn't queued again). */
+function placeLocal(gid: string, eid: string, e: Expense | null) {
+  const put = (st: State) => {
+    const g = st.groups.find(x => x.id === gid)
+    if (!g) return
+    const i = g.expenses.findIndex(x => x.id === eid)
+    if (!e) { if (i >= 0) g.expenses.splice(i, 1) } else if (i >= 0) g.expenses[i] = e; else g.expenses.push(e)
+  }
+  setRemote(put)
+  snap = structuredClone(snap); put(snap)
+}
+
+/**
+ * mine: send my version again, on top of theirs (base = their version). theirs: drop mine.
+ * retry: send a refused change again. discard: drop it. Either way the next pull shows the server's truth.
+ */
+export function resolveIssue(id: string, choice: 'mine' | 'theirs' | 'retry' | 'discard') {
+  const it = issues.find(i => i.id === id)
+  if (!it) return
+  issues = issues.filter(i => i !== it)
+  saveIssues()
+  if (choice === 'mine' || choice === 'retry') {
+    const op: Op = it.kind === 'conflict' ? { ...it.op, base: it.theirs?.version ?? null } : it.op
+    if (it.eid) {
+      const g = getState().groups.find(x => x.id === it.gid)
+      const b = op.body as ReturnType<typeof expenseBody> | undefined
+      placeLocal(it.gid, it.eid, op.m === 'DELETE' || !b ? null
+        : expenseFromServer({ id: it.eid, ...bodySnap(b), mode: b.mode, input: b.input, repeatDay: b.repeat?.day ?? null, version: op.base ?? undefined }, g?.selfId))
+    }
+    outbox = enqueue(outbox, op, sending)
+    saveOutbox()
+    setStatus({})
+    void flush()
+  } else {
+    setStatus({})
+    void pull()
+  }
+}
+
+/** Online-only history actions: restore a deleted expense, or put back an older version. Then pull. */
+export async function restoreExpense(gid: string, eid: string) {
+  await api(`/api/groups/${gid}/expenses/${eid}/restore`, { method: 'POST' })
+  await flush(); await pull()
+}
+export async function revertExpense(gid: string, eid: string, to: Snap & { mode?: string | null; input?: unknown; repeatDay?: number | null }, version: number, current: number) {
+  const paid: Record<string, number> = {}, owed: Record<string, number> = {}
+  for (const x of to.shares) { if (x.paid) paid[x.memberId] = x.paid; if (x.owed) owed[x.memberId] = x.owed }
+  await api(`/api/groups/${gid}/expenses/${eid}`, { method: 'PUT', body: JSON.stringify({
+    title: to.title, cat: to.cat, date: to.date, amount: to.amount, paid, owed, mode: to.mode ?? null, input: to.input ?? null,
+    settle: !!to.settle, pending: !!to.pending, rejected: !!to.rejected, receipt: to.receipt ?? null,
+    repeat: to.repeatNext && to.repeatDay ? { next: to.repeatNext, day: to.repeatDay } : null, base: current, revertOf: version,
+  }) })
+  await flush(); await pull()
 }
 
 /** Shrink a photo on the phone before it travels: JPEG, longest side at most `max`. */
@@ -240,7 +394,10 @@ const gates = (u: AuthUser) => ({ ageGroup: u.ageGroup ?? null, guardianEmail: u
 export async function signedIn(u: AuthUser) {
   const local = getState()
   const firstOnDevice = !local.user
-  if (local.user && local.user.id !== u.id) { outbox = []; saveOutbox() } // different account: don't leak data across
+  // Different account (or an outbox restored from native storage that belonged to someone else): don't leak data across.
+  const owner = local.user?.id ?? localStorage.getItem(WKEY)?.replace(/"/g, '')
+  if (owner && owner !== u.id) { outbox = []; issues = []; saveOutbox(); saveIssues() }
+  setCursor(null)
   setRemote(d => {
     if (local.user && local.user.id !== u.id) Object.assign(d, structuredClone(blank))
     d.user = { id: u.id, email: u.email, emailVerified: !!u.emailVerified, image: u.image, ...gates(u) }
@@ -279,8 +436,8 @@ export async function refreshUser() {
 export async function signOut() {
   await authClient.signOut().catch(() => {})
   token.clear()
-  outbox = []
-  saveOutbox()
+  outbox = []; issues = []
+  saveOutbox(); saveIssues(); setCursor(null)
   setRemote(d => { Object.assign(d, structuredClone(blank)) })
   snap = getState()
   setStatus({ authed: false, error: '' })
@@ -288,6 +445,10 @@ export async function signOut() {
 
 /** Wire up once at boot. */
 export function startSync() {
+  // The store hydrates from IndexedDB before this runs: start from what it loaded.
+  snap = getState()
+  status = { ...status, authed: !!getState().user }
+  setCursor(null) // a full pull at every launch: cheap insurance against anything a delta could have missed
   onLocalChange(() => { clearTimeout(timer); timer = setTimeout(queueNow, 400) })
   addEventListener('online', () => { setStatus({ offline: false }); void flush() })
   addEventListener('offline', () => setStatus({ offline: true }))
@@ -309,5 +470,5 @@ export function startSync() {
   if (!status.authed) return
   // Catch up monthly repeats (deterministic ids, so two devices never duplicate), then sync.
   update(s => s.groups.forEach(g => runRecurring(g)))
-  void flush().then(pull)
+  void restoreDurable().then(() => { setStatus({}); return flush() }).then(pull)
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, type Group } from './logic.ts'
+import { ME, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -93,3 +93,32 @@ assert.ok('error' in itemSplit([{ name: 'Fries', amount: 100, who: [] }], 0))
 const disc = itemSplit([{ name: 'A', amount: 1000, who: [ME] }, { name: 'B', amount: 1000, who: ['k'] }], -200)
 assert.deepEqual(disc, { owed: { [ME]: 900, k: 900 } })
 console.log('capture ok')
+
+// sync outbox: newer changes to an expense replace the queued one, keep its base, go to the back
+const e1 = '/api/groups/g/expenses/x', mem1 = '/api/groups/g/members/m'
+let q: Op[] = []
+q = enqueue(q, { m: 'PUT', path: e1, body: 1, base: 3 }, false)
+q = enqueue(q, { m: 'PUT', path: mem1, body: 'm' }, false)
+q = enqueue(q, { m: 'PUT', path: e1, body: 2, base: 3 }, false)
+assert.deepEqual(q.map(o => [o.path, o.body, o.base]), [[mem1, 'm', undefined], [e1, 2, 3]])
+q = enqueue(q, { m: 'DELETE', path: e1, base: 3 }, false)
+assert.equal(q.length, 2); assert.equal(q[1].m, 'DELETE')
+// the op being sent is never touched; a new one queues behind it and is rebased when it lands
+let r2: Op[] = [{ m: 'PUT', path: e1, body: 1, base: null }]
+r2 = enqueue(r2, { m: 'PUT', path: e1, body: 2, base: null }, true)
+assert.equal(r2.length, 2)
+r2 = rebase(r2.slice(1), e1, 1)
+assert.deepEqual(r2, [{ m: 'PUT', path: e1, body: 2, base: 1 }])
+assert.deepEqual(rebase([{ m: 'PUT', path: mem1, body: 1 }], mem1, 4), [{ m: 'PUT', path: mem1, body: 1 }])
+
+// history: versions described in words
+const nm = (id: string) => ({ a: 'Asha', b: 'Bala', c: 'Chitra' })[id] ?? '?'
+const v1: Snap = { title: 'Dinner', cat: 'food', date: '2026-09-26', amount: 120000, shares: [{ memberId: 'a', paid: 120000, owed: 40000 }, { memberId: 'b', paid: 0, owed: 40000 }, { memberId: 'c', paid: 0, owed: 40000 }] }
+const v2: Snap = { ...v1, title: 'Dinner at Toit', amount: 150000, shares: [{ memberId: 'a', paid: 0, owed: 75000 }, { memberId: 'b', paid: 150000, owed: 75000 }] }
+assert.deepEqual(changes(v1, v2, nm), ['name “Dinner” → “Dinner at Toit”', 'amount ₹1,200 → ₹1,500', 'paid by Asha → Bala', 'took Chitra out of the split'])
+assert.deepEqual(changes(v1, v1, nm), [])
+assert.equal(summary(v1, nm), '₹1,200, paid by Asha, split between 3')
+const pay: Snap = { title: 'Settlement', cat: 'check', date: '2026-09-26', amount: 5000, settle: true, pending: true, shares: [{ memberId: 'b', paid: 5000, owed: 0 }, { memberId: 'a', paid: 0, owed: 5000 }] }
+assert.deepEqual(changes(pay, { ...pay, pending: false }, nm), ['confirmed the payment arrived'])
+assert.equal(summary(pay, nm), '₹50 from Bala to Asha')
+console.log('sync ok')

@@ -4,6 +4,7 @@ import { ME, balances, simplify, type Expense, inr, upiLink, isVpa, encodeShare,
 import { update, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
+import { IssuesBanner } from './history'
 import { API } from './auth-client'
 import { fileUrl } from './sync'
 
@@ -478,6 +479,7 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
       <Denomination t={t} amount={net} line={g.track ? 'Tracking only, no nudges' : verb(g, net)}
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
       {spent.length > 0 && !debts.length && <Seal t={t} burst={burst} />}
+      <IssuesBanner gid={g.id} />
       <NeedsYou groups={[g]} />
       <SpendBar g={g} />
       {debts.length > 0 && <>
@@ -502,7 +504,7 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
           ))}
         </ol>
       </>}
-      <SectionHead title="Expenses" />
+      <SectionHead title="Expenses" action={<button className="link" onClick={() => go(`/g/${g.id}/activity`)}>Activity</button>} />
       {list.length ? <ol className="ledger">{list.map(({ e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} />)}</ol>
         : <Peaceful />}
     </Screen>

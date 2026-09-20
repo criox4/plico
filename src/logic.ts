@@ -28,6 +28,7 @@ export type Expense = {
   pending?: true // settlement waiting for the payee to confirm; doesn't move balances yet
   rejected?: true // the payee says it hasn't arrived; doesn't move balances
   repeat?: { next: string; day: number } // monthly
+  v?: number // the server version this copy is; edits send it so the server can spot stale ones
 }
 export type Group = {
   id: Id
@@ -316,4 +317,58 @@ export function itemSplit(items: Item[], extras: number): { owed: Record<Id, num
   if (subtotal + extras <= 0) return { error: 'The discount is bigger than the bill' }
   const ex = extras >= 0 ? allocate(extras, sub) : Object.fromEntries(Object.entries(allocate(-extras, sub)).map(([k, v]) => [k, -v]))
   return { owed: Object.fromEntries(Object.keys(sub).map(id => [id, sub[id] + (ex[id] ?? 0)])) }
+}
+
+// ---------- sync: the outbox and edit history ----------
+/** A queued server change. `base` = the expense version it started from (null = new, absent = not an expense). */
+export type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown; base?: number | null }
+const expensePath = (p: string) => /\/expenses\/[^/?]+$/.test(p)
+
+/** Queue an op. A newer change to an expense replaces one still waiting (keeping its base, so the server can still
+ * spot a stale edit) and moves to the back, after anything it may depend on (a person added since). `busy`: ops[0] is being sent. */
+export function enqueue(ops: Op[], op: Op, busy: boolean): Op[] {
+  const i = expensePath(op.path) ? ops.findIndex((o, k) => o.path === op.path && !(busy && k === 0)) : -1
+  if (i < 0) return [...ops, op]
+  return [...ops.slice(0, i), ...ops.slice(i + 1), { ...op, base: ops[i].base }]
+}
+
+/** The server took a change to `path` at `version`: later queued changes to it build on that. */
+export const rebase = (ops: Op[], path: string, version: number) => ops.map(o => (o.path === path && 'base' in o ? { ...o, base: version } : o))
+
+/** One version of an expense as the server records it (history snapshots, conflicts). Member ids are server ids. */
+export type Snap = {
+  title: string; cat: string; date: string; amount: number; settle?: boolean; pending?: boolean; rejected?: boolean
+  receipt?: string | null; repeatNext?: string | null; shares: { memberId: Id; paid: number; owed: number }[]
+}
+const day = (d: string) => new Date(d + 'T00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+const list = (xs: string[]) => xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`
+
+/** What changed between two versions, in words ("amount ₹1,200 → ₹1,500"). */
+export function changes(a: Snap, b: Snap, name: (id: Id) => string): string[] {
+  const out: string[] = []
+  if (a.title !== b.title) out.push(`name “${a.title}” → “${b.title}”`)
+  if (a.amount !== b.amount) out.push(`amount ${inr(a.amount)} → ${inr(b.amount)}`)
+  if (a.date !== b.date) out.push(`date ${day(a.date)} → ${day(b.date)}`)
+  if (a.cat !== b.cat) out.push(`category ${a.cat} → ${b.cat}`)
+  const payers = (s: Snap) => s.shares.filter(x => x.paid).map(x => name(x.memberId))
+  if (payers(a).join() !== payers(b).join()) out.push(`paid by ${list(payers(a))} → ${list(payers(b))}`)
+  const inA = a.shares.filter(x => x.owed).map(x => x.memberId), inB = b.shares.filter(x => x.owed).map(x => x.memberId)
+  const added = inB.filter(x => !inA.includes(x)), removed = inA.filter(x => !inB.includes(x))
+  if (added.length) out.push(`added ${list(added.map(name))} to the split`)
+  if (removed.length) out.push(`took ${list(removed.map(name))} out of the split`)
+  if (!added.length && !removed.length && a.amount === b.amount && a.shares.some(x => x.owed !== (b.shares.find(y => y.memberId === x.memberId)?.owed ?? 0)))
+    out.push('changed who owes how much')
+  if (a.settle && a.pending && !b.pending && !b.rejected) out.push('confirmed the payment arrived')
+  if (!a.rejected && b.rejected) out.push('said the payment hasn’t arrived')
+  if ((a.receipt ?? null) !== (b.receipt ?? null)) out.push(b.receipt ? (a.receipt ? 'replaced the receipt' : 'added a receipt') : 'removed the receipt')
+  if (!!a.repeatNext !== !!b.repeatNext) out.push(b.repeatNext ? 'made it repeat monthly' : 'stopped it repeating')
+  return out
+}
+
+/** One line for a version on its own: "₹1,200, paid by Asha, split between 3". */
+export function summary(s: Snap, name: (id: Id) => string): string {
+  const owe = s.shares.filter(x => x.owed)
+  const payers = list(s.shares.filter(x => x.paid).map(x => name(x.memberId)))
+  return s.settle ? `${inr(s.amount)} from ${payers} to ${list(owe.map(x => name(x.memberId)))}`
+    : `${inr(s.amount)}, paid by ${payers}, split between ${owe.length === 1 ? name(owe[0].memberId) : owe.length}`
 }

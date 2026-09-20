@@ -10,6 +10,7 @@ import { Avatar, Converge, Denomination, EMOJI, calm, count, useGroupImage, Them
 import { AccountHub, AgeGate, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
+import { Activity, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
 
 const back = () => (history.length > 1 ? history.back() : go('/'))
 const edit = (gid: Id, fn: (g: Group) => void) => update(d => { const g = d.groups.find(x => x.id === gid); if (g) fn(g) })
@@ -42,11 +43,15 @@ export default function App() {
     return Page ? <Page key={r[1]} s={s} /> : <AccountHub s={s} />
   }
   if (r[0] === 'import') return <ImportSplitwise s={s} />
+  if (r[0] === 'sync') return <SyncIssues s={s} />
   if (r[0] === 'new' || !s.groups.length) return <NewGroup s={s} />
   if (r[0] === 'add') return <ExpenseForm key={r[1] ?? 'add'} s={s} shared={r[1] === 'shared'} />
   const g = r[0] === 'g' ? s.groups.find(x => x.id === r[1]) : undefined
   if (g) {
     if (r[2] === 'add') return <ExpenseForm key="add" s={s} gid={g.id} />
+    if (r[2] === 'sync') return <SyncIssues s={s} gid={g.id} />
+    if (r[2] === 'activity') return <Activity s={s} g={g} />
+    if (r[2] === 'e' && r[3] && r[4] === 'history') return <ExpenseHistory s={s} g={g} eid={r[3]} />
     if (r[2] === 'e' && r[3]) return <ExpenseForm key={r[3]} s={s} gid={g.id} eid={r[3]} />
     if (r[2] === 'edit') return <GroupSettings s={s} g={g} />
     if (r[2] === 'pay' && r[3] && r[4] && +r[5] > 0) {
@@ -59,7 +64,7 @@ export default function App() {
     }
     return <GroupView s={s} g={g} />
   }
-  return <Home s={s} t={s.theme} banner={<VerifyBanner s={s} />} />
+  return <Home s={s} t={s.theme} banner={<><VerifyBanner s={s} /><IssuesBanner /></>} />
 }
 
 // ---------- shared form bits ----------
@@ -179,7 +184,7 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   if (eid && !old) return null
 
   const del = () => {
-    if (!old || !confirm(old.settle ? 'Delete this settlement?' : `Delete “${old.title}”?`)) return
+    if (!old || !confirm(`${old.settle ? 'Delete this settlement?' : `Delete “${old.title}”?`} You can restore it from the group’s activity.`)) return
     edit(g.id, x => { x.expenses = x.expenses.filter(y => y.id !== old.id) })
     back()
   }
@@ -194,6 +199,7 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
           <p className="pay-for">{new Date(old.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
         </section>
         <button className="btn secondary" onClick={del}>Delete settlement</button>
+        <button className="link center-link" onClick={() => go(`/g/${g.id}/e/${old.id}/history`)}>See history</button>
       </Screen>
     )
   }
@@ -403,6 +409,7 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
         <ReceiptField gid={g.id} name={receipt} onChange={setReceipt} />
         {total > 0 && error && <p className="error" role="alert">{error}</p>}
         <button className="btn primary" disabled={!total || !!error}>{old ? 'Save changes' : total ? `Add ${inr(total)}` : 'Add expense'}</button>
+        {old && <button type="button" className="link center-link" onClick={() => go(`/g/${g.id}/e/${old.id}/history`)}>See history: who changed what</button>}
         {old && <button type="button" className="link danger" onClick={del}>Delete expense</button>}
       </form>
     </Screen>
