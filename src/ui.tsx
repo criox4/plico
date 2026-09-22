@@ -181,10 +181,10 @@ export function Screen({ t, title, back, action, fab, children }: {
       {shell && <Sidebar s={s} add={fab ?? '/add'} unread={sync.unread} here={here} />}
       <header className="bar">
         {back ? <button className="iconbtn" onClick={typeof back === 'function' ? back : goBack} aria-label="Back"><Icon n="back" /></button>
-          : <span className="bar-brand"><Wordmark /></span>}
+          : !title && <span className="bar-brand"><Wordmark /></span>}
         {title && <h1 className="bar-title">{title}</h1>}
         <span className="bar-end">
-          {shell && <button className="iconbtn" aria-label="Search" aria-keyshortcuts="/" onClick={() => go('/search')}><Icon n="search" /></button>}
+          {shell && here[0] !== 'search' && <button className="iconbtn" aria-label="Search" aria-keyshortcuts="/" onClick={() => go('/search')}><Icon n="search" /></button>}
           {action}
         </span>
       </header>
@@ -464,7 +464,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
     .sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
     .slice(0, 6)
   return (
-    <Screen t={t} fab="/add" action={<button className="iconbtn" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
+    <Screen t={t} fab="/add" action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
       <Denomination t={t} amount={total} line={verb(null, total, true)}
         caption={collect && pay ? `${inr(collect)} to collect · ${inr(pay)} to pay` : undefined} />
       {banner}

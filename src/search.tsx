@@ -5,6 +5,7 @@ import type { State } from './store'
 import { friendBalance, friendsOf } from './people'
 import { Avatar, LedgerRow, Screen, SectionHead, go } from './ui'
 import { Icon } from './icons'
+import { theme } from './themes'
 
 export function Search({ s }: { s: State }) {
   const [q, setQ] = useState('')
@@ -29,7 +30,7 @@ export function Search({ s }: { s: State }) {
         <SectionHead title="Groups" />
         <ul className="friends">{groups.map(g => { const n = balances(g)[ME] ?? 0; return (
           <li key={g.id}><button className="friend-row" onClick={() => go('/g/' + g.id)}>
-            <span className="slip-kind">{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
+            <span className="slip-kind" style={{ background: theme(g.theme).c.accent, color: theme(g.theme).c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
             <span className="grow"><strong>{g.name}</strong><small>{g.members.length} people · {g.expenses.length} expenses</small></span>
             <span className={`money ${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}`}>{n ? inr(n) : 'even'}</span>
           </button></li>) })}</ul>

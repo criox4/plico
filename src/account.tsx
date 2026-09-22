@@ -500,7 +500,7 @@ export function AccountHub({ s }: { s: State }) {
     void signOut()
   }
   return (
-    <Screen t={s.theme} back title="Account">
+    <Screen t={s.theme} title="Account" fab="/add">
       <section className="profile-card">
         <Avatar name={s.me.name} image={s.user?.image} />
         <div>
