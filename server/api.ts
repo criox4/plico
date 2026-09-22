@@ -41,6 +41,37 @@ publicApi.post('/guardian/:token', async c => {
   return c.json({ ok: true })
 })
 
+// Invite previews: what a link shows before anyone signs up. Just enough to decide (the group, who invited you),
+// never member names, emails or amounts, so a forwarded link doesn't leak the group.
+// ponytail: in-memory per-IP limit; move to the database or Redis when the API runs as more than one process.
+const peeks = new Map<string, number[]>()
+const peekLimit = (c: { req: { header: (h: string) => string | undefined } }) => {
+  const ip = c.req.header('x-vercel-forwarded-for') ?? c.req.header('x-forwarded-for')?.split(',')[0] ?? 'local'
+  const now = Date.now(), recent = (peeks.get(ip) ?? []).filter(t => now - t < 60_000)
+  peeks.set(ip, [...recent, now])
+  return recent.length >= 30
+}
+const inviterOf = async (groupId: string, memberId?: string) => {
+  const e = await db.auditEvent.findFirst({ where: { groupId, ...(memberId ? { memberId, kind: 'member.invited' } : { kind: 'group.created' }) }, orderBy: { seq: 'asc' }, select: { byName: true } })
+  return e?.byName ?? 'A friend'
+}
+publicApi.get('/public/invites/:code', async c => {
+  if (peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
+  const g = await db.group.findUnique({ where: { inviteCode: z.string().max(40).parse(c.req.param('code')) }, select: { id: true, name: true, kind: true, theme: true, _count: { select: { members: true } } } })
+  if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
+  return c.json({ group: { name: g.name, kind: g.kind, theme: g.theme, people: g._count.members }, invitedBy: await inviterOf(g.id) })
+})
+publicApi.get('/public/claim/:token', async c => {
+  if (peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
+  const token = c.req.param('token')
+  if (!/^[a-f0-9]{32}$/.test(token)) return c.json({ error: 'This invite was already used or is no longer valid' }, 404)
+  const m = await db.member.findUnique({ where: { inviteToken: token }, select: { id: true, name: true, email: true, userId: true, group: { select: { id: true, name: true, kind: true, theme: true } } } })
+  if (!m || m.userId) return c.json({ error: 'This invite was already used or is no longer valid' }, 404)
+  // The token was emailed to this address, so whoever holds it can see it: it pre-fills their sign-up.
+  const mask = m.email ? m.email.replace(/^(.{1,2})[^@]*/, '$1***') : null
+  return c.json({ group: { name: m.group.name, kind: m.group.kind, theme: m.group.theme }, invitedBy: await inviterOf(m.group.id, m.id), name: m.name, email: mask, prefill: m.email })
+})
+
 export const api = new Hono<Env>()
 
 const Id = z.string().regex(/^[\w:-]{1,64}$/)
@@ -222,6 +253,35 @@ api.get('/groups/:gid/expenses/:eid/history', async c => {
   return c.json(await db.auditEvent.findMany({ where: { groupId: gid, expenseId: eid }, orderBy: { seq: 'asc' } }))
 })
 
+// Activity: everything that happened in my groups (scope=all) or only what moved my balance (scope=money),
+// newest first, 50 a page, with how many entries by other people I haven't seen yet.
+api.get('/me/activity', async c => {
+  const uid = c.get('userId')
+  const money = c.req.query('scope') === 'money'
+  const [mine, me] = await Promise.all([
+    db.member.findMany({ where: { userId: uid }, select: { id: true, groupId: true, group: { select: { name: true, kind: true } } } }),
+    db.user.findUniqueOrThrow({ where: { id: uid }, select: { activitySeenAt: true } }),
+  ])
+  const byGroup = new Map(mine.map(m => [m.groupId, m]))
+  const before = c.req.query('before')
+  const where = { groupId: { in: [...byGroup.keys()] }, ...(money && { kind: { startsWith: 'expense.' } }), ...(before && { at: { lt: new Date(before) } }) }
+  // ponytail: "money" filters after the query (the member id differs per group); fine at hundreds of entries a page.
+  const rows = await db.auditEvent.findMany({ where, orderBy: { at: 'desc' }, take: money ? 200 : 50 })
+  const events = rows
+    .map(e => ({ ...e, group: byGroup.get(e.groupId)!.group, memberOf: byGroup.get(e.groupId)!.id, byMe: e.byId === uid, myEffect: (e.effect as Record<string, number>)[byGroup.get(e.groupId)!.id] ?? 0 }))
+    .filter(e => !money || e.myEffect).slice(0, 50)
+  const unread = await db.auditEvent.count({ where: { groupId: { in: [...byGroup.keys()] }, byId: { not: uid }, ...(me.activitySeenAt && { at: { gt: me.activitySeenAt } }) } })
+  return c.json({ events, unread, next: rows.length === (money ? 200 : 50) ? rows.at(-1)!.at : null })
+})
+
+// Seen up to here: clears the Activity badge on every device. Never moves backwards, never past now.
+api.post('/me/activity/seen', async c => {
+  const { at } = z.object({ at: z.iso.datetime() }).parse(await c.req.json())
+  const when = new Date(Math.min(Date.parse(at), Date.now()))
+  await db.user.updateMany({ where: { id: c.get('userId'), OR: [{ activitySeenAt: null }, { activitySeenAt: { lt: when } }] }, data: { activitySeenAt: when } })
+  return c.json({ ok: true })
+})
+
 // My money log: entries across all my groups that moved my balance, newest first (paged by `before`, an ISO time).
 api.get('/me/audit', async c => {
   const uid = c.get('userId')
@@ -272,6 +332,29 @@ api.delete('/groups/:id', async c => {
   if (g.kind === 'direct') return c.json({ error: 'Friends can’t be deleted' }, 403)
   if (g.createdById !== c.get('userId')) return c.json({ error: 'Only the person who made the group can delete it' }, 403)
   await db.group.delete({ where: { id: g.id } })
+  return c.json({ ok: true })
+})
+
+// Leave a group you're settled in. Your spot goes back to being your email, so the history and everyone's totals stay
+// exactly as they were; if you made the group, the longest-standing member on Plico takes it over.
+api.post('/groups/:gid/leave', async c => {
+  const gid = Id.parse(c.req.param('gid'))
+  const uid = c.get('userId')
+  const me = await membership(gid, uid)
+  if (!me) return c.json({ ok: true })
+  const g = await db.group.findUniqueOrThrow({ where: { id: gid }, include: { members: { where: { userId: { not: null } }, orderBy: { createdAt: 'asc' } } } })
+  if (g.kind === 'direct') return c.json({ error: 'A balance with a friend can’t be left' }, 400)
+  const shares = await db.expenseShare.findMany({ where: { memberId: me.id, expense: { deletedAt: null, pending: false, rejected: false } }, select: { paid: true, owed: true } })
+  const balance = shares.reduce((a, s) => a + s.paid - s.owed, 0)
+  if (balance) return c.json({ error: balance > 0 ? 'People still owe you here. Settle up first.' : 'You still owe money here. Settle up first.', balance }, 409)
+  const heir = g.members.find(m => m.userId !== uid)
+  if (g.createdById === uid && !heir) return c.json({ error: 'You’re the only one on Plico here. Delete the group instead.' }, 409)
+  const user = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true } })
+  await db.$transaction(async tx => {
+    await tx.member.update({ where: { id: me.id }, data: { userId: null, email: user.email.toLowerCase(), inviteToken: null, invitedAt: null } })
+    if (g.createdById === uid) await tx.group.update({ where: { id: gid }, data: { createdById: heir!.userId } })
+    await audit(tx, gid, { kind: 'member.left', memberId: me.id, byId: uid, byName: c.get('userName'), before: { name: me.name, email: user.email.toLowerCase() } })
+  })
   return c.json({ ok: true })
 })
 

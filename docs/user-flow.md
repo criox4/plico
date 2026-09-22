@@ -106,7 +106,7 @@ Plico is offline-first: screens read the phone's copy of your groups (`src/store
 What a group invite link shows before anyone signs up.
 ```json
 { "group": { "name": "Goa '26", "kind": "trip", "theme": "goa", "people": 4 },
-  "invitedBy": "Asha", "faces": ["A", "B", "C"] }
+  "invitedBy": "Asha" }
 ```
 - `404` for a wrong code and for friends (direct) groups.
 - No member names, emails or amounts: a leaked link must not leak the group.
@@ -118,7 +118,7 @@ A personal invite's preview, and the email to pre-fill.
 { "group": { "name": "Flat 404", "kind": "home", "theme": "matcha" }, "invitedBy": "Asha", "name": "Riya", "email": "ri***@gmail.com", "prefill": "riya@gmail.com" }
 ```
 - `prefill` is only returned for the token that was emailed to that address. The token is 128-bit and single-use, and is retired when the email changes.
-- `410` if it's already been claimed.
+- `404` once it's been claimed (claiming clears the token).
 
 ### `GET /api/me/activity?scope=all|money&before=<ISO>` (signed in)
 The Activity tab: audit entries across all your groups, newest first, 50 per page.

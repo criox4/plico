@@ -165,6 +165,53 @@ try {
   await db.group.deleteMany({ where: { id: f1 } })
   console.log('✓ friends: one balance per pair from either side, two people only')
 
+  // (l) invite previews before sign-in: the group and who invited you, nothing else
+  const g2 = crypto.randomUUID(), selfA2 = crypto.randomUUID()
+  await A.call('PUT', `/api/groups/${g2}`, { name: 'Leave test', kind: 'friends', theme: 'classic', selfId: selfA2 })
+  const code2 = (await A.call('GET', `/api/groups/${g2}/invite`)).body.code
+  const peek = await (await fetch(`${API}/api/public/invites/${code2}`)).json() as any
+  assert.deepEqual(peek, { group: { name: 'Leave test', kind: 'friends', theme: 'classic', people: 1 }, invitedBy: 'Asha' })
+  const spot = crypto.randomUUID()
+  await A.call('PUT', `/api/groups/${g2}/members/${spot}`, { name: 'Esha', email: `esha-${run}@splittr.test` })
+  const tok = (await db.member.findUniqueOrThrow({ where: { id: spot } })).inviteToken!
+  const cl = await (await fetch(`${API}/api/public/claim/${tok}`)).json() as any
+  assert.equal(cl.name, 'Esha'); assert.equal(cl.prefill, `esha-${run}@splittr.test`); assert.equal(cl.invitedBy, 'Asha'); assert.match(cl.email, /^es\*\*\*@/)
+  assert.equal((await fetch(`${API}/api/public/claim/${'0'.repeat(32)}`)).status, 404)
+  console.log('✓ invite previews: group and inviter only; personal invites pre-fill their email')
+
+  // (m) leaving: only when settled; your spot stays as your email; the maker can't leave an otherwise empty group
+  await B.call('POST', `/api/invites/${code2}/join`, {})
+  const bSpot = (await db.member.findFirstOrThrow({ where: { groupId: g2, userId: B.id } })).id
+  const halves = { [selfA2]: 5000, [bSpot]: 5000 }
+  await A.call('PUT', `/api/groups/${g2}/expenses/${crypto.randomUUID()}`, { title: 'Chai', cat: 'food', date: '2026-09-27', amount: 10000, paid: { [selfA2]: 10000 }, owed: halves, base: null })
+  const stuck = await B.call('POST', `/api/groups/${g2}/leave`)
+  assert.equal(stuck.status, 409); assert.equal(stuck.body.balance, -5000)
+  await B.call('PUT', `/api/groups/${g2}/expenses/${crypto.randomUUID()}`, { title: 'Settlement', cat: 'check', date: '2026-09-27', amount: 5000, paid: { [bSpot]: 5000 }, owed: { [selfA2]: 5000 }, settle: true, base: null })
+  // B's settlement to A waits for A to confirm; A confirms it
+  const pend = (await A.call('GET', '/api/groups')).body.groups.find((g: any) => g.id === g2).expenses.find((e: any) => e.settle)
+  await A.call('PUT', `/api/groups/${g2}/expenses/${pend.id}`, { title: 'Settlement', cat: 'check', date: '2026-09-27', amount: 5000, paid: { [bSpot]: 5000 }, owed: { [selfA2]: 5000 }, settle: true, pending: false, base: pend.version })
+  assert.equal((await B.call('POST', `/api/groups/${g2}/leave`)).status, 200, 'settled: can leave')
+  const left = await db.member.findUniqueOrThrow({ where: { id: bSpot } })
+  assert.equal(left.userId, null); assert.equal(left.email, `race-bala-${run}@splittr.test`)
+  assert.ok(!(await B.call('GET', '/api/groups')).body.groups.some((g: any) => g.id === g2), 'gone from B’s list')
+  assert.equal((await A.call('POST', `/api/groups/${g2}/leave`)).status, 409, 'the maker, alone on Plico, deletes instead')
+  const kinds2 = (await A.call('GET', `/api/groups/${g2}/audit`)).body.events.map((e: any) => e.kind)
+  assert.ok(kinds2.includes('member.left'))
+  console.log('✓ leave: only when settled, history intact, logged')
+
+  // (n) activity: everything in my groups, an unread count of other people's entries, cleared everywhere by "seen"
+  const act = (await C.call('GET', '/api/me/activity')).body
+  assert.ok(act.events.length > 0 && act.unread > 0)
+  assert.ok(act.events.every((e: any) => e.group && typeof e.myEffect === 'number'))
+  const money = (await C.call('GET', '/api/me/activity?scope=money')).body
+  assert.ok(money.events.every((e: any) => e.myEffect !== 0))
+  await C.call('POST', '/api/me/activity/seen', { at: new Date().toISOString() })
+  assert.equal((await C.call('GET', '/api/me/activity')).body.unread, 0)
+  await C.call('POST', '/api/me/activity/seen', { at: '2020-01-01T00:00:00.000Z' })
+  assert.equal((await C.call('GET', '/api/me/activity')).body.unread, 0, 'seen never moves backwards')
+  await db.group.deleteMany({ where: { id: g2 } })
+  console.log('✓ activity: feed, money filter, unread badge, seen')
+
   console.log('\nall sync race checks passed')
 } finally {
   await db.group.deleteMany({ where: { id: gid } })

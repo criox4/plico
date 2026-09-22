@@ -29,6 +29,7 @@ model User {
   guardianName      String?
   guardianConsentAt DateTime?
   aiConsentAt       DateTime? /// agreed to send photos/sentences to the AI reader; null = not asked or withdrawn
+  activitySeenAt    DateTime? /// newest Activity entry this person has seen, on any device (the unread badge)
   sessions      Session[]
   accounts      Account[]
   members       Member[]
