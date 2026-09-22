@@ -6,7 +6,9 @@
 import { useSyncExternalStore } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
-import { ME, enqueue, isVpa, rebase, runRecurring, uid, type Expense, type Group, type Op, type Snap, type Theme, type Tone } from './logic'
+import { ME, enqueue, isVpa, rebase, runRecurring, uid, type Expense, type Group, type Op, type Theme, type Tone } from './logic'
+import { ConflictOut, GroupsOut, ReadOut, SavedOut, UnreadOut, type ExpenseInput, type Read, type ServerExpense, type ServerGroup, type Snap, type SnapFull } from './schema'
+export type { Read, ServerExpense }
 import { blank, getState, onLocalChange, setRemote, update, type State } from './store'
 import { API, authClient, token } from './auth-client'
 
@@ -77,8 +79,8 @@ const memberBody = (m: Group['members'][number]) => ({
   email: m.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email) ? m.email.trim().toLowerCase() : null,
   phone: m.phone && /^\+?[0-9 ()-]{7,20}$/.test(m.phone) ? m.phone.trim() : null,
 })
-const expenseBody = (g: Group, e: Expense) => ({
-  title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid: mapKeys(g, e.paid), owed: mapKeys(g, e.owed),
+const expenseBody = (g: Group, e: Expense): ExpenseInput => ({
+  title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid: mapKeys(g, e.paid)!, owed: mapKeys(g, e.owed)!,
   mode: e.mode ?? null, input: mapKeys(g, e.input) ?? null, settle: !!e.settle, pending: !!e.pending, rejected: !!e.rejected, receipt: e.receipt ?? null, repeat: e.repeat ?? null,
 })
 export const isPhone = (p = '') => /^\+?[0-9 ()-]{7,20}$/.test(p.trim())
@@ -178,24 +180,29 @@ async function flush() {
       } finally { sending = false }
       if (res.status === 401) return expired()
       if (res.status >= 500) return setStatus({ error: 'The server had trouble. Your changes are safe and will retry.' })
-      const out = await res.json().catch(() => ({})) as { version?: number; code?: string; error?: string; theirs?: ServerExpense | null; by?: string; action?: string }
+      const raw: unknown = await res.json().catch(() => ({}))
+      const { code, error } = raw as { code?: string; error?: string }
       // Waiting on the age question or a parent's consent: keep everything and try again once it's sorted.
-      if (res.status === 403 && (out.code === 'age' || out.code === 'guardian')) return
+      if (res.status === 403 && (code === 'age' || code === 'guardian')) return
       outbox.shift()
       const [, gid, eid] = opIds(op.path)
       const title = (op.body as { title?: string })?.title ?? snap.groups.find(g => g.id === gid)?.expenses.find(e => e.id === eid)?.title ?? groupName(gid) ?? 'A change'
-      if (res.status === 409 && out.code === 'conflict') {
+      const clash = res.status === 409 ? ConflictOut.safeParse(raw) : null
+      if (clash?.success) {
         // Someone changed it first: keep both versions and ask. Their version shows here after the pull.
-        addIssue({ kind: 'conflict', gid, eid, title, op, theirs: out.theirs, by: out.by, action: out.action })
+        addIssue({ kind: 'conflict', gid, eid, title, op, theirs: clash.data.theirs, by: clash.data.by, action: clash.data.action })
       } else if (res.status === 404 && gid) {
         // The group is gone (deleted, or we were removed): everything else queued for it would fail the same way.
         outbox = outbox.filter(o => opIds(o.path)[1] !== gid)
         addIssue({ kind: 'failed', gid, title: groupName(gid) ?? 'A group', op, message: 'This group was deleted, or you were removed from it, so changes you made there couldn’t be saved.' })
       } else if (!res.ok) {
-        addIssue({ kind: 'failed', gid, eid, title, op, message: out.error || 'The server didn’t accept this change.' })
-      } else if (eid && typeof out.version === 'number') {
-        outbox = rebase(outbox, op.path, out.version)
-        if (op.m === 'PUT') setVersion(gid, eid, out.version)
+        addIssue({ kind: 'failed', gid, eid, title, op, message: error || 'The server didn’t accept this change.' })
+      } else {
+        const saved = SavedOut.safeParse(raw)
+        if (eid && saved.success && saved.data.version !== undefined) {
+          outbox = rebase(outbox, op.path, saved.data.version)
+          if (op.m === 'PUT') setVersion(gid, eid, saved.data.version)
+        }
       }
       saveOutbox()
       setStatus({ offline: false, error: '' })
@@ -205,17 +212,6 @@ async function flush() {
     flushing = false
     if (outbox.length && status.authed && !status.offline) setTimeout(() => void flush(), 0) // edits that landed mid-pull
   }
-}
-
-export type ServerExpense = Snap & {
-  id: string; mode: Expense['mode'] | null; input: Record<string, number> | null; repeatDay: number | null
-  version: number; deletedAt: string | null; updatedAt: string
-}
-type ServerGroup = {
-  id: string; name: string; kind: Group['kind']; theme: Group['theme']; track: boolean; emoji: string | null; cover: string | null; createdById: string
-  members: { id: string; name: string; upi: string | null; userId: string | null; email: string | null; phone: string | null; invitedAt: string | null; user?: { image: string | null; email: string } | null }[]
-  expenses: ServerExpense[]
-  full: boolean // false: `expenses` holds only what changed since the cursor, deletions included
 }
 
 /** A server expense (or a history snapshot) in the phone's shape: my member id becomes ME. */
@@ -235,7 +231,7 @@ export function expenseFromServer(e: Omit<ServerExpense, 'version' | 'deletedAt'
 }
 
 /** A queued edit's body (server member ids) as a history-style snapshot, to compare with theirs. */
-export function bodySnap(b: ReturnType<typeof expenseBody>): Snap {
+export function bodySnap(b: ExpenseInput): Snap {
   const ids = [...new Set([...Object.keys(b.paid ?? {}), ...Object.keys(b.owed ?? {})])].sort()
   return { title: b.title, cat: b.cat, date: b.date, amount: b.amount, settle: b.settle, pending: b.pending, rejected: b.rejected, receipt: b.receipt, repeatNext: b.repeat?.next ?? null,
     shares: ids.map(memberId => ({ memberId, paid: b.paid?.[memberId] ?? 0, owed: b.owed?.[memberId] ?? 0 })) }
@@ -262,7 +258,13 @@ export async function pull() {
   try { res = await req('/api/groups' + q) } catch { return setStatus({ offline: true }) }
   if (res.status === 401) return expired()
   if (!res.ok) return
-  const data = (await res.json()) as { now: string; groups: ServerGroup[] }
+  // Checked before it touches the phone's copy: a malformed answer must never overwrite good data.
+  const parsed = GroupsOut.safeParse(await res.json().catch(() => null))
+  if (!parsed.success) {
+    console.warn('Unexpected sync answer', parsed.error.issues.slice(0, 3))
+    return setStatus({ error: 'Plico got an answer from the server it doesn’t understand. Your data is safe. Update the app or try again later.' })
+  }
+  const data = parsed.data
   if (outbox.length || timer) { missedPull = true; return } // local edits pending: they win, and we pull again after
   missedPull = false
   let gap = false
@@ -282,7 +284,7 @@ export async function pull() {
   setCursor(gap ? null : data.now)
   snap = getState()
   setStatus({ offline: false })
-  void req('/api/me/activity?peek=1').then(r => (r.ok ? r.json() : null)).then(j => j && setStatus({ unread: j.unread })).catch(() => {})
+  void req('/api/me/activity?peek=1').then(r => (r.ok ? r.json() : null)).then(j => { const u = UnreadOut.safeParse(j); if (u.success) setStatus({ unread: u.data.unread }) }).catch(() => {})
 }
 
 /** The Activity tab was looked at up to this entry: clears the badge here and on other devices. */
@@ -317,7 +319,7 @@ export function resolveIssue(id: string, choice: 'mine' | 'theirs' | 'retry' | '
     const op: Op = it.kind === 'conflict' ? { ...it.op, base: it.theirs?.version ?? null } : it.op
     if (it.eid) {
       const g = getState().groups.find(x => x.id === it.gid)
-      const b = op.body as ReturnType<typeof expenseBody> | undefined
+      const b = op.body as ExpenseInput | undefined
       placeLocal(it.gid, it.eid, op.m === 'DELETE' || !b ? null
         : expenseFromServer({ id: it.eid, ...bodySnap(b), mode: b.mode, input: b.input, repeatDay: b.repeat?.day ?? null, version: op.base ?? undefined }, g?.selfId))
     }
@@ -336,7 +338,7 @@ export async function restoreExpense(gid: string, eid: string) {
   await api(`/api/groups/${gid}/expenses/${eid}/restore`, { method: 'POST' })
   await flush(); await pull()
 }
-export async function revertExpense(gid: string, eid: string, to: Snap & { mode?: string | null; input?: unknown; repeatDay?: number | null }, version: number, current: number) {
+export async function revertExpense(gid: string, eid: string, to: SnapFull, version: number, current: number) {
   const paid: Record<string, number> = {}, owed: Record<string, number> = {}
   for (const x of to.shares) { if (x.paid) paid[x.memberId] = x.paid; if (x.owed) owed[x.memberId] = x.owed }
   await api(`/api/groups/${gid}/expenses/${eid}`, { method: 'PUT', body: JSON.stringify({
@@ -369,12 +371,12 @@ export async function uploadImage<T>(path: string, f: Blob, max: number): Promis
   return out as T
 }
 
-export type Read = { title: string; amount: number | null; cat: string; date: string | null; payer: string | null; people: string[]; items: { name: string; amount: number }[]; extras: number }
 const dataUrl = (b: Blob) => new Promise<string>((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => no(r.error); r.readAsDataURL(b) })
 /** Ask the server to read an expense out of a sentence or a photo (receipt, order, UPI screenshot). */
 export async function readExpense(src: { text?: string; image?: Blob; groupId?: string }) {
   const image = src.image && await dataUrl(await shrink(src.image, 1600))
-  return api<Read>('/api/ai/read', { method: 'POST', body: JSON.stringify({ text: src.text, image, groupId: src.groupId, today: new Date().toLocaleDateString('en-CA') }) })
+  return api<unknown>('/api/ai/read', { method: 'POST', body: JSON.stringify({ text: src.text, image, groupId: src.groupId, today: new Date().toLocaleDateString('en-CA') }) })
+    .then((r): Read => ReadOut.parse(r))
     .catch(e => { throw new Error(navigator.onLine ? (e as Error).message : 'Reading photos needs a connection. You can still type it in.') })
 }
 

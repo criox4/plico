@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { GENESIS, ME, auditPayload, balances, changes, inr, summary, type Group, type Id, type Snap } from './logic'
 import { theme, type ThemeId } from './themes'
+import * as z from 'zod/mini'
+import { ActivityOut, AuditEvent, AuditOut, SnapFull, type ActivityEvent } from './schema'
 import { groupTitle } from './people'
 import type { State } from './store'
 import { api, bodySnap, resolveIssue, restoreExpense, revertExpense, seenActivity, useSync, type Issue, type ServerExpense } from './sync'
@@ -99,16 +101,14 @@ function Compare({ mine, theirs, name }: { mine: Snap; theirs: Snap; name: (id: 
 }
 
 // ---------- the money audit ----------
-type Event = {
-  seq: number; groupId: string; kind: string; expenseId: string | null; memberId: string | null; version: number; revertOf: number | null
-  byId: string | null; byName: string; at: string; before: (Snap & Record<string, unknown>) | null; after: (Snap & Record<string, unknown>) | null
-  effect: Record<string, number>; prevHash: string; hash: string
-}
+type Event = AuditEvent
+/** An audit entry's before/after as an expense, when it is one (checked, not assumed). */
+const snapOf = (x: Event['before']) => (x ? SnapFull.safeParse(x).data ?? null : null)
 const actionOf = (e: Event) => e.kind.split('.')[1]
-function useFetch<T>(path: string, dep: unknown = null) {
+function useFetch<T>(path: string, schema: z.ZodMiniType<T>, dep: unknown = null) {
   const [data, setData] = useState<T | null>(null)
   const [err, setErr] = useState('')
-  useEffect(() => { api<T>(path).then(setData, () => setErr(navigator.onLine ? 'Couldn’t load this. Try again.' : 'History needs a connection. Come back online to see it.')) }, [path, dep])
+  useEffect(() => { api<unknown>(path).then(r => setData(schema.parse(r)), () => setErr(navigator.onLine ? 'Couldn’t load this. Try again.' : 'History needs a connection. Come back online to see it.')) }, [path, dep])
   return { data, err }
 }
 const signed = (n: number) => `${n > 0 ? '+' : '−'}${inr(n)}`
@@ -120,12 +120,12 @@ function describe(e: Event, g: Group | undefined, meId?: string) {
   const name = namer(g)
   const actor = e.byId && e.byId === meId ? 'You' : e.byName
   const [area, a] = e.kind.split('.')
-  const snap = e.after ?? e.before
   let line: string, details: string[] = []
   if (area === 'expense') {
+    const before = snapOf(e.before), after = snapOf(e.after), snap = after ?? before
     const verb = a === 'reverted' && e.revertOf ? `put back version ${e.revertOf} of` : ({ created: 'added', edited: 'changed', deleted: 'deleted', restored: 'restored' } as Record<string, string>)[a] ?? a
     line = `${actor} ${verb} “${snap?.title ?? 'an expense'}”`
-    details = (a === 'edited' || a === 'reverted') && e.before && e.after ? changes(e.before, e.after, name) : snap ? [summary(snap, name)] : []
+    details = (a === 'edited' || a === 'reverted') && before && after ? changes(before, after, name) : snap ? [summary(snap, name)] : []
   } else if (area === 'member') {
     const who = String((e.after ?? e.before)?.name ?? (e.memberId ? name(e.memberId) : 'someone'))
     const email = (e.after ?? e.before)?.email ? ` (${(e.after ?? e.before)!.email})` : ''
@@ -189,12 +189,12 @@ function Entry({ s, g, e, onRestore, busy, mine, label }: { s: State; g?: Group;
 }
 
 export function AuditLog({ s, g }: { s: State; g: Group }) {
-  const [log, setLog] = useState<{ head: { auditSeq: number; auditHash: string }; events: Event[] } | null>(null)
+  const [log, setLog] = useState<z.infer<typeof AuditOut> | null>(null)
   const [check, setCheck] = useState<{ ok: boolean; at: number } | null>(null)
   const [err, setErr] = useState('')
   const [shown, setShown] = useState(50)
   const [busy, setBusy] = useState('')
-  const load = () => api<{ head: { auditSeq: number; auditHash: string }; events: Event[] }>(`/api/groups/${g.id}/audit`)
+  const load = () => api<unknown>(`/api/groups/${g.id}/audit`).then(r => AuditOut.parse(r))
     .then(l => { setLog(l); setCheck(null); void verify(l.events, l.head).then(setCheck) },
       () => setErr(navigator.onLine ? 'Couldn’t load the audit log. Try again.' : 'The audit log needs a connection. Come back online to see it.'))
   useEffect(() => { void load() }, [g.id, g.expenses.length])
@@ -234,14 +234,14 @@ export function AuditLog({ s, g }: { s: State; g: Group }) {
 }
 
 // ---------- Activity: everything in my groups, or just what moved my balance ----------
-type Mine = Event & { memberOf: string; group: { name: string; kind: string }; byMe: boolean; myEffect: number }
+type Mine = ActivityEvent
 export function Activity({ s }: { s: State }) {
   const [scope, setScope] = useState<'all' | 'money'>('all')
   const [rows, setRows] = useState<Mine[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [err, setErr] = useState('')
   const [loaded, setLoaded] = useState(false)
-  const load = (before?: string) => api<{ events: Mine[]; next: string | null }>(`/api/me/activity?scope=${scope}${before ? `&before=${encodeURIComponent(before)}` : ''}`)
+  const load = (before?: string) => api<unknown>(`/api/me/activity?scope=${scope}${before ? `&before=${encodeURIComponent(before)}` : ''}`).then(r => ActivityOut.parse(r))
     .then(r => {
       setRows(x => (before ? [...x, ...r.events] : r.events)); setNext(r.next); setLoaded(true); setErr('')
       if (!before && r.events[0]) void seenActivity(r.events[0].at)
@@ -278,12 +278,12 @@ export function Activity({ s }: { s: State }) {
 // ---------- one expense, every version ----------
 export function ExpenseHistory({ s, g, eid }: { s: State; g: Group; eid: Id }) {
   const local = g.expenses.find(e => e.id === eid)
-  const { data, err } = useFetch<Event[]>(`/api/groups/${g.id}/expenses/${eid}/history`, local?.v)
+  const { data, err } = useFetch(`/api/groups/${g.id}/expenses/${eid}/history`, z.array(AuditEvent), local?.v)
   const [busy, setBusy] = useState(0)
   const [note, setNote] = useState('')
   const latest = data?.at(-1)
   const deleted = latest ? actionOf(latest) === 'deleted' : false
-  const title = (latest?.after ?? latest?.before)?.title ?? local?.title ?? 'Expense'
+  const title = (snapOf(latest?.after ?? null) ?? snapOf(latest?.before ?? null))?.title ?? local?.title ?? 'Expense'
   const act = async (v: number, fn: () => Promise<void>) => {
     setBusy(v); setNote('')
     await fn().then(() => setNote('Done. Everyone in the group sees it on their next sync.'),
@@ -296,7 +296,7 @@ export function ExpenseHistory({ s, g, eid }: { s: State; g: Group; eid: Id }) {
       {deleted && <p className="muted-p">Deleted by {latest!.byId === s.user?.id ? 'you' : latest!.byName}, {when(latest!.at)}.</p>}
       {err && <p className="error" role="alert">{err}</p>}
       {note && <p className="notice" role="status">{note}</p>}
-      {deleted && <button className="btn primary" disabled={!!busy} onClick={() => void act(latest!.version, () => restoreExpense(g.id, eid))}>Restore this expense</button>}
+      {deleted && <button className="btn primary" disabled={!!busy} onClick={() => void act(latest!.version ?? 0, () => restoreExpense(g.id, eid))}>Restore this expense</button>}
       <ol className="versions">
         {[...(data ?? [])].reverse().map(e => {
           const current = e === latest && !deleted
@@ -304,8 +304,8 @@ export function ExpenseHistory({ s, g, eid }: { s: State; g: Group; eid: Id }) {
             <li key={e.seq} className={current ? 'current' : ''}>
               <p className="ver-head"><span className="ver-n">v{e.version}</span><small>{cap(when(e.at))}</small>{current && <span className="tag">Current</span>}</p>
               <VersionLine s={s} g={g} e={e} />
-              {!current && !deleted && e.after && latest && (
-                <button className="link" disabled={!!busy} onClick={() => void act(e.version, () => revertExpense(g.id, eid, e.after!, e.version, latest.version))}>
+              {!current && !deleted && snapOf(e.after) && latest && (
+                <button className="link" disabled={!!busy} onClick={() => void act(e.version ?? 0, () => revertExpense(g.id, eid, snapOf(e.after)!, e.version ?? 0, latest.version ?? 0))}>
                   <Icon n="back" size={16} />{busy === e.version ? 'Restoring…' : 'Restore this version'}
                 </button>
               )}

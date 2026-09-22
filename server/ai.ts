@@ -28,7 +28,8 @@ From a UPI or bank payment screenshot (GPay, PhonePe, Paytm): amount = the amoun
 From a sentence: follow what it says about who paid and who is in. Only use "me" or names from the member list for payer and people.
 Never invent amounts that are not shown or said. If there is no amount, use null.`
 
-export type Read = { title: string; amount: number | null; cat: string; date: string | null; payer: string | null; people: string[]; items: { name: string; amount: number }[]; extras: number }
+import type { Read } from '../src/schema.ts'
+export type { Read }
 
 export async function readExpense(input: { text?: string; image?: string; members: string[]; today: string }): Promise<Read> {
   const user: unknown[] = [{ type: 'text', text: `Today is ${input.today}. Members: me${input.members.length ? ', ' + input.members.join(', ') : ''}.${input.text ? `\nThe expense: ${input.text}` : '\nRead the expense in this image.'}` }]

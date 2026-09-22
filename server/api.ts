@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { z } from 'zod'
+import * as z from 'zod/mini'
+import { AgeIn, AiConsentIn, ExpenseIn, FileName, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, ParentConsentIn, ReadIn, SeenIn, Token } from '../src/schema.ts'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
 import { mail } from './email.ts'
@@ -27,7 +28,7 @@ publicApi.get('/guardian/:token', async c => {
   return t ? c.json({ child: { name: t.user.name, email: t.user.email } }) : c.json({ error: 'This link has expired or was already used' }, 404)
 })
 publicApi.post('/guardian/:token', async c => {
-  const b = z.object({ consent: z.boolean(), name: z.string().trim().min(2).max(80).optional(), adult: z.boolean().optional() }).parse(await c.req.json())
+  const b = ParentConsentIn.parse(await c.req.json())
   const t = await guardianToken(c.req.param('token'))
   if (!t) return c.json({ error: 'This link has expired or was already used' }, 404)
   await db.verification.delete({ where: { id: t.v.id } })
@@ -57,7 +58,7 @@ const inviterOf = async (groupId: string, memberId?: string) => {
 }
 publicApi.get('/public/invites/:code', async c => {
   if (peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
-  const g = await db.group.findUnique({ where: { inviteCode: z.string().max(40).parse(c.req.param('code')) }, select: { id: true, name: true, kind: true, theme: true, _count: { select: { members: true } } } })
+  const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, select: { id: true, name: true, kind: true, theme: true, _count: { select: { members: true } } } })
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
   return c.json({ group: { name: g.name, kind: g.kind, theme: g.theme, people: g._count.members }, invitedBy: await inviterOf(g.id) })
 })
@@ -74,31 +75,8 @@ publicApi.get('/public/claim/:token', async c => {
 
 export const api = new Hono<Env>()
 
-const Id = z.string().regex(/^[\w:-]{1,64}$/)
-const Kind = z.enum(['trip', 'home', 'couple', 'friends', 'office', 'family', 'direct'])
-const Theme = z.enum(THEMES.map(t => t.id) as [string, ...string[]])
-const Upi = z.string().trim().max(256).refine(v => !v || isVpa(v), 'Not a valid UPI ID').nullish()
-const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
-const Paise = z.number().int().min(0).max(2_000_000_000)
-
-const Emoji = z.string().regex(/^(?=.*\p{Extended_Pictographic})\S{1,16}$/u)
-const GroupIn = z.object({ name: z.string().trim().min(1).max(60), kind: Kind, theme: Theme, track: z.boolean().optional(), emoji: Emoji.nullish(), cover: z.string().regex(/^[0-9a-f-]{36}\.(jpg|png|webp)$/).nullish(), selfId: Id })
-const Email = z.string().trim().toLowerCase().max(254).refine(v => !v || z.email().safeParse(v).success, 'Not a valid email').nullish()
-const Phone = z.string().trim().max(20).refine(v => !v || /^\+?[0-9 ()-]{7,20}$/.test(v), 'Not a valid phone number').nullish()
-const MemberIn = z.object({ name: z.string().trim().min(1).max(60), upi: Upi, email: Email, phone: Phone })
 const APP = process.env.PUBLIC_URL || 'http://localhost:5173'
 const claimUrl = (token: string) => `${APP}/#/claim/${token}`
-const FileName = z.string().regex(/^[0-9a-f-]{36}\.(jpg|png|webp)$/)
-const ExpenseIn = z.object({
-  title: z.string().trim().min(1).max(120), cat: z.string().max(20), date: Day, amount: Paise.min(1),
-  paid: z.record(Id, Paise), owed: z.record(Id, Paise),
-  mode: z.enum(['equal', 'exact', 'percent', 'shares']).nullish(), input: z.record(Id, z.number()).nullish(),
-  settle: z.boolean().optional(), pending: z.boolean().optional(), rejected: z.boolean().optional(), receipt: FileName.nullish(), repeat: z.object({ next: Day, day: z.number().int().min(1).max(31) }).nullish(),
-  // The version this edit started from: null for a new expense. Absent only from pre-versioning clients (last write wins).
-  base: z.number().int().min(0).nullish(),
-  revertOf: z.number().int().min(1).optional(), // "restore this version" from the history screen
-})
-const JoinIn = z.object({ memberId: Id.optional() })
 
 const inviteCode = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12)
 const notFound = { error: 'Not found' }
@@ -117,7 +95,6 @@ api.use('*', async (c, next) => {
 })
 
 // ---------- age, parental consent, AI consent, data export ----------
-const GuardianEmail = z.string().trim().toLowerCase().max(254).refine(v => z.email().safeParse(v).success, 'Enter your parent’s email')
 async function askGuardian(uid: string) {
   const u = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { name: true, email: true, guardianEmail: true } })
   if (!u.guardianEmail) return
@@ -128,7 +105,7 @@ async function askGuardian(uid: string) {
 }
 
 api.post('/me/age', async c => {
-  const b = z.object({ group: z.enum(['adult', 'teen']), guardianEmail: GuardianEmail.optional() }).parse(await c.req.json())
+  const b = AgeIn.parse(await c.req.json())
   const uid = c.get('userId')
   const u = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { ageGroup: true, email: true } })
   if (u.ageGroup && u.ageGroup !== b.group) return c.json({ error: 'Your age is already set. If it’s wrong, write to privacy@plico.space.' }, 409)
@@ -141,7 +118,7 @@ api.post('/me/age', async c => {
 
 // A teen can change the parent's email or resend the request (once a minute).
 api.post('/me/guardian', async c => {
-  const b = z.object({ email: GuardianEmail.optional() }).parse(await c.req.json().catch(() => ({})))
+  const b = GuardianIn.parse(await c.req.json().catch(() => ({})))
   const uid = c.get('userId')
   const u = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { ageGroup: true, guardianConsentAt: true, email: true } })
   if (u.ageGroup !== 'teen' || u.guardianConsentAt) return c.json({ error: 'No consent needed' }, 409)
@@ -156,7 +133,7 @@ api.post('/me/guardian', async c => {
 })
 
 api.post('/me/ai', async c => {
-  const { consent } = z.object({ consent: z.boolean() }).parse(await c.req.json())
+  const { consent } = AiConsentIn.parse(await c.req.json())
   await db.user.update({ where: { id: c.get('userId') }, data: { aiConsentAt: consent ? new Date() : null } })
   return c.json({ ok: true })
 })
@@ -179,7 +156,7 @@ api.get('/me/export', async c => {
 })
 
 api.onError((e, c) => {
-  if (e instanceof z.ZodError) return c.json({ error: e.issues[0]?.message ?? 'Invalid input' }, 400)
+  if (e instanceof z.core.$ZodError) return c.json({ error: e.issues[0]?.message ?? 'Invalid input' }, 400)
   if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return c.json({ error: 'Already exists' }, 409)
   console.error(e)
   return c.json({ error: 'Something went wrong' }, 500)
@@ -277,7 +254,7 @@ api.get('/me/activity', async c => {
 
 // Seen up to here: clears the Activity badge on every device. Never moves backwards, never past now.
 api.post('/me/activity/seen', async c => {
-  const { at } = z.object({ at: z.iso.datetime() }).parse(await c.req.json())
+  const { at } = SeenIn.parse(await c.req.json())
   const when = new Date(Math.min(Date.parse(at), Date.now()))
   await db.user.updateMany({ where: { id: c.get('userId'), OR: [{ activitySeenAt: null }, { activitySeenAt: { lt: when } }] }, data: { activitySeenAt: when } })
   return c.json({ ok: true })
@@ -440,7 +417,7 @@ api.post('/groups/:gid/members/:mid/invite', async c => {
   const m = await db.member.findUnique({ where: { id: mid } })
   if (!m || m.groupId !== gid) return c.json(notFound, 404)
   if (m.userId) return c.json({ error: 'Already joined' }, 409)
-  const { email } = z.object({ email: z.boolean().optional() }).parse(await c.req.json().catch(() => ({})))
+  const { email } = InviteResendIn.parse(await c.req.json().catch(() => ({})))
   if (email && m.email) {
     if (m.invitedAt && Date.now() - m.invitedAt.getTime() < 60_000) return c.json({ error: 'Invite just sent. Try again in a minute.' }, 429)
     await inviteByEmail(gid, mid, m.email, c.get('userName'))
@@ -617,11 +594,6 @@ api.get('/groups/:gid/files/:name', async c => {
 })
 
 // ---------- reading expenses: a sentence, a receipt photo, a payment screenshot ----------
-const ReadIn = z.object({
-  text: z.string().trim().min(1).max(500).optional(),
-  image: z.string().regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/).max(7_000_000).optional(),
-  groupId: Id.optional(), today: Day,
-}).refine(b => b.text || b.image, 'Send a sentence or a photo')
 const reads = new Map<string, number[]>() // ponytail: per-process limiter; move to the DB if we run several instances
 api.post('/ai/read', bodyLimit({ maxSize: 7 << 20, onError: c => c.json({ error: 'That photo is too large' }, 413) }), async c => {
   if (!aiReady()) return c.json({ error: 'Reading receipts isn’t set up yet' }, 503)
@@ -647,7 +619,6 @@ api.post('/ai/read', bodyLimit({ maxSize: 7 << 20, onError: c => c.json({ error:
 })
 
 // ---------- personal claim links: whoever holds the token takes that guest spot ----------
-const Token = z.string().regex(/^[a-f0-9]{32}$/)
 
 api.get('/claim/:token', async c => {
   const m = await db.member.findUnique({ where: { inviteToken: Token.parse(c.req.param('token')) }, include: { group: true } })
@@ -672,13 +643,13 @@ api.post('/claim/:token', async c => {
 // ---------- group invite links: anyone with the link joins as themselves ----------
 // A spot someone was invited to by email is only theirs: claimed by its personal link, or here when the email matches.
 api.get('/invites/:code', async c => {
-  const g = await db.group.findUnique({ where: { inviteCode: z.string().max(40).parse(c.req.param('code')) }, include: { members: { select: { userId: true } } } })
+  const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, include: { members: { select: { userId: true } } } })
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
   return c.json({ id: g.id, name: g.name, kind: g.kind, theme: g.theme, people: g.members.length, joined: g.members.some(m => m.userId === c.get('userId')) })
 })
 
 api.post('/invites/:code/join', async c => {
-  const g = await db.group.findUnique({ where: { inviteCode: z.string().max(40).parse(c.req.param('code')) }, include: { members: true } })
+  const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, include: { members: true } })
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
   const uid = c.get('userId')
   if (g.members.some(m => m.userId === uid)) return c.json({ id: g.id })
@@ -699,7 +670,7 @@ api.post('/invites/:code/join', async c => {
 // ---------- friends: a two-person group per pair, for expenses outside any group ----------
 const directKey = (a: string, b: string) => createHash('sha256').update([a.toLowerCase(), b.toLowerCase()].sort().join('\n')).digest('hex')
 api.post('/friends', async c => {
-  const b = z.object({ email: z.email().max(254), name: z.string().trim().min(1).max(60) }).parse(await c.req.json())
+  const b = FriendIn.parse(await c.req.json())
   const uid = c.get('userId'), email = b.email.trim().toLowerCase()
   const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, name: true } })
   if (email === me.email.toLowerCase()) return c.json({ error: 'That’s your own email.' }, 400)

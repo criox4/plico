@@ -1,3 +1,4 @@
+import type { Snap } from './schema'
 // All money is integer paise. Never floats past the input box.
 import type { ThemeId as Theme } from './themes'
 export type { Theme }
@@ -349,10 +350,7 @@ export function enqueue(ops: Op[], op: Op, busy: boolean): Op[] {
 export const rebase = (ops: Op[], path: string, version: number) => ops.map(o => (o.path === path && 'base' in o ? { ...o, base: version } : o))
 
 /** One version of an expense as the server records it (history snapshots, conflicts). Member ids are server ids. */
-export type Snap = {
-  title: string; cat: string; date: string; amount: number; settle?: boolean; pending?: boolean; rejected?: boolean
-  receipt?: string | null; repeatNext?: string | null; shares: { memberId: Id; paid: number; owed: number }[]
-}
+export type { Snap }
 const day = (d: string) => new Date(d + 'T00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 const list = (xs: string[]) => xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`
 

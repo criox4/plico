@@ -6,6 +6,13 @@ import { auth } from '../server/auth.ts'
 import { db } from '../server/db.ts'
 import { createHash } from 'node:crypto'
 import { auditPayload, GENESIS } from '../src/logic.ts'
+import * as z from 'zod/mini'
+import { ActivityOut, AuditEvent, AuditOut, ClaimPreviewOut, ConflictOut, GroupsOut, InvitePreviewOut, SavedOut } from '../src/schema.ts'
+/** The server's answers must match the shared contract the app reads them with. */
+const contract = (schema: z.ZodMiniType, body: unknown, what: string) => {
+  const r = schema.safeParse(body)
+  assert.ok(r.success, `${what} breaks the contract: ${JSON.stringify(r.error?.issues.slice(0, 3))}`)
+}
 
 const API = process.env.RACE_API ?? 'http://localhost:8787'
 const run = Date.now()
@@ -45,7 +52,9 @@ try {
   let r = await B.call('PUT', path, exp('Dinner at Toit', 120000, 1))
   assert.equal(r.status, 409, 'second edit from the same base is a conflict')
   assert.equal(r.body.code, 'conflict'); assert.equal(r.body.theirs.amount, 150000); assert.equal(r.body.by, 'Asha')
-  assert.equal((await B.call('PUT', path, exp('Dinner at Toit', 120000, 2))).body.version, 3, 'keep mine: re-sent on their version')
+  contract(ConflictOut, r.body, '409 conflict')
+  const kept = (await B.call('PUT', path, exp('Dinner at Toit', 120000, 2))).body
+  assert.equal(kept.version, 3, 'keep mine: re-sent on their version'); contract(SavedOut, kept, 'expense PUT')
   console.log('✓ edit vs edit: 409 with their version and name; keep-mine lands')
 
   // (b) edit vs delete, both orders
@@ -82,7 +91,9 @@ try {
     assert.equal([x.status, y.status].filter(s => s === 409).length, 1, `round ${i}: the other gets a conflict`)
     wins++
   }
-  const all = (await A.call('GET', '/api/groups')).body.groups.find((g: { id: string }) => g.id === gid).expenses
+  const full = (await A.call('GET', '/api/groups')).body
+  contract(GroupsOut, full, 'GET /groups')
+  const all = full.groups.find((g: { id: string }) => g.id === gid).expenses
   assert.equal(all.length, 61)
   const total = all.reduce((s: number, e: any) => s + e.amount, 0)
   const owed = all.flatMap((e: any) => e.shares).reduce((s: number, x: any) => s + x.owed, 0)
@@ -100,6 +111,7 @@ try {
   await C.call('PUT', `/api/groups/${gid}/expenses/${gone}`, exp('Oops', 100, null))
   await C.call('DELETE', `/api/groups/${gid}/expenses/${gone}?base=1`)
   const d = (await B.call('GET', `/api/groups?since=${encodeURIComponent(cursor)}&known=${gid}`)).body
+  contract(GroupsOut, d, 'GET /groups delta')
   const g = d.groups.find((x: { id: string }) => x.id === gid)
   assert.equal(g.full, false)
   assert.ok(g.expenses.some((e: any) => e.id === gone && e.deletedAt), 'tombstone included')
@@ -112,6 +124,7 @@ try {
 
   // (g) history tells who did what
   const h = (await C.call('GET', `${path}/history`)).body
+  contract(z.array(AuditEvent), h, 'expense history')
   assert.deepEqual(h.slice(0, 9).map((e: any) => `${e.version}:${e.kind}:${e.byName}`),
     ['1:expense.created:Asha', '2:expense.edited:Asha', '3:expense.edited:Bala', '4:expense.deleted:Asha', '5:expense.restored:Bala', '6:expense.edited:Bala', '7:expense.edited:Asha', '8:expense.deleted:Asha', '9:expense.restored:Chitra'])
   assert.equal(h[1].before.amount, 120000); assert.equal(h[1].after.amount, 150000)
@@ -119,7 +132,9 @@ try {
 
   // (h) the audit chain survived all of that concurrency: no gaps, every hash checks, every entry's effect sums to 0,
   // and replaying the effects gives exactly today's balances
-  const { head, events } = (await B.call('GET', `/api/groups/${gid}/audit`)).body
+  const auditBody = (await B.call('GET', `/api/groups/${gid}/audit`)).body
+  contract(AuditOut, auditBody, 'group audit')
+  const { head, events } = auditBody
   let prev = GENESIS
   events.forEach((e: any, i: number) => {
     assert.equal(e.seq, i + 1, 'no gaps'); assert.equal(e.prevHash, prev, `entry ${e.seq} links to the one before`)
@@ -145,6 +160,8 @@ try {
 
   // (j) people: no email, no spot; no duplicates; group links join as yourself
   assert.equal((await A.call('PUT', `/api/groups/${gid}/members/${crypto.randomUUID()}`, { name: 'Nameless' })).status, 400, 'email required')
+  const bad = await A.call('PUT', `/api/groups/${gid}/expenses/${crypto.randomUUID()}`, { title: '  ', cat: 'food', date: 'yesterday', amount: -5, paid: {}, owed: {} })
+  assert.equal(bad.status, 400); assert.equal(typeof bad.body.error, 'string', 'schema errors come back as a message')
   const ghost = crypto.randomUUID()
   assert.equal((await A.call('PUT', `/api/groups/${gid}/members/${ghost}`, { name: 'Dev', email: `dev-${run}@splittr.test` })).status, 200)
   assert.equal((await A.call('PUT', `/api/groups/${gid}/members/${crypto.randomUUID()}`, { name: 'Dev again', email: `DEV-${run}@splittr.test` })).status, 409, 'same email twice')
@@ -171,10 +188,12 @@ try {
   const code2 = (await A.call('GET', `/api/groups/${g2}/invite`)).body.code
   const peek = await (await fetch(`${API}/api/public/invites/${code2}`)).json() as any
   assert.deepEqual(peek, { group: { name: 'Leave test', kind: 'friends', theme: 'classic', people: 1 }, invitedBy: 'Asha' })
+  contract(InvitePreviewOut, peek, 'invite preview')
   const spot = crypto.randomUUID()
   await A.call('PUT', `/api/groups/${g2}/members/${spot}`, { name: 'Esha', email: `esha-${run}@splittr.test` })
   const tok = (await db.member.findUniqueOrThrow({ where: { id: spot } })).inviteToken!
   const cl = await (await fetch(`${API}/api/public/claim/${tok}`)).json() as any
+  contract(ClaimPreviewOut, cl, 'claim preview')
   assert.equal(cl.name, 'Esha'); assert.equal(cl.prefill, `esha-${run}@splittr.test`); assert.equal(cl.invitedBy, 'Asha'); assert.match(cl.email, /^es\*\*\*@/)
   assert.equal((await fetch(`${API}/api/public/claim/${'0'.repeat(32)}`)).status, 404)
   console.log('✓ invite previews: group and inviter only; personal invites pre-fill their email')
@@ -201,9 +220,11 @@ try {
 
   // (n) activity: everything in my groups, an unread count of other people's entries, cleared everywhere by "seen"
   const act = (await C.call('GET', '/api/me/activity')).body
+  contract(ActivityOut, act, 'activity')
   assert.ok(act.events.length > 0 && act.unread > 0)
   assert.ok(act.events.every((e: any) => e.group && typeof e.myEffect === 'number'))
   const money = (await C.call('GET', '/api/me/activity?scope=money')).body
+  contract(ActivityOut, money, 'activity (money)')
   assert.ok(money.events.every((e: any) => e.myEffect !== 0))
   await C.call('POST', '/api/me/activity/seen', { at: new Date().toISOString() })
   assert.equal((await C.call('GET', '/api/me/activity')).body.unread, 0)
