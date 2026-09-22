@@ -292,10 +292,10 @@ function Showcase() {
 // ---------- welcome + auth ----------
 type Step = 'welcome' | 'signup' | 'signin' | 'forgot' | 'sent'
 
-export function AuthFlow({ s, notice, prefill }: { s: State; notice?: string; prefill?: string }) {
+export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: string; prefill?: string; start?: Step }) {
   const sync = useSync()
   const returning = !!s.user
-  const [step, setStep] = useState<Step>(returning ? 'signin' : 'welcome')
+  const [step, setStep] = useState<Step>(start ?? (returning ? 'signin' : 'welcome'))
   const [name, setName] = useState(s.me.name)
   const [email, setEmail] = useState(s.user?.email ?? prefill ?? '')
   const [password, setPassword] = useState('')

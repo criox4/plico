@@ -10,6 +10,8 @@ import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGro
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
+import { Landing } from './Landing'
+import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
 import { Search } from './search'
 import { FriendPage, FriendSettle, Friends, PeoplePicker, emailOk, friendsOf, groupTitle, type Person as Pick } from './people'
@@ -43,6 +45,9 @@ export default function App() {
   if (r[0] === 'guardian' && r[1]) return <GuardianConsent token={r[1]} />
   if (sync.booting) return <Splash />
   if (!sync.authed && (r[0] === 'join' || r[0] === 'claim') && r[1]) return <InvitePreview s={s} kind={r[0]} code={r[1]} />
+  // plico.space, signed out, first visit on the web: the front door. Phone apps and returning people go straight to sign-in.
+  if (!sync.authed && !Capacitor.isNativePlatform() && !s.user && !r[0]) return <Landing />
+  if (!sync.authed && r[0] === 'signin') return <AuthFlow s={s} start="signin" />
   if (!sync.authed) return <AuthFlow s={s} notice={r[0] === 'verified' ? 'Email verified. Sign in to continue.' : undefined} />
   if (s.user && !s.user.ageGroup) return <AgeGate s={s} />
   if (s.user?.ageGroup === 'teen' && !s.user.guardianConsent) return <GuardianWait s={s} />
