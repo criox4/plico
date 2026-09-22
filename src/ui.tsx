@@ -1,12 +1,12 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
 import { ME, balances, simplify, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
-import { update, type State } from './store'
+import { update, useStore, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { IssuesBanner } from './history'
 import { API } from './auth-client'
-import { fileUrl } from './sync'
+import { fileUrl, useSync } from './sync'
 
 // ---------- routing ----------
 export function useRoute() {
@@ -170,25 +170,74 @@ export function Money({ p, sign, className = '' }: { p: number; sign?: boolean; 
 export function Screen({ t, title, back, action, fab, children }: {
   t: ThemeId; title?: ReactNode; back?: boolean | (() => void); action?: ReactNode; fab?: string; children: ReactNode
 }) {
+  const s = useStore()
+  const sync = useSync()
+  const here = location.hash.replace(/^#\/?/, '').split('/')
+  // The app's navigation, for anyone signed in and past the age question: a sidebar on wide screens,
+  // bottom tabs on phones (only on the top-level screens, which pass `fab`).
+  const shell = sync.authed && !!s.user?.ageGroup
   return (
-    <div className="screen" data-theme={t} style={themeVars(t)}>
+    <div className={`screen${shell ? ' has-nav' : ''}`} data-theme={t} style={themeVars(t)}>
+      {shell && <Sidebar s={s} add={fab ?? '/add'} unread={sync.unread} here={here} />}
       <header className="bar">
         {back ? <button className="iconbtn" onClick={typeof back === 'function' ? back : goBack} aria-label="Back"><Icon n="back" /></button>
-          : <Wordmark />}
+          : <span className="bar-brand"><Wordmark /></span>}
         {title && <h1 className="bar-title">{title}</h1>}
-        <span className="bar-end">{action}</span>
+        <span className="bar-end">
+          {shell && <button className="iconbtn" aria-label="Search" aria-keyshortcuts="/" onClick={() => go('/search')}><Icon n="search" /></button>}
+          {action}
+        </span>
       </header>
       <main className="main">{children}</main>
-      {fab && (
+      {shell && fab && (
         <nav className="dock" aria-label="Main">
-          <button className="dock-item" onClick={() => go('/')}><Icon n="home" />Home</button>
-          <button className="dock-item" onClick={() => go('/friends')}><Icon n="direct" />Friends</button>
+          <Tab to="/" icon="home" label="Home" on={!here[0]} />
+          <Tab to="/friends" icon="direct" label="Friends" on={here[0] === 'friends' || here[0] === 'f'} />
           <button className="fab" onClick={() => go(fab)} aria-label="Add expense"><Icon n="plus" size={28} /></button>
-          <button className="dock-item" onClick={() => go('/log')}><Icon n="log" />Log</button>
-          <button className="dock-item" onClick={() => go('/me')}><Icon n="user" />You</button>
+          <Tab to="/activity" icon="log" label="Activity" on={here[0] === 'activity'} badge={sync.unread} />
+          <Tab to="/me" icon="user" label="You" on={here[0] === 'me'} />
         </nav>
       )}
     </div>
+  )
+}
+
+const Badge = ({ n }: { n: number }) => (n ? <span className="badge" aria-label={`${n} new`}>{n > 99 ? '99+' : n}</span> : null)
+function Tab({ to, icon, label, on, badge = 0 }: { to: string; icon: IconName; label: string; on: boolean; badge?: number }) {
+  return <a className={`dock-item${on ? ' on' : ''}`} href={'#' + to} aria-current={on ? 'page' : undefined}><span className="dock-icon"><Icon n={icon} /><Badge n={badge} /></span>{label}</a>
+}
+
+/** Wide screens: the app's own theme (not the group's), so navigation stays put as you move between groups. */
+function Sidebar({ s, add, unread, here }: { s: State; add: string; unread: number; here: string[] }) {
+  const groups = s.groups.filter(g => g.kind !== 'direct')
+  const item = (to: string, icon: IconName, label: string, on: boolean, badge = 0) => (
+    <a href={'#' + to} className={`side-item${on ? ' on' : ''}`} aria-current={on ? 'page' : undefined}><Icon n={icon} /><span>{label}</span><Badge n={badge} /></a>
+  )
+  return (
+    <nav className="side" aria-label="Main" data-theme={s.theme} style={themeVars(s.theme)}>
+      <a href="#/" className="side-brand" aria-label="Plico home"><Wordmark /></a>
+      <button className="btn primary side-add" onClick={() => go(add)}><Icon n="plus" />Add expense</button>
+      {item('/', 'home', 'Home', !here[0])}
+      {item('/friends', 'direct', 'Friends', here[0] === 'friends' || here[0] === 'f')}
+      {item('/activity', 'log', 'Activity', here[0] === 'activity', unread)}
+      <p className="side-head"><span>Groups</span><a href="#/new" className="link">New</a></p>
+      <ul className="side-groups">
+        {groups.map(g => {
+          const n = balances(g)[ME] ?? 0, gt = theme(g.theme)
+          return (
+            <li key={g.id}><a href={`#/g/${g.id}`} className={`side-group${here[0] === 'g' && here[1] === g.id ? ' on' : ''}`} aria-current={here[0] === 'g' && here[1] === g.id ? 'page' : undefined}>
+              <span className="side-tile" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span>{g.emoji}</span> : <Icon n={g.kind} size={16} />}</span>
+              <span className="side-name">{g.name}</span>
+              {n !== 0 && !g.track && <span className={`money ${tone(n)}`}>{inr(Math.round(n / 100) * 100)}</span>}
+            </a></li>
+          )
+        })}
+      </ul>
+      <a href="#/me" className={`side-me${here[0] === 'me' ? ' on' : ''}`} aria-current={here[0] === 'me' ? 'page' : undefined}>
+        <Avatar name={s.me.name} image={s.user?.image} size={36} />
+        <span><strong>{s.me.name || 'You'}</strong><small>{s.user?.email}</small></span>
+      </a>
+    </nav>
   )
 }
 

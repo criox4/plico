@@ -5,8 +5,8 @@ import { GENESIS, ME, auditPayload, balances, changes, inr, summary, type Group,
 import { theme, type ThemeId } from './themes'
 import { groupTitle } from './people'
 import type { State } from './store'
-import { api, bodySnap, resolveIssue, restoreExpense, revertExpense, useSync, type Issue, type ServerExpense } from './sync'
-import { Avatar, Denomination, Screen, count, go } from './ui'
+import { api, bodySnap, resolveIssue, restoreExpense, revertExpense, seenActivity, useSync, type Issue, type ServerExpense } from './sync'
+import { Avatar, Denomination, Plico, Screen, count, go } from './ui'
 import { Icon } from './icons'
 
 const when = (at: string) => {
@@ -182,7 +182,7 @@ function Entry({ s, g, e, onRestore, busy, mine, label }: { s: State; g?: Group;
         {!mine && d.moves.length > 0 && <p className="moves">{d.moves.join(' · ')}</p>}
         <small>#{e.seq} · {cap(when(e.at))}</small>
       </button>
-      {mine ? <span className={`money ${e.effect[mine] > 0 ? 'pos' : 'neg'}`}>{signed(e.effect[mine])}</span>
+      {mine && e.effect[mine] ? <span className={`money ${e.effect[mine] > 0 ? 'pos' : 'neg'}`}>{signed(e.effect[mine])}</span>
         : onRestore && <button className="btn-sm" disabled={busy} onClick={onRestore}>{busy ? '…' : 'Restore'}</button>}
     </li>
   )
@@ -233,34 +233,44 @@ export function AuditLog({ s, g }: { s: State; g: Group }) {
   )
 }
 
-// ---------- My money log: everything that moved my balance, across groups ----------
-type Mine = Event & { memberOf: string; group: { name: string; kind: string } }
-export function MoneyLog({ s }: { s: State }) {
+// ---------- Activity: everything in my groups, or just what moved my balance ----------
+type Mine = Event & { memberOf: string; group: { name: string; kind: string }; byMe: boolean; myEffect: number }
+export function Activity({ s }: { s: State }) {
+  const [scope, setScope] = useState<'all' | 'money'>('all')
   const [rows, setRows] = useState<Mine[]>([])
-  const [more, setMore] = useState<string | null>(null)
+  const [next, setNext] = useState<string | null>(null)
   const [err, setErr] = useState('')
   const [loaded, setLoaded] = useState(false)
-  const load = (before?: string) => api<{ events: Mine[]; more: boolean; last: string | null }>(`/api/me/audit${before ? `?before=${encodeURIComponent(before)}` : ''}`)
-    .then(r => { setRows(x => (before ? [...x, ...r.events] : r.events)); setMore(r.more ? r.last : null); setLoaded(true) },
-      () => setErr(navigator.onLine ? 'Couldn’t load your money log. Try again.' : 'Your money log needs a connection. Come back online to see it.'))
-  useEffect(() => { void load() }, [])
+  const load = (before?: string) => api<{ events: Mine[]; next: string | null }>(`/api/me/activity?scope=${scope}${before ? `&before=${encodeURIComponent(before)}` : ''}`)
+    .then(r => {
+      setRows(x => (before ? [...x, ...r.events] : r.events)); setNext(r.next); setLoaded(true); setErr('')
+      if (!before && r.events[0]) void seenActivity(r.events[0].at)
+    }, () => setErr(navigator.onLine ? 'Couldn’t load activity. Try again.' : 'Activity needs a connection. Come back online to see it.'))
+  useEffect(() => { setLoaded(false); void load() }, [scope])
   const total = s.groups.reduce((a, g) => a + (balances(g)[ME] ?? 0), 0)
   const gOf = (id: string) => s.groups.find(g => g.id === id)
   const title = (e: Mine) => (gOf(e.groupId) ? groupTitle(gOf(e.groupId)!) : e.group.name)
-  const csv = () => saveCsv('plico-my-money-log.csv', [
+  const csv = () => saveCsv(`plico-activity-${scope}.csv`, [
     ['When', 'Group', 'Who', 'What', 'Details', 'My balance change (₹)', 'Group entry #', 'Hash'],
-    ...rows.map(e => { const d = describe(e, gOf(e.groupId), s.user?.id); return [stamp(e.at), title(e), e.byName, d.line, d.details.join('; '), rupees(e.effect[e.memberOf]), e.seq, e.hash] }),
+    ...rows.map(e => { const d = describe(e, gOf(e.groupId), s.user?.id); return [stamp(e.at), title(e), e.byName, d.line, d.details.join('; '), e.myEffect ? rupees(e.myEffect) : '', e.seq, e.hash] }),
   ])
   return (
-    <Screen t={s.theme} fab="/add" title="Money log">
-      <Denomination t={s.theme} amount={total} line={total > 0 ? 'You’re owed overall' : total < 0 ? 'You owe overall' : 'All even'} caption="Every change to your balance, newest first" />
+    <Screen t={s.theme} fab="/add" title="Activity">
+      {scope === 'money' && <Denomination t={s.theme} amount={total} line={total > 0 ? 'You’re owed overall' : total < 0 ? 'You owe overall' : 'All even'} caption="Every change to your balance, newest first" />}
+      <div className="seg activity-seg" role="tablist" aria-label="Show">
+        <button role="tab" aria-selected={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>Everything</button>
+        <button role="tab" aria-selected={scope === 'money'} className={scope === 'money' ? 'on' : ''} onClick={() => setScope('money')}>My money</button>
+      </div>
       {err && <p className="error" role="alert">{err}</p>}
-      {loaded && !rows.length && <p className="muted-p">Nothing has moved your balance yet. Expenses and settlements you’re part of show up here, with who made each change.</p>}
-      {rows.length > 0 && <div className="row"><button className="btn secondary" onClick={csv}><Icon n="copy" size={18} />Export CSV</button></div>}
+      {!loaded && !err && <ol className="feed" aria-busy="true">{[0, 1, 2].map(i => <li key={i} className="skeleton" aria-hidden />)}</ol>}
+      {loaded && !rows.length && (
+        <div className="empty-state"><Plico mood="empty" size={72} /><p><strong>Quiet so far.</strong>{scope === 'all' ? ' Everything people add, change or settle in your groups shows up here, with who did it.' : ' Expenses and settlements that change your balance show up here.'}</p></div>
+      )}
       <ol className="feed">
-        {rows.map(e => <Entry key={e.groupId + e.seq} s={s} g={gOf(e.groupId)} e={e} mine={e.memberOf} label={title(e)} />)}
+        {rows.map(e => <Entry key={e.groupId + e.seq} s={s} g={gOf(e.groupId)} e={e} mine={scope === 'money' || e.myEffect ? e.memberOf : undefined} label={title(e)} />)}
       </ol>
-      {more && <button className="btn secondary" onClick={() => void load(more)}>Show older</button>}
+      {next && <button className="btn secondary" onClick={() => void load(next)}>Show older</button>}
+      {rows.length > 0 && <button className="link center-link" onClick={csv}><Icon n="copy" size={18} />Export as CSV</button>}
     </Screen>
   )
 }

@@ -263,6 +263,8 @@ api.get('/me/activity', async c => {
     db.user.findUniqueOrThrow({ where: { id: uid }, select: { activitySeenAt: true } }),
   ])
   const byGroup = new Map(mine.map(m => [m.groupId, m]))
+  const unread = () => db.auditEvent.count({ where: { groupId: { in: [...byGroup.keys()] }, byId: { not: uid }, ...(me.activitySeenAt && { at: { gt: me.activitySeenAt } }) } })
+  if (c.req.query('peek')) return c.json({ unread: await unread() }) // just the badge, on every sync
   const before = c.req.query('before')
   const where = { groupId: { in: [...byGroup.keys()] }, ...(money && { kind: { startsWith: 'expense.' } }), ...(before && { at: { lt: new Date(before) } }) }
   // ponytail: "money" filters after the query (the member id differs per group); fine at hundreds of entries a page.
@@ -270,8 +272,7 @@ api.get('/me/activity', async c => {
   const events = rows
     .map(e => ({ ...e, group: byGroup.get(e.groupId)!.group, memberOf: byGroup.get(e.groupId)!.id, byMe: e.byId === uid, myEffect: (e.effect as Record<string, number>)[byGroup.get(e.groupId)!.id] ?? 0 }))
     .filter(e => !money || e.myEffect).slice(0, 50)
-  const unread = await db.auditEvent.count({ where: { groupId: { in: [...byGroup.keys()] }, byId: { not: uid }, ...(me.activitySeenAt && { at: { gt: me.activitySeenAt } }) } })
-  return c.json({ events, unread, next: rows.length === (money ? 200 : 50) ? rows.at(-1)!.at : null })
+  return c.json({ events, unread: await unread(), next: rows.length === (money ? 200 : 50) ? rows.at(-1)!.at : null })
 })
 
 // Seen up to here: clears the Activity badge on every device. Never moves backwards, never past now.

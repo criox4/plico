@@ -10,7 +10,8 @@ import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGro
 import { AccountHub, AgeGate, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
-import { AuditLog, ExpenseHistory, IssuesBanner, MoneyLog, SyncIssues } from './history'
+import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
+import { Search } from './search'
 import { FriendPage, FriendSettle, Friends, PeoplePicker, emailOk, friendsOf, groupTitle, type Person as Pick } from './people'
 
 const back = () => (history.length > 1 ? history.back() : go('/'))
@@ -22,6 +23,15 @@ export default function App() {
   const s = useStore()
   const r = useRoute()
   const sync = useSync()
+  // Desktop: "/" opens search from anywhere that isn't a text field.
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      if (e.key === '/' && !e.metaKey && !e.ctrlKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !el.isContentEditable && sync.authed) { e.preventDefault(); go('/search') }
+    }
+    addEventListener('keydown', k)
+    return () => removeEventListener('keydown', k)
+  }, [sync.authed])
   useEffect(() => {
     ensureFonts([s.theme, ...s.groups.map(g => g.theme)])
     document.body.style.background = theme(s.theme).c.bg
@@ -46,7 +56,8 @@ export default function App() {
   if (r[0] === 'import') return <ImportSplitwise s={s} />
   if (r[0] === 'sync') return <SyncIssues s={s} />
   if (r[0] === 'friends') return <Friends s={s} />
-  if (r[0] === 'log') return <MoneyLog s={s} />
+  if (r[0] === 'activity' || r[0] === 'log') return <Activity s={s} />
+  if (r[0] === 'search') return <Search s={s} />
   if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} email={decodeURIComponent(r[1])} /> : <FriendPage s={s} email={decodeURIComponent(r[1])} />
   if (r[0] === 'new' || !s.groups.some(x => x.kind !== 'direct')) return <NewGroup s={s} />
   if (r[0] === 'add') return <ExpenseForm key={r[1] ?? 'add'} s={s} shared={r[1] === 'shared'} />

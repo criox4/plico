@@ -19,6 +19,7 @@ export type Issue = {
 }
 type Status = {
   authed: boolean; booting: boolean; pending: number; offline: boolean; error: string; issues: Issue[]
+  unread: number // Activity entries by other people you haven't seen
   google: boolean; googleWebClientId: string | null; googleIosClientId: string | null; ai: boolean
 }
 
@@ -54,7 +55,7 @@ let missedPull = false // a pull was skipped because an edit was pending
 
 // Signed in = we know the user. A dead session is only concluded from the server (never from being offline).
 let status: Status = {
-  authed: !!getState().user, booting: true, pending: outbox.length, offline: !navigator.onLine, error: '', issues,
+  authed: !!getState().user, booting: true, pending: outbox.length, offline: !navigator.onLine, error: '', issues, unread: 0,
   google: false, googleWebClientId: null, googleIosClientId: null, ai: false,
 }
 const subs = new Set<() => void>()
@@ -281,6 +282,13 @@ export async function pull() {
   setCursor(gap ? null : data.now)
   snap = getState()
   setStatus({ offline: false })
+  void req('/api/me/activity?peek=1').then(r => (r.ok ? r.json() : null)).then(j => j && setStatus({ unread: j.unread })).catch(() => {})
+}
+
+/** The Activity tab was looked at up to this entry: clears the badge here and on other devices. */
+export async function seenActivity(at: string) {
+  setStatus({ unread: 0 })
+  await req('/api/me/activity/seen', { method: 'POST', body: JSON.stringify({ at }) }).catch(() => {})
 }
 
 // ---------- issues: conflicts and refused changes ----------
