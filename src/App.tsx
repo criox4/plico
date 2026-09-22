@@ -7,7 +7,7 @@ import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
 import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
-import { AccountHub, AgeGate, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
+import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import Gallery from './Gallery'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
@@ -42,6 +42,7 @@ export default function App() {
   if (r[0] === 'reset') return <ResetPassword />
   if (r[0] === 'guardian' && r[1]) return <GuardianConsent token={r[1]} />
   if (sync.booting) return <Splash />
+  if (!sync.authed && (r[0] === 'join' || r[0] === 'claim') && r[1]) return <InvitePreview s={s} kind={r[0]} code={r[1]} />
   if (!sync.authed) return <AuthFlow s={s} notice={r[0] === 'verified' ? 'Email verified. Sign in to continue.' : undefined} />
   if (s.user && !s.user.ageGroup) return <AgeGate s={s} />
   if (s.user?.ageGroup === 'teen' && !s.user.guardianConsent) return <GuardianWait s={s} />

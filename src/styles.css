@@ -830,3 +830,12 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 @keyframes shimmer { to { background-position: -150% 0; } }
 .empty-state { display: flex; gap: 14px; align-items: center; padding: 24px 4px; color: var(--muted); }
 .empty-state strong { color: var(--ink); }
+
+/* ---------- invite preview ---------- */
+.invite-card { position: relative; isolation: isolate; overflow: hidden; display: grid; gap: 8px; margin-top: 8px; padding: 26px 22px 24px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--elev-hi, var(--elev)); container-type: inline-size; }
+.invite-card .ornament { z-index: -1; }
+.invite-kind { background: var(--accent); color: var(--on-accent); width: 56px; height: 56px; margin-bottom: 6px; }
+.invite-by { color: var(--muted); font-size: 1.0625rem; }
+.invite-by strong { color: var(--ink); font-weight: 650; }
+.invite-card h1 { font: 800 clamp(2.2rem, 11cqi, 3.25rem)/1.02 var(--num); letter-spacing: -.03em; text-wrap: balance; overflow-wrap: anywhere; }
+.invite-meta { color: var(--muted); font-size: .9375rem; }

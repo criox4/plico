@@ -8,11 +8,54 @@ import { API, authClient, token } from './auth-client'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker } from './ui'
+import { ClaimPreviewOut, InvitePreviewOut, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
 
 const origin = () => location.origin + location.pathname.replace(/index\.html$/, '')
 const msg = (e: unknown, fallback = 'That didn’t work. Your balances are safe. Try again.') =>
   (e as { message?: string })?.message || fallback
 const cleanUrl = (hash = '#/') => history.replaceState(null, '', location.pathname + hash)
+
+// ---------- invite preview: who invited you, to what, before you sign up ----------
+export function InvitePreview({ s, kind, code }: { s: State; kind: 'join' | 'claim'; code: string }) {
+  const [p, setP] = useState<(InvitePreviewData & Partial<ClaimPreview>) | (ClaimPreview) | null>(null)
+  const [err, setErr] = useState('')
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    fetch(`${API}/api/public/${kind === 'join' ? 'invites' : 'claim'}/${code}`).then(async r => {
+      const j: unknown = await r.json().catch(() => ({}))
+      const out = (kind === 'join' ? InvitePreviewOut : ClaimPreviewOut).safeParse(j)
+      if (r.ok && out.success) setP(out.data); else setErr((j as { error?: string }).error ?? 'This invite link is no longer valid.')
+    }, () => setErr('Can’t reach Plico. Check your connection and try again.'))
+  }, [kind, code])
+  const t = p?.group.theme ?? 'classic'
+  useEffect(() => ensureFonts([t]), [t])
+  if (ready || err) return <AuthFlow s={s} prefill={p?.prefill ?? undefined}
+    notice={p ? `Sign in or create your account to join ${p.group.name}.` : `${err.replace(/\.?$/, '.')} You can still sign in.`} />
+  if (!p) return <Splash />
+  return (
+    <div className="welcome invite" data-theme={t} style={themeVars(t)}>
+      <div className="welcome-top">
+        <Wordmark />
+        <section className="invite-card" aria-label={`Invitation to ${p.group.name}`}>
+          <Ornament t={t} />
+          <span className="slip-kind invite-kind"><Icon n={p.group.kind} size={28} /></span>
+          <p className="invite-by"><strong>{p.invitedBy}</strong> invited you{p.name ? <> as <strong>{p.name}</strong></> : null} to</p>
+          <h1>{p.group.name}</h1>
+          {'people' in p.group && <p className="invite-meta">{p.group.people === 1 ? `Just ${p.invitedBy} so far` : `${p.group.people} people`} splitting and settling here</p>}
+        </section>
+        <ul className="points">
+          <li><Icon n="check" />See exactly who paid what, and who owes whom.</li>
+          <li><Icon n="qr" />Settle by UPI, to a name you can see before you pay.</li>
+          <li><Icon n="shield" />Every change is on the record, sealed so nobody can quietly rewrite it.</li>
+        </ul>
+      </div>
+      <div className="welcome-actions">
+        <button className="btn primary" onClick={() => setReady(true)}>Join {p.group.name}</button>
+        <p className="legal-line center">Free to join. <a href={legalUrl('privacy')} target="_blank" rel="noopener">Privacy</a> · <a href={legalUrl('terms')} target="_blank" rel="noopener">Terms</a></p>
+      </div>
+    </div>
+  )
+}
 
 // ---------- splash ----------
 export function Splash() {
@@ -249,12 +292,12 @@ function Showcase() {
 // ---------- welcome + auth ----------
 type Step = 'welcome' | 'signup' | 'signin' | 'forgot' | 'sent'
 
-export function AuthFlow({ s, notice }: { s: State; notice?: string }) {
+export function AuthFlow({ s, notice, prefill }: { s: State; notice?: string; prefill?: string }) {
   const sync = useSync()
   const returning = !!s.user
   const [step, setStep] = useState<Step>(returning ? 'signin' : 'welcome')
   const [name, setName] = useState(s.me.name)
-  const [email, setEmail] = useState(s.user?.email ?? '')
+  const [email, setEmail] = useState(s.user?.email ?? prefill ?? '')
   const [password, setPassword] = useState('')
   const [age, setAge] = useState<Age>(null)
   const [guardian, setGuardian] = useState('')
