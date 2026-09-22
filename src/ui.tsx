@@ -5,6 +5,7 @@ import { update, useStore, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { IssuesBanner } from './history'
+import { friendBalance, friendsOf } from './people'
 import { API } from './auth-client'
 import { fileUrl, useSync } from './sync'
 
@@ -267,13 +268,15 @@ export function useTicker(value: number, ms = 700) {
 
 export function Denomination({ t, amount, line, caption }: { t: ThemeId; amount: number; line: string; caption?: ReactNode }) {
   const shown = useTicker(amount)
-  const digits = inr(shown).replace('₹', '')
+  // Rupees lead; paise ride small beside them, so the size reads at a glance without losing the exact amount.
+  const [rupees, paise] = inr(shown).replace('₹', '').split('.')
   // Size to the final value so the numeral doesn't resize while it counts.
-  const chars = inr(amount).length - 1
+  const [finalRupees, finalPaise] = inr(amount).replace('₹', '').split('.')
+  const chars = finalRupees.length + (finalPaise ? 1.1 : 0)
   return (
     <section className="hero" aria-label={`${line}: ${inr(amount)}`}>
       <Ornament t={t} />
-      <p className={`hero-num ${tone(amount)}`} aria-hidden style={{ '--chars': chars } as CSSProperties}><span className="cur">₹</span>{digits}</p>
+      <p className={`hero-num ${tone(amount)}`} aria-hidden style={{ '--chars': chars } as CSSProperties}><span className="cur">₹</span>{rupees}{paise && <span className="paise">.{paise}</span>}</p>
       <p className="hero-verb" aria-hidden>{line}</p>
       {caption && <p className="hero-cap">{caption}</p>}
     </section>
@@ -454,21 +457,36 @@ function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean 
 }
 
 export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNode }) {
-  const rows = s.groups.filter(g => g.kind !== 'direct').map(g => ({ g, net: balances(g)[ME] ?? 0 }))
-  const live = rows.filter(r => !r.g.track)
+  const all = s.groups.map(g => ({ g, net: balances(g)[ME] ?? 0 }))
+  const rows = all.filter(r => r.g.kind !== 'direct') // friends' balances count in the total, but aren't groups
+  const live = all.filter(r => !r.g.track)
+  const people = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
+    .map(f => ({ f, n: friendBalance(f) })).filter(x => x.n).sort((a, b) => Math.abs(b.n) - Math.abs(a.n)).slice(0, 8)
   const total = live.reduce((a, r) => a + r.net, 0)
   const collect = live.reduce((a, r) => a + Math.max(r.net, 0), 0)
   const pay = live.reduce((a, r) => a + Math.max(-r.net, 0), 0)
   const recent = s.groups
     .flatMap(g => g.expenses.map((e, i) => ({ g, e, i })))
     .sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
-    .slice(0, 6)
+    .slice(0, 5)
   return (
     <Screen t={t} fab="/add" action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
       <Denomination t={t} amount={total} line={verb(null, total, true)}
         caption={collect && pay ? `${inr(collect)} to collect · ${inr(pay)} to pay` : undefined} />
       {banner}
       <NeedsYou groups={s.groups} showGroup />
+      {people.length > 0 && <>
+        <SectionHead title="People" action={<button className="link" onClick={() => go('/friends')}>All friends</button>} />
+        <ul className="people-strip" aria-label="Who you settle with">
+          {people.map(({ f, n }) => (
+            <li key={f.email}><button className="person-chip" onClick={() => go('/f/' + encodeURIComponent(f.email))} aria-label={`${f.name}: ${n > 0 ? `owes you ${inr(n)}` : `you owe ${inr(n)}`}`}>
+              <Avatar name={f.name} image={f.image} size={48} />
+              <span className="pc-name">{f.name.split(' ')[0]}</span>
+              <span className={`money ${tone(n)}`}>{inr(Math.round(n / 100) * 100)}</span>
+            </button></li>
+          ))}
+        </ul>
+      </>}
       <SectionHead title="Groups" action={<button className="link" onClick={() => go('/new')}>New group</button>} />
       <ol className="slips">
         {rows.map(({ g, net }, i) => {
@@ -488,7 +506,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
           )
         })}
       </ol>
-      <SectionHead title="Recent" />
+      <SectionHead title="Latest" action={<button className="link" onClick={() => go('/activity')}>All activity</button>} />
       {recent.length ? (
         <ol className="ledger">
           {recent.map(({ g, e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} showGroup />)}

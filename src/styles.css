@@ -86,6 +86,7 @@ img, svg { display: block; }
   letter-spacing: -.03em; font-variant-numeric: tabular-nums lining-nums;
 }
 .hero-num .cur { font-size: .42em; margin-top: .16em; font-weight: 400; letter-spacing: 0; }
+.hero-num .paise { font-size: .46em; margin-top: .1em; letter-spacing: -.01em; opacity: .62; }
 .hero-verb { margin-top: 12px; font-size: 1.0625rem; font-weight: 600; }
 .hero-cap { margin-top: 4px; color: var(--muted); font-size: .9375rem; }
 
@@ -775,7 +776,10 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .friend-head small { color: var(--muted); overflow-wrap: anywhere; }
 .friend-actions .btn { flex: 1; margin: 0; }
 .link-row { width: 100%; text-align: left; }
-.add-friend { margin-top: 24px; }
+.add-friend { margin: 4px 0 18px; padding: 16px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--elev); }
+.friend-filter { margin: 0 0 12px; }
+.friend-filter small { margin-left: 6px; font-weight: 600; opacity: .7; font-variant-numeric: tabular-nums; }
+.tag-invited { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .75rem; font-weight: 650; background: color-mix(in srgb, #F4A340 22%, var(--surface)); color: var(--ink); }
 .verified { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: var(--radius); background: color-mix(in srgb, var(--pos, #1f8a5b) 10%, var(--surface)); box-shadow: var(--elev); }
 .verified .icon-svg { color: var(--pos, #1f8a5b); flex: none; margin-top: 2px; }
 .verified span { display: grid; gap: 4px; }
@@ -839,3 +843,11 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .invite-by strong { color: var(--ink); font-weight: 650; }
 .invite-card h1 { font: 800 clamp(2.2rem, 11cqi, 3.25rem)/1.02 var(--num); letter-spacing: -.03em; text-wrap: balance; overflow-wrap: anywhere; }
 .invite-meta { color: var(--muted); font-size: .9375rem; }
+
+/* ---------- home: people ---------- */
+.people-strip { list-style: none; margin: 0 -16px; padding: 2px 16px 6px; display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x proximity; scroll-padding-inline: 16px; scrollbar-width: none; }
+.people-strip::-webkit-scrollbar { display: none; }
+.person-chip { width: 88px; flex: none; display: grid; justify-items: center; gap: 6px; padding: 14px 6px 12px; scroll-snap-align: start; border-radius: var(--radius); background: var(--surface); box-shadow: var(--elev); transition: translate var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.person-chip:hover { translate: 0 -2px; box-shadow: var(--elev-hi, var(--elev)); }
+.pc-name { max-width: 100%; font-weight: 600; font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.person-chip .money { font-size: .875rem; }

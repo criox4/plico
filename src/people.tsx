@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { ME, inr, needsConfirm, pairwise, today, uid, type Group, type Id } from './logic'
 import { update, type State } from './store'
 import { api, pull, syncNow } from './sync'
-import { Avatar, Denomination, LedgerRow, Screen, SectionHead, Settle, TONES, count, go, groupTitle, wa } from './ui'
+import { Avatar, Denomination, LedgerRow, Plico, Screen, SectionHead, Settle, TONES, count, go, groupTitle, wa } from './ui'
 export { groupTitle }
 import { Icon } from './icons'
 
@@ -93,44 +93,77 @@ export function PeoplePicker({ s, value, onChange, taken = [], label = 'Add peop
 }
 
 // ---------- Friends tab ----------
+type Filter = 'all' | 'owed' | 'owe' | 'even'
 export function Friends({ s }: { s: State }) {
   const fs = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
-  const rows = fs.map(f => ({ f, n: friendBalance(f) }))
+  const rows = fs.map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name))
   const total = rows.reduce((a, r) => a + r.n, 0)
+  const collect = rows.reduce((a, r) => a + Math.max(r.n, 0), 0), pay = rows.reduce((a, r) => a + Math.max(-r.n, 0), 0)
+  const [filter, setFilter] = useState<Filter>('all')
+  const [q, setQ] = useState('')
+  const [adding, setAdding] = useState(false)
+  const t = q.trim().toLowerCase()
+  const shown = rows.filter(({ f, n }) => (filter === 'all' || (filter === 'owed' ? n > 0 : filter === 'owe' ? n < 0 : !n))
+    && (!t || f.name.toLowerCase().includes(t) || f.email.includes(t)))
+  const counts = { all: rows.length, owed: rows.filter(r => r.n > 0).length, owe: rows.filter(r => r.n < 0).length, even: rows.filter(r => !r.n).length }
+  return (
+    <Screen t={s.theme} fab="/add" title="Friends">
+      <Denomination t={s.theme} amount={total} line={total > 0 ? 'Friends owe you' : total < 0 ? 'You owe friends' : 'All square with friends'}
+        caption={collect && pay ? `${inr(collect)} to collect · ${inr(pay)} to pay` : undefined} />
+      <SectionHead title={rows.length ? count(rows.length, 'friend', 'friends') : 'Friends'}
+        action={<button className="link" aria-expanded={adding} onClick={() => setAdding(!adding)}>{adding ? 'Close' : 'Add a friend'}</button>} />
+      {adding && <AddFriend onDone={() => setAdding(false)} />}
+      {rows.length > 3 && (
+        <div className="seg friend-filter" role="tablist" aria-label="Show">
+          {([['all', 'All'], ['owed', 'Owe you'], ['owe', 'You owe'], ['even', 'Settled']] as [Filter, string][]).map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>{label}<small>{counts[id]}</small></button>
+          ))}
+        </div>
+      )}
+      {rows.length > 8 && (
+        <label className="field search-field"><span className="sr-only">Find a friend</span><Icon n="search" />
+          <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Find a friend" /></label>
+      )}
+      {rows.length ? (
+        shown.length ? (
+          <ol className="friends">
+            {shown.map(({ f, n }) => (
+              <li key={f.email}><button className="friend-row" onClick={() => go('/f/' + encodeURIComponent(f.email))}>
+                <Avatar name={f.name} image={f.image} size={44} />
+                <span className="grow"><strong>{f.name}</strong>
+                  <small>{f.joined ? (f.spots.some(x => x.g.kind !== 'direct') ? `In ${count(f.spots.filter(x => x.g.kind !== 'direct').length, 'group', 'groups')}` : 'Just the two of you') : <span className="tag-invited">Invited</span>}</small></span>
+                <span className={`money ${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}`}>{n ? inr(n) : <Icon n="check" size={20} />}<small>{n > 0 ? 'owes you' : n < 0 ? 'you owe' : 'settled'}</small></span>
+              </button></li>
+            ))}
+          </ol>
+        ) : <p className="muted-p">Nobody here{t ? ` matching “${q.trim()}”` : ''}.</p>
+      ) : (
+        <div className="empty-state"><Plico mood="empty" size={72} /><p><strong>No friends yet.</strong> Everyone you share a group with shows up here. Add a friend to split a cab or a dinner for two, outside any group.</p></div>
+      )}
+      {!rows.length && !adding && <button className="btn primary" onClick={() => setAdding(true)}><Icon n="plus" size={18} />Add a friend</button>}
+    </Screen>
+  )
+}
+
+function AddFriend({ onDone }: { onDone: () => void }) {
   const [email, setEmail] = useState('')
   const [name, setName] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const e = email.trim().toLowerCase()
-  const addFriend = async () => {
+  const add = async () => {
     setBusy(true); setErr('')
-    try { await directWith(e, (name ?? guessName(e)).trim()); go('/f/' + encodeURIComponent(e)) }
+    try { await directWith(e, (name ?? guessName(e)).trim()); onDone(); go('/f/' + encodeURIComponent(e)) }
     catch (x) { setErr(navigator.onLine ? (x as Error).message : 'Adding a friend needs a connection.') } finally { setBusy(false) }
   }
   return (
-    <Screen t={s.theme} fab="/add" title="Friends">
-      <Denomination t={s.theme} amount={total} line={total > 0 ? 'Friends owe you' : total < 0 ? 'You owe friends' : 'All square with friends'} />
-      <SectionHead title="Friends" />
-      {rows.length ? (
-        <ol className="friends">
-          {rows.map(({ f, n }) => (
-            <li key={f.email}><button className="friend-row" onClick={() => go('/f/' + encodeURIComponent(f.email))}>
-              <Avatar name={f.name} image={f.image} size={40} />
-              <span className="grow"><strong>{f.name}</strong><small>{f.joined ? count(f.spots.filter(x => x.g.kind !== 'direct').length, 'group', 'groups') : 'Invited, hasn’t joined yet'}</small></span>
-              <span className={`money ${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}`}>{n ? inr(n) : '–'}<small>{n > 0 ? 'owes you' : n < 0 ? 'you owe' : 'settled'}</small></span>
-            </button></li>
-          ))}
-        </ol>
-      ) : <p className="muted-p">Friends appear here as you share groups. Add one to split things outside a group, like a cab or a dinner for two.</p>}
-      <form className="form add-friend" onSubmit={x => { x.preventDefault(); if (emailOk(e)) void addFriend() }}>
-        <h2 className="form-h">Add a friend</h2>
-        <label className="field"><span>Email</span><input type="email" value={email} onChange={x => { setEmail(x.target.value); setName(null) }} autoCapitalize="none" placeholder="friend@example.com" /></label>
-        {emailOk(e) && <label className="field"><span>Their name</span><input value={name ?? guessName(e)} onChange={x => setName(x.target.value)} maxLength={40} /></label>}
-        {err && <p className="error" role="alert">{err}</p>}
-        <button className="btn secondary" disabled={!emailOk(e) || busy}>{busy ? 'Adding…' : 'Add friend'}</button>
-        <small>If they’re not on Plico yet, they get an invite. Expenses with them wait for them until they join.</small>
-      </form>
-    </Screen>
+    <form className="form add-friend" onSubmit={x => { x.preventDefault(); if (emailOk(e)) void add() }}>
+      <label className="field"><span>Their email</span><input type="email" value={email} onChange={x => { setEmail(x.target.value); setName(null) }} autoCapitalize="none" placeholder="friend@example.com" autoFocus /></label>
+      {emailOk(e) && <label className="field"><span>Their name</span><input value={name ?? guessName(e)} onChange={x => setName(x.target.value)} maxLength={40} /></label>}
+      {err && <p className="error" role="alert">{err}</p>}
+      <button className="btn primary" disabled={!emailOk(e) || busy}>{busy ? 'Adding…' : 'Add friend'}</button>
+      <small>Not on Plico yet? They get an invite, and expenses with them wait until they join.</small>
+    </form>
   )
 }
 
