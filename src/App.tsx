@@ -1,4 +1,4 @@
-import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { update, useStore, type State } from './store'
@@ -9,7 +9,6 @@ import { CATS, Icon } from './icons'
 import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
-import Gallery from './Gallery'
 import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
@@ -20,6 +19,9 @@ const back = () => (history.length > 1 ? history.back() : go('/'))
 const edit = (gid: Id, fn: (g: Group) => void) => update(d => { const g = d.groups.find(x => x.id === gid); if (g) fn(g) })
 const digits = (v: string) => v.replace(/[^\d.]/g, '')
 const num = (v?: string) => parseFloat((v ?? '').replace(/,/g, '')) || 0
+
+// Every theme side by side, for design review. `npm run dev` only: left out of production builds.
+const Gallery = import.meta.env.DEV ? lazy(() => import('./Gallery')) : null
 
 export default function App() {
   const s = useStore()
@@ -39,7 +41,7 @@ export default function App() {
     document.body.style.background = theme(s.theme).c.bg
   }, [s])
 
-  if (r[0] === 'themes') return <Gallery />
+  if (Gallery && r[0] === 'themes') return <Suspense fallback={null}><Gallery /></Suspense>
   if (r[0] === 's') return <SharedPay p={r[1] ?? ''} />
   if (r[0] === 'reset') return <ResetPassword />
   if (r[0] === 'guardian' && r[1]) return <GuardianConsent token={r[1]} />
