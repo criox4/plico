@@ -101,7 +101,7 @@ export function Friends({ s }: { s: State }) {
   const collect = rows.reduce((a, r) => a + Math.max(r.n, 0), 0), pay = rows.reduce((a, r) => a + Math.max(-r.n, 0), 0)
   const [filter, setFilter] = useState<Filter>('all')
   const [q, setQ] = useState('')
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useState(location.hash.endsWith('/friends/add'))
   const t = q.trim().toLowerCase()
   const shown = rows.filter(({ f, n }) => (filter === 'all' || (filter === 'owed' ? n > 0 : filter === 'owe' ? n < 0 : !n))
     && (!t || f.name.toLowerCase().includes(t) || f.email.includes(t)))

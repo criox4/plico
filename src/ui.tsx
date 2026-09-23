@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
-import { ME, balances, simplify, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
+import { ME, balances, simplify, today, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import { update, useStore, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
@@ -310,8 +310,8 @@ export function Converge({ s, g, e }: { s: State; g: Group; e: Expense }) {
   )
 }
 
-export const SectionHead = ({ title, action }: { title: string; action?: ReactNode }) => (
-  <div className="section-head"><h2>{title}</h2>{action}</div>
+export const SectionHead = ({ title, action, id }: { title: string; action?: ReactNode; id?: string }) => (
+  <div className="section-head"><h2 id={id}>{title}</h2>{action}</div>
 )
 
 const CONFETTI = ['#6C5CE7', '#22B983', '#EA6673', '#F4A340', '#B7AEF5']
@@ -456,71 +456,159 @@ function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean 
   return items.length ? <><SectionHead title="Needs you" /><ol className="debts">{items}</ol></> : null
 }
 
+/** The dashboard: where your money stands, what needs you, and every group and person at a glance.
+ *  Computed on the phone from the synced ledger, so it works offline. Phones stack it; wide screens add a right rail. */
 export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNode }) {
   const all = s.groups.map(g => ({ g, net: balances(g)[ME] ?? 0 }))
   const rows = all.filter(r => r.g.kind !== 'direct') // friends' balances count in the total, but aren't groups
   const live = all.filter(r => !r.g.track)
-  const people = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
-    .map(f => ({ f, n: friendBalance(f) })).filter(x => x.n).sort((a, b) => Math.abs(b.n) - Math.abs(a.n)).slice(0, 8)
   const total = live.reduce((a, r) => a + r.net, 0)
   const collect = live.reduce((a, r) => a + Math.max(r.net, 0), 0)
   const pay = live.reduce((a, r) => a + Math.max(-r.net, 0), 0)
+  const open = rows.filter(r => r.net && !r.g.track).length
+  const people = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
+    .map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name)).slice(0, 6)
   const recent = s.groups
     .flatMap(g => g.expenses.map((e, i) => ({ g, e, i })))
     .sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
-    .slice(0, 5)
+    .slice(0, 6)
+  const fresh = !rows.length
   return (
-    <Screen t={t} fab="/add" action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
-      <Denomination t={t} amount={total} line={verb(null, total, true)}
-        caption={collect && pay ? `${inr(collect)} to collect · ${inr(pay)} to pay` : undefined} />
-      {banner}
-      <NeedsYou groups={s.groups} showGroup />
-      {people.length > 0 && <>
-        <SectionHead title="People" action={<button className="link" onClick={() => go('/friends')}>All friends</button>} />
-        <ul className="people-strip" aria-label="Who you settle with">
-          {people.map(({ f, n }) => (
-            <li key={f.email}><button className="person-chip" onClick={() => go('/f/' + encodeURIComponent(f.email))} aria-label={`${f.name}: ${n > 0 ? `owes you ${inr(n)}` : `you owe ${inr(n)}`}`}>
-              <Avatar name={f.name} image={f.image} size={48} />
-              <span className="pc-name">{f.name.split(' ')[0]}</span>
-              <span className={`money ${tone(n)}`}>{inr(Math.round(n / 100) * 100)}</span>
-            </button></li>
-          ))}
-        </ul>
-      </>}
-      <SectionHead title="Groups" action={<button className="link" onClick={() => go('/new')}>New group</button>} />
-      <ol className="slips">
-        {rows.map(({ g, net }, i) => {
-          const gt = theme(g.theme)
-          return (
-            <li key={g.id} style={{ '--i': i, '--gnum': `${gt.num}, ${gt.ui}, system-ui` } as CSSProperties}>
-              <button className="slip" onClick={() => go('/g/' + g.id)}>
-                <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
-                <span className="slip-body">
-                  <span className="serial">No. {String(i + 1).padStart(2, '0')}</span>
-                  <strong>{g.name}</strong>
-                  <small>{count(g.members.length, 'person', 'people')} · {count(g.expenses.filter(e => !e.settle).length, 'expense', 'expenses')}</small>
-                </span>
-                <span className="slip-amt">{net ? <Money p={net} /> : <span className="money settled-ink"><Icon n="check" size={20} /></span>}<small>{g.track ? 'tracking' : verbShort(g, net)}</small></span>
-              </button>
-            </li>
-          )
-        })}
-      </ol>
-      <SectionHead title="Latest" action={<button className="link" onClick={() => go('/activity')}>All activity</button>} />
-      {recent.length ? (
-        <ol className="ledger">
-          {recent.map(({ g, e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} showGroup />)}
-        </ol>
-      ) : <Peaceful />}
+    <Screen t={t} fab={s.groups.length ? '/add' : '/new'} action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
+      <div className="dash">
+        <div className="dash-main">
+          <div className="d-hero">
+            {fresh && !total ? <h1 className="q d-welcome">Welcome{s.me.name ? `, ${s.me.name.split(' ')[0]}` : ''}.</h1>
+              : <Denomination t={t} amount={total} line={verb(null, total, true)} />}
+            {!fresh && <ul className="d-stats" aria-label="Summary">
+              <li aria-label={`To collect ${inr(collect)}`}><small>To collect</small><span className={`money ${collect ? 'pos' : ''}`}>{inr(rupees(collect))}</span></li>
+              <li aria-label={`To pay ${inr(pay)}`}><small>To pay</small><span className={`money ${pay ? 'neg' : ''}`}>{inr(rupees(pay))}</span></li>
+              <li><small>Open groups</small><span className="money">{open}<i> of {rows.length}</i></span></li>
+            </ul>}
+          </div>
+          <nav className="d-actions" aria-label="Quick actions">
+            <button onClick={() => go(s.groups.length ? '/add' : '/new')}><Icon n="plus" />Add expense</button>
+            <button onClick={() => go('/new')}><Icon n="friends" />New group</button>
+            <button onClick={() => go('/friends/add')}><Icon n="direct" />Add friend</button>
+            <button onClick={() => go('/import')}><Icon n="arrow" />Import</button>
+          </nav>
+          {banner && <div className="d-banner">{banner}</div>}
+          {fresh && (
+            <section className="d-card d-start" aria-labelledby="d-start">
+              <div className="hello"><Plico mood="idle" size={56} /><p><strong id="d-start">Start your first group.</strong>Pick who’s spending together. You can invite them by email next.</p></div>
+              <div className="kinds">
+                {GROUP_KINDS.map(k => <button key={k} className="kind" onClick={() => go('/new/' + k)}><Icon n={k} size={26} /><span>{KINDS[k].label}</span></button>)}
+              </div>
+            </section>
+          )}
+          <ThisMonth groups={s.groups} />
+          {!fresh && <section className="d-groups" aria-labelledby="d-groups">
+            <SectionHead title="Groups" id="d-groups" action={<button className="link" onClick={() => go('/new')}>New group</button>} />
+            <ol className="slips">
+              {rows.map(({ g, net }, i) => {
+                const gt = theme(g.theme)
+                const last = g.expenses.reduce((a, e) => (e.date > a ? e.date : a), '')
+                return (
+                  <li key={g.id} style={{ '--i': i, '--gnum': `${gt.num}, ${gt.ui}, system-ui` } as CSSProperties}>
+                    <button className="slip" onClick={() => go('/g/' + g.id)}>
+                      <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
+                      <span className="slip-body">
+                        <span className="serial">No. {String(i + 1).padStart(2, '0')}</span>
+                        <strong>{g.name}</strong>
+                        <small>{count(g.members.length, 'person', 'people')}{last ? ` · ${ago(last)}` : ' · no expenses yet'}</small>
+                      </span>
+                      <span className="slip-amt">{net ? <Money p={net} /> : <span className="money settled-ink"><Icon n="check" size={20} /></span>}<small>{g.track ? 'tracking' : verbShort(g, net)}</small></span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ol>
+          </section>}
+        </div>
+
+        <aside className="dash-rail" aria-label="People and activity">
+          {(!fresh || s.groups.length > 0) && <DashNeeds groups={s.groups} />}
+          {people.length > 0 && <section className="d-people" aria-labelledby="d-people">
+            <SectionHead title="People" id="d-people" action={<button className="link" onClick={() => go('/friends')}>All friends</button>} />
+            <ol className="d-list">
+              {people.map(({ f, n }) => (
+                <li key={f.email}><button className="d-row" onClick={() => go('/f/' + encodeURIComponent(f.email))}>
+                  <Avatar name={f.name} image={f.image} size={36} />
+                  <span className="grow"><strong>{f.name}</strong><small>{n > 0 ? 'owes you' : n < 0 ? 'you owe' : 'settled up'}</small></span>
+                  {n ? <span className={`money ${tone(n)}`}>{inr(Math.abs(n))}</span> : <Icon n="check" size={18} />}
+                </button></li>
+              ))}
+            </ol>
+          </section>}
+          {!fresh && <section className="d-recent" aria-labelledby="d-recent">
+            <SectionHead title="Latest" id="d-recent" action={recent.length > 0 && <button className="link" onClick={() => go('/activity')}>All activity</button>} />
+            {recent.length ? <ol className="ledger">{recent.map(({ g, e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} showGroup />)}</ol> : <Peaceful />}
+          </section>}
+        </aside>
+      </div>
     </Screen>
   )
 }
 
-function SpendBar({ g }: { g: Group }) {
-  const spent = g.expenses.filter(e => !e.settle)
-  const total = spent.reduce((a, e) => a + e.amount, 0)
-  const cats = Object.entries(spent.reduce<Record<string, number>>((m, e) => ((m[e.cat] = (m[e.cat] ?? 0) + e.amount), m), {})).sort((a, b) => b[1] - a[1]).slice(0, 5)
-  if (!total) return null
+/** Whole rupees for at-a-glance tiles; the exact amount lives in the label. */
+const rupees = (p: number) => Math.round(p / 100) * 100
+
+/** "today", "yesterday", "3 days ago", or the date. */
+function ago(day: string) {
+  const d = Math.round((Date.parse(today()) - Date.parse(day)) / 864e5)
+  return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d < 7 ? `${d} days ago` : new Date(day).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+}
+
+const monthOf = (back: number) => {
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - back)
+  return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, name: d.toLocaleString('en-IN', { month: 'long' }) }
+}
+const byCat = (es: Expense[], val: (e: Expense) => number) =>
+  Object.entries(es.reduce<Record<string, number>>((m, e) => ((m[e.cat] = (m[e.cat] ?? 0) + val(e)), m), {})).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 5)
+
+/** Your share of spending this month, by category, against last month. */
+function ThisMonth({ groups }: { groups: Group[] }) {
+  const [now, prev] = [monthOf(0), monthOf(1)]
+  const mine = (key: string) => groups.flatMap(g => g.expenses).filter(e => !e.settle && e.date.startsWith(key) && e.owed[ME])
+  const cur = mine(now.key), old = mine(prev.key)
+  const sum = (es: Expense[]) => es.reduce((a, e) => a + (e.owed[ME] ?? 0), 0)
+  const [a, b] = [sum(cur), sum(old)]
+  if (!a && !b) return null
+  const pct = b ? Math.round(((a - b) / b) * 100) : 0
+  return (
+    <section className="d-card d-month" aria-labelledby="d-month">
+      <p className="d-month-head"><span><small id="d-month">Your share in {now.name}</small><span className="money d-month-num">{inr(a)}</span></span>
+        <small className="d-delta">{!b ? `Nothing in ${prev.name} to compare` : pct === 0 ? `Same as ${prev.name}` : `${Math.abs(pct)}% ${pct > 0 ? 'more' : 'less'} than ${prev.name} (${inr(b)})`}</small></p>
+      {a > 0 ? <SpendBar cats={byCat(cur, e => e.owed[ME] ?? 0)} /> : <small>No spending yet this month.</small>}
+    </section>
+  )
+}
+
+/** Money waiting on you: payments to confirm, payments that bounced, and what you owe. */
+function DashNeeds({ groups }: { groups: Group[] }) {
+  const cards = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup />),
+    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup />)])
+  const owe = groups.filter(g => !g.track).flatMap(g => simplify(balances(g)).filter(d => d.from === ME && !g.expenses.some(e => e.pending && ends(e).from === ME && ends(e).to === d.to)).map(d => ({ g, d })))
+    .sort((x, y) => y.d.amount - x.d.amount)
+  return (
+    <section className="d-needs" aria-labelledby="d-needs">
+      <SectionHead title="Needs you" id="d-needs" />
+      {cards.length || owe.length ? <ol className="debts">
+        {cards}
+        {owe.map(({ g, d }) => (
+          <li className="debt" key={g.id + d.to}>
+            <span className="grow"><strong>You owe {who(g, d.to)}</strong><small>{g.kind === 'direct' ? 'Outside groups' : groupTitle(g)}</small></span>
+            <span className="money neg">{inr(d.amount)}</span>
+            <span className="debt-actions"><button className="btn-sm" onClick={() => go(`/g/${g.id}/pay/${d.from}/${d.to}/${d.amount}`)}>Settle</button></span>
+          </li>
+        ))}
+      </ol> : <p className="d-clear"><Icon n="check" size={18} />Nothing needs you right now.</p>}
+    </section>
+  )
+}
+
+function SpendBar({ cats }: { cats: [string, number][] }) {
+  if (!cats.length) return null
   const fill = (i: number) => `color-mix(in srgb, var(--accent) ${100 - i * 18}%, var(--surface2))`
   return (
     <figure className="spend" aria-label={`Spending by category: ${cats.map(([c, v]) => `${c} ${inr(v)}`).join(', ')}`}>
@@ -555,7 +643,7 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
       {spent.length > 0 && !debts.length && <Seal t={t} burst={burst} />}
       <IssuesBanner gid={g.id} />
       <NeedsYou groups={[g]} />
-      <SpendBar g={g} />
+      <SpendBar cats={byCat(spent, e => e.amount)} />
       {debts.length > 0 && <>
         <SectionHead title={g.track ? 'Balances' : 'Still to settle'}
           action={!g.track && toMe.length > 1 && <a className="link" href={wa(remindAll)} target="_blank" rel="noopener">Remind all</a>} />

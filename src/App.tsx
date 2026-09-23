@@ -65,7 +65,7 @@ export default function App() {
   if (r[0] === 'activity' || r[0] === 'log') return <Activity s={s} />
   if (r[0] === 'search') return <Search s={s} />
   if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} email={decodeURIComponent(r[1])} /> : <FriendPage s={s} email={decodeURIComponent(r[1])} />
-  if (r[0] === 'new' || !s.groups.some(x => x.kind !== 'direct')) return <NewGroup s={s} />
+  if (r[0] === 'new' || (r[0] === 'add' && !s.groups.length)) return <NewGroup key={r[1]} s={s} preset={r[0] === 'new' ? r[1] : undefined} />
   if (r[0] === 'add') return <ExpenseForm key={r[1] ?? 'add'} s={s} shared={r[1] === 'shared'} />
   const g = r[0] === 'g' ? s.groups.find(x => x.id === r[1]) : undefined
   if (g) {
@@ -94,18 +94,15 @@ export function Chip({ on, onClick, children }: { on: boolean; onClick: () => vo
 }
 
 // ---------- onboarding / new group ----------
-function NewGroup({ s }: { s: State }) {
-  const first = !s.groups.length
-  const [kind, setKind] = useState<Kind | null>(null)
+function NewGroup({ s, preset }: { s: State; preset?: string }) {
+  const [kind, setKind] = useState<Kind | null>(GROUP_KINDS.find(k => k === preset) ?? null)
   const [name, setName] = useState('')
   const [me, setMe] = useState(s.me.name)
   const [people, setPeople] = useState<Pick[]>([])
 
   if (!kind)
     return (
-      <Screen t={s.theme} back={!first}>
-        {first && <VerifyBanner s={s} />}
-        {first && <div className="hello"><Plico mood="idle" size={56} /><p><strong>Hi. I’m Plico.</strong>I keep track of the awkward money stuff.</p></div>}
+      <Screen t={s.theme} back>
         <h1 className="q">Who’s spending together?</h1>
         <div className="kinds">
           {GROUP_KINDS.map(k => (
@@ -131,7 +128,7 @@ function NewGroup({ s }: { s: State }) {
     location.replace('#/g/' + id)
   }
   return (
-    <Screen t={KINDS[kind].theme} back={() => setKind(null)} title={`New ${KINDS[kind].label.toLowerCase()} group`}>
+    <Screen t={KINDS[kind].theme} back={preset ? true : () => setKind(null)} title={`New ${KINDS[kind].label.toLowerCase()} group`}>
       <form className="form" onSubmit={e => { e.preventDefault(); create() }}>
         <label className="field"><span>Group name</span>
           <input value={name} onChange={e => setName(e.target.value)} placeholder={KINDS[kind].hint} maxLength={40} autoFocus />
