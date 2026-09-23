@@ -145,7 +145,7 @@ The Activity tab: audit entries across all your groups, newest first, 50 per pag
 - **Server search:** the phone already holds everything you can see. Revisit if groups grow past what fits on a phone.
 - **App-launch waitlist** (`POST /api/public/notify`): only if you want to collect emails before the store launch. It needs a consent line and a table.
 
-## 5. Build order (one commit each)
+## 5. Build order (one commit each) — shipped 2026-09-27: `8621068`, `60cedfd`, `8dc8ae5`, `88470f6`, `65cb7a1`, `48556d2`, `00e3c85`
 1. **APIs:** public invite and claim previews, activity and seen (with `activitySeenAt`), and leave group. Covered by `scripts/sync-race.mts`.
 2. **Navigation shell:** bottom tabs on phones and a sidebar with groups on desktop, the top bar with search, and Activity replacing Log.
 3. **Invite preview screens:** before sign-in, with the email pre-filled.
