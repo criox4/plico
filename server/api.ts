@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import * as z from 'zod/mini'
-import { AgeIn, AiConsentIn, ExpenseIn, FileName, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, ParentConsentIn, ReadIn, SeenIn, Token } from '../src/schema.ts'
+import { AgeIn, AiConsentIn, ExpenseIn, FileName, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, NotifyIn, ParentConsentIn, PushDeviceIn, PushTokenIn, ReadIn, RemindIn, SeenIn, Token } from '../src/schema.ts'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
 import { mail } from './email.ts'
@@ -9,11 +9,12 @@ import { aiReady, readExpense } from './ai.ts'
 import { BUCKET, deleteFile, getFile, imageType, putFile, storageReady } from './storage.ts'
 import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
+import { prefsOf } from './push-text.ts'
 import { createHash } from 'node:crypto'
 import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
 
-type Env = { Variables: { userId: string; userName: string } }
+type Env = { Variables: { userId: string; userName: string; sessionId: string } }
 // Public (no sign-in): a parent opening the consent link from their email.
 export const publicApi = new Hono()
 const guardianToken = async (token: string) => {
@@ -86,6 +87,7 @@ api.use('*', async (c, next) => {
   if (!s) return c.json({ error: 'Sign in first' }, 401)
   c.set('userId', s.user.id)
   c.set('userName', s.user.name)
+  c.set('sessionId', s.session.id)
   // Age gate (DPDP Act s.9): nobody uses Plico before saying how old they are, and 13-17 year olds wait for a parent.
   const u = s.user as typeof s.user & { ageGroup?: string | null; guardianConsentAt?: Date | null }
   const open = /^\/api\/me\/(age|guardian|export)$/.test(c.req.path)
@@ -391,7 +393,7 @@ async function inviteByEmail(gid: string, mid: string, email: string, inviter: s
   if (user) {
     const count = await db.$transaction(async tx => {
       const { count } = await tx.member.updateMany({ where: { id: mid, userId: null, group: { members: { none: { userId: user.id } } } }, data: { userId: user.id, inviteToken: null, name: user.name } })
-      if (count) await audit(tx, gid, { kind: 'member.joined', memberId: mid, byId: user.id, byName: user.name, after: { email, how: 'email' } })
+      if (count) await audit(tx, gid, { kind: 'member.joined', memberId: mid, byId: user.id, byName: user.name, after: { email, how: 'email', addedBy: inviter } })
       return count
     })
     if (count) void mail.added(user.email, inviter, g.name).catch(console.error)
@@ -693,4 +695,69 @@ api.post('/friends', async c => {
   const g = await db.group.findUniqueOrThrow({ where: { directKey: key }, select: { id: true } })
   if (g.id === id) await inviteByEmail(id, friendId, email, me.name)
   return c.json({ id: g.id })
+})
+
+// ---------- push notifications ----------
+/** This device wants pushes. A token moves to whoever registers it last (a shared or handed-down phone). */
+api.post('/me/push-devices', async c => {
+  const b = PushDeviceIn.parse(await c.req.json())
+  const uid = c.get('userId'), sessionId = c.get('sessionId')
+  const data = { userId: uid, sessionId, platform: b.platform, keys: b.keys ?? Prisma.DbNull, lastSeenAt: new Date() }
+  await db.pushDevice.upsert({ where: { token: b.token }, create: { token: b.token, ...data }, update: data })
+  if (b.tz) await db.user.update({ where: { id: uid }, data: { tz: b.tz } })
+  return c.json({ ok: true })
+})
+
+api.delete('/me/push-devices', async c => {
+  const { token } = PushTokenIn.parse(await c.req.json())
+  await db.pushDevice.deleteMany({ where: { token, userId: c.get('userId') } })
+  return c.json({ ok: true })
+})
+
+api.get('/me/notify', async c => {
+  const uid = c.get('userId')
+  const [u, devices] = await Promise.all([
+    db.user.findUniqueOrThrow({ where: { id: uid }, select: { notify: true } }),
+    db.pushDevice.findMany({ where: { userId: uid }, select: { sessionId: true }, distinct: ['sessionId'] }),
+  ])
+  return c.json({ prefs: prefsOf(u.notify), sessions: devices.map(d => d.sessionId) })
+})
+
+api.put('/me/notify', async c => {
+  const b = NotifyIn.parse(await c.req.json())
+  const uid = c.get('userId')
+  const u = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { notify: true } })
+  const prefs = { ...prefsOf(u.notify), ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)) }
+  await db.user.update({ where: { id: uid }, data: { notify: prefs } })
+  return c.json({ prefs })
+})
+
+/** Each member's balance in a group, in paise (what balances() in logic.ts computes, on the server). */
+const nets = async (gid: string) => new Map((await db.$queryRaw<{ memberId: string; net: number }[]>`
+  SELECT s."memberId", SUM(s."paid" - s."owed")::int AS net FROM "splittr"."expense_share" s JOIN "splittr"."expense" e ON e."id" = s."expenseId"
+  WHERE e."groupId" = ${gid} AND e."deletedAt" IS NULL AND NOT e."pending" AND NOT e."rejected" GROUP BY s."memberId"`).map(r => [r.memberId, r.net]))
+
+const DAY = 864e5
+/** Remind someone who owes you. Once per person per group a day, and three a week to anyone in a group. */
+api.post('/groups/:gid/remind', async c => {
+  const gid = Id.parse(c.req.param('gid'))
+  const { memberId, amount } = RemindIn.parse(await c.req.json())
+  const uid = c.get('userId')
+  const me = await membership(gid, uid)
+  if (!me) return c.json(notFound, 404)
+  const [g, them] = await Promise.all([db.group.findUnique({ where: { id: gid }, select: { track: true } }), db.member.findFirst({ where: { id: memberId, groupId: gid } })])
+  if (!g || !them || them.id === me.id) return c.json(notFound, 404)
+  if (g.track) return c.json({ error: 'This group only tracks spending, so it doesn’t send reminders.', code: 'tracking' }, 409)
+  if (!them.userId) return c.json({ error: `${them.name} isn’t on Plico yet. Remind them on WhatsApp.`, code: 'not-on-plico' }, 409)
+  const net = await nets(gid)
+  if ((net.get(them.id) ?? 0) >= 0 || (net.get(me.id) ?? 0) <= 0) return c.json({ error: `You and ${them.name} are square here.`, code: 'square' }, 409)
+  return db.$transaction(async tx => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`remind:${gid}:${them.userId}`}))` // two taps can't both pass the limits
+    const recent = await tx.notification.findMany({ where: { kind: 'remind', groupId: gid, userId: them.userId!, createdAt: { gt: new Date(Date.now() - 7 * DAY) } }, orderBy: { createdAt: 'asc' }, select: { byId: true, createdAt: true } })
+    const mineToday = recent.filter(r => r.byId === uid && r.createdAt.getTime() > Date.now() - DAY).at(-1)
+    const retryAt = mineToday ? new Date(mineToday.createdAt.getTime() + DAY) : recent.length >= 3 ? new Date(recent[recent.length - 3].createdAt.getTime() + 7 * DAY) : null
+    if (retryAt) return c.json({ error: `${them.name} was reminded recently. You can nudge again ${retryAt.toLocaleString('en-IN', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })}.`, code: 'limit', retryAt }, 429)
+    await tx.notification.create({ data: { userId: them.userId!, kind: 'remind', groupId: gid, byId: uid, data: { by: c.get('userName'), amount: Math.min(amount, -(net.get(them.id) ?? 0)) } } })
+    return c.json({ ok: true as const })
+  })
 })

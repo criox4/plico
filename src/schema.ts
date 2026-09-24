@@ -51,6 +51,18 @@ export const AiConsentIn = z.object({ consent: z.boolean() })
 export const InviteResendIn = z.object({ email: z.optional(z.boolean()) })
 export const FriendIn = z.object({ email: z.email().check(z.maxLength(254)), name: text(60) })
 export const SeenIn = z.object({ at: z.iso.datetime() })
+/** Web Push endpoints must belong to a browser's push service: the server POSTs to them. */
+const PUSH_HOSTS = /^https:\/\/([\w-]+\.)*(fcm\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)\//
+export const PushDeviceIn = z.object({
+  platform: z.enum(['web', 'ios', 'android']),
+  token: z.string().check(z.minLength(8), z.maxLength(2048)),
+  keys: z.optional(z.object({ p256dh: z.string().check(z.maxLength(200)), auth: z.string().check(z.maxLength(100)) })),
+  tz: z.optional(z.string().check(z.maxLength(64))),
+}).check(z.refine(b => b.platform !== 'web' || (!!b.keys && PUSH_HOSTS.test(b.token)), 'Not a browser push subscription'))
+export const PushTokenIn = z.object({ token: z.string().check(z.minLength(8), z.maxLength(2048)) })
+const on = z.optional(z.boolean())
+export const NotifyIn = z.object({ payments: on, activity: on, reminders: on, nudge: on, quiet: on, amounts: on })
+export const RemindIn = z.object({ memberId: Id, amount: Paise.check(z.minimum(1)) })
 export const Token = z.string().check(z.regex(/^[a-f0-9]{32}$/))
 export const InviteCode = z.string().check(z.maxLength(40))
 
@@ -109,6 +121,14 @@ export const ClaimPreviewOut = z.object({
   group: z.object({ name: z.string(), kind: Kind, theme: Theme }), invitedBy: z.string(), name: z.string(), email: z.nullable(z.string()), prefill: z.nullable(z.string()),
 })
 
+export const NotifyOut = z.object({
+  prefs: z.object({ payments: z.boolean(), activity: z.boolean(), reminders: z.boolean(), nudge: z.boolean(), quiet: z.boolean(), amounts: z.boolean() }),
+  /** Sign-ins (session ids) that have a device registered for pushes. */
+  sessions: z.array(z.string()),
+})
+export const RemindOut = z.object({ ok: z.literal(true) })
+export const RemindLimitOut = z.object({ error: z.string(), code: z.enum(['limit', 'not-on-plico', 'square', 'tracking']), retryAt: z.nullish(When) })
+
 export type GroupInput = z.input<typeof GroupIn>
 export type MemberInput = z.input<typeof MemberIn>
 export type ExpenseInput = z.input<typeof ExpenseIn>
@@ -122,3 +142,4 @@ export type ActivityEvent = z.infer<typeof ActivityEvent>
 export type Read = z.infer<typeof ReadOut>
 export type InvitePreview = z.infer<typeof InvitePreviewOut>
 export type ClaimPreview = z.infer<typeof ClaimPreviewOut>
+export type NotifyPrefs = z.infer<typeof NotifyOut>['prefs']
