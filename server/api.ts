@@ -749,10 +749,11 @@ api.post('/groups/:gid/remind', async c => {
   if (!g || !them || them.id === me.id) return c.json(notFound, 404)
   if (g.track) return c.json({ error: 'This group only tracks spending, so it doesn’t send reminders.', code: 'tracking' }, 409)
   if (!them.userId) return c.json({ error: `${them.name} isn’t on Plico yet. Remind them on WhatsApp.`, code: 'not-on-plico' }, 409)
+  if (!(await db.pushDevice.count({ where: { userId: them.userId } }))) return c.json({ error: `${them.name} doesn’t have Plico notifications on. Remind them on WhatsApp.`, code: 'no-device' }, 409)
   const net = await nets(gid)
   if ((net.get(them.id) ?? 0) >= 0 || (net.get(me.id) ?? 0) <= 0) return c.json({ error: `You and ${them.name} are square here.`, code: 'square' }, 409)
   return db.$transaction(async tx => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`remind:${gid}:${them.userId}`}))` // two taps can't both pass the limits
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`remind:${gid}:${them.userId}`}))` // two taps can't both pass the limits
     const recent = await tx.notification.findMany({ where: { kind: 'remind', groupId: gid, userId: them.userId!, createdAt: { gt: new Date(Date.now() - 7 * DAY) } }, orderBy: { createdAt: 'asc' }, select: { byId: true, createdAt: true } })
     const mineToday = recent.filter(r => r.byId === uid && r.createdAt.getTime() > Date.now() - DAY).at(-1)
     const retryAt = mineToday ? new Date(mineToday.createdAt.getTime() + DAY) : recent.length >= 3 ? new Date(recent[recent.length - 3].createdAt.getTime() + 7 * DAY) : null

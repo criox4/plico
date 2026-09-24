@@ -23,6 +23,7 @@ type Status = {
   authed: boolean; booting: boolean; pending: number; offline: boolean; error: string; issues: Issue[]
   unread: number // Activity entries by other people you haven't seen
   google: boolean; googleWebClientId: string | null; googleIosClientId: string | null; ai: boolean
+  push: { web: string | null; ios: boolean; android: boolean } // push channels the server can send on; web is the VAPID public key
 }
 
 // Unsynced work must survive the OS clearing WebView storage: on phones it's mirrored to native preferences
@@ -58,7 +59,7 @@ let missedPull = false // a pull was skipped because an edit was pending
 // Signed in = we know the user. A dead session is only concluded from the server (never from being offline).
 let status: Status = {
   authed: !!getState().user, booting: true, pending: outbox.length, offline: !navigator.onLine, error: '', issues, unread: 0,
-  google: false, googleWebClientId: null, googleIosClientId: null, ai: false,
+  google: false, googleWebClientId: null, googleIosClientId: null, ai: false, push: { web: null, ios: false, android: false },
 }
 const subs = new Set<() => void>()
 const setStatus = (p: Partial<Status>) => { status = { ...status, ...p, pending: outbox.length, issues }; subs.forEach(f => f()) }
@@ -469,7 +470,7 @@ export function startSync() {
   setInterval(() => { if (document.visibilityState === 'visible') void flush().then(pull) }, 30_000)
   // Boot: learn the sign-in options and confirm the session, but never hold an offline user hostage (800ms cap).
   const config = fetch(`${API}/api/config`).then(r => r.json())
-    .then(c => setStatus({ google: !!c.google, googleWebClientId: c.googleWebClientId, googleIosClientId: c.googleIosClientId, ai: !!c.ai })).catch(() => {})
+    .then(c => setStatus({ google: !!c.google, googleWebClientId: c.googleWebClientId, googleIosClientId: c.googleIosClientId, ai: !!c.ai, ...(c.push && { push: c.push }) })).catch(() => {})
   const session = authClient.getSession().then(async r => {
     const u = r.data?.user
     if (u && !getState().user) return signedIn(u) // back from Google's redirect with a session cookie

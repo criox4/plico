@@ -127,7 +127,7 @@ export const NotifyOut = z.object({
   sessions: z.array(z.string()),
 })
 export const RemindOut = z.object({ ok: z.literal(true) })
-export const RemindLimitOut = z.object({ error: z.string(), code: z.enum(['limit', 'not-on-plico', 'square', 'tracking']), retryAt: z.nullish(When) })
+export const RemindLimitOut = z.object({ error: z.string(), code: z.enum(['limit', 'not-on-plico', 'no-device', 'square', 'tracking']), retryAt: z.nullish(When) })
 
 export type GroupInput = z.input<typeof GroupIn>
 export type MemberInput = z.input<typeof MemberIn>

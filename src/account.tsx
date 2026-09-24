@@ -8,7 +8,8 @@ import { API, authClient, token } from './auth-client'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker } from './ui'
-import { ClaimPreviewOut, InvitePreviewOut, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
+import { disablePush, enablePush, pushState, type PushState } from './push'
+import { ClaimPreviewOut, InvitePreviewOut, NotifyOut, type NotifyPrefs, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
 
 const origin = () => location.origin + location.pathname.replace(/index\.html$/, '')
 const msg = (e: unknown, fallback = 'That didn’t work. Your balances are safe. Try again.') =>
@@ -555,7 +556,7 @@ export function AccountHub({ s }: { s: State }) {
       <ol className="ledger">
         <Row icon="user" title="Profile" sub={[s.me.phone, s.me.upi].filter(Boolean).join(' · ') || 'Name, phone, UPI ID'} to="/me/profile" />
         <Row icon="settings" title="Appearance" sub={`${theme(s.theme).name} theme`} to="/me/theme" />
-        <Row icon="bell" title="Reminders" sub={`${{ normal: 'Normal', gentle: 'Friendly', shameless: 'Playful' }[s.tone]} tone`} to="/me/tone" />
+        <Row icon="bell" title="Notifications" sub="Payments, group activity, reminders" to="/me/notify" />
         <Row icon="lock" title="Privacy and data" sub="AI reading, download your data, policies" to="/me/privacy" />
         <Row icon="lock" title="Sign-in and security" sub="Google, Apple, email and password" to="/me/security" />
         <Row icon="phone" title="Devices" sub="Where you’re signed in" to="/me/devices" />
@@ -563,7 +564,7 @@ export function AccountHub({ s }: { s: State }) {
       <SyncLine />
       <button className="btn secondary" onClick={out}>Sign out</button>
       <ol className="ledger danger-zone"><Row icon="trash" title="Delete account" to="/me/delete" danger /></ol>
-      <a className="link center-link" href="#/themes">See all {THEMES.length} themes</a>
+      {import.meta.env.DEV && <a className="link center-link" href="#/themes">See all {THEMES.length} themes</a>}
     </Screen>
   )
 }
@@ -671,17 +672,69 @@ export function AppearancePage({ s }: { s: State }) {
   return <Page s={s} title="Appearance"><ThemePicker value={s.theme} onChange={t => update(d => { d.theme = t })} /><small>Each group can also have its own theme in its settings.</small></Page>
 }
 
-export function RemindersPage({ s }: { s: State }) {
+/** Pushes on this device, what's worth a push, and how reminders to others sound. */
+export function NotificationsPage({ s }: { s: State }) {
+  const sync = useSync()
+  const [state, setState] = useState<PushState | null>(null)
+  const [prefs, setPrefs] = useState<NotifyPrefs | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { void pushState(sync.push).then(setState, () => setState('unsupported')) }, [sync.push])
+  useEffect(() => { void api('/api/me/notify').then(r => setPrefs(NotifyOut.parse(r).prefs), () => setErr('Couldn’t load your settings. Check your connection.')) }, [])
+  const toggle = async (on: boolean) => {
+    setBusy(true); setErr('')
+    try {
+      if (on) { if (!(await enablePush(sync.push))) setErr('Notifications are blocked for Plico. Allow them in your settings, then try again.') }
+      else await disablePush()
+      setState(await pushState(sync.push))
+    } catch (e) { setErr(msg(e)) } finally { setBusy(false) }
+  }
+  const set = async (k: keyof NotifyPrefs, v: boolean) => {
+    if (!prefs) return
+    const before = prefs
+    setPrefs({ ...prefs, [k]: v })
+    try { setPrefs(NotifyOut.shape.prefs.parse((await api<{ prefs: unknown }>('/api/me/notify', { method: 'PUT', body: JSON.stringify({ [k]: v }) })).prefs)) }
+    catch { setPrefs(before); setErr('Couldn’t save that. Check your connection.') }
+  }
+  const Pref = ({ k, title, sub }: { k: keyof NotifyPrefs; title: string; sub: string }) => (
+    <label className="check pref"><input type="checkbox" checked={!!prefs?.[k]} disabled={!prefs} onChange={e => void set(k, e.target.checked)} /><span><strong>{title}</strong><small>{sub}</small></span></label>
+  )
+  const device = {
+    on: 'On for this device.',
+    off: 'Off for this device.',
+    blocked: `Blocked in your ${Capacitor.isNativePlatform() ? 'phone’s' : 'browser’s'} settings. Allow notifications for Plico there, then come back.`,
+    unsupported: Capacitor.isNativePlatform() ? 'Notifications aren’t set up for this app yet.'
+      : /iPhone|iPad/.test(navigator.userAgent) ? 'On iPhone, add Plico to your Home Screen (Share, then Add to Home Screen) and open it from there.' : 'This browser can’t show notifications from Plico.',
+  }
   return (
-    <Page s={s} title="Reminders">
-      <div className="seg" role="radiogroup" aria-label="Reminder tone">
-        {(['normal', 'gentle', 'shameless'] as Tone[]).map(t => (
-          <button type="button" key={t} role="radio" aria-checked={s.tone === t} className={s.tone === t ? 'on' : ''} onClick={() => update(d => { d.tone = t })}>
-            {{ normal: 'Normal', gentle: 'Friendly', shameless: 'Playful' }[t]}
-          </button>
-        ))}
-      </div>
-      <p className="preview-msg">{TONES[s.tone]('₹840', 'Arjun', "Goa '26")}</p>
+    <Page s={s} title="Notifications">
+      <section className="notify-device" aria-live="polite">
+        <Icon n="bell" />
+        <p><strong>This device</strong><small>{state ? device[state] : 'Checking…'}</small></p>
+        {(state === 'on' || state === 'off') && <button className={`btn-sm${state === 'on' ? ' ghost' : ''}`} disabled={busy} onClick={() => void toggle(state === 'off')}>{state === 'on' ? 'Turn off' : 'Turn on'}</button>}
+      </section>
+      {err && <p className="error" role="alert">{err}</p>}
+      <fieldset className="field"><legend>Tell me about</legend>
+        <Pref k="payments" title="Payments" sub="Someone paid you, or confirmed your payment. Sent right away." />
+        <Pref k="activity" title="Group activity" sub="New expenses, changes to your share, people joining. Bundled every couple of minutes." />
+        <Pref k="reminders" title="Reminders from friends" sub="When someone reminds you to settle up. At most once a day per group." />
+        <Pref k="nudge" title="Weekly nudge" sub="Sunday morning, only if you’ve owed money for over a week." />
+      </fieldset>
+      <fieldset className="field"><legend>How</legend>
+        <Pref k="quiet" title="Quiet at night" sub="Nothing between 10 pm and 8 am. It all arrives at 8." />
+        <Pref k="amounts" title="Show amounts" sub="Include ₹ amounts on the lock screen." />
+      </fieldset>
+      <p className="legal-line">At most 8 a day, payments aside. Apple, Google or your browser’s push service delivers them.</p>
+      <fieldset className="field"><legend>When you remind others on WhatsApp</legend>
+        <div className="seg" role="radiogroup" aria-label="Reminder tone">
+          {(['normal', 'gentle', 'shameless'] as Tone[]).map(t => (
+            <button type="button" key={t} role="radio" aria-checked={s.tone === t} className={s.tone === t ? 'on' : ''} onClick={() => update(d => { d.tone = t })}>
+              {{ normal: 'Normal', gentle: 'Friendly', shameless: 'Playful' }[t]}
+            </button>
+          ))}
+        </div>
+        <p className="preview-msg">{TONES[s.tone]('₹840', 'Arjun', "Goa '26")}</p>
+      </fieldset>
     </Page>
   )
 }
@@ -771,6 +824,8 @@ export function DevicesPage({ s }: { s: State }) {
   const [list, setList] = useState<Sess[] | null>(null)
   const [current, setCurrent] = useState('')
   const [err, setErr] = useState('')
+  const [pushing, setPushing] = useState<string[]>([])
+  useEffect(() => { void api('/api/me/notify').then(r => setPushing(NotifyOut.parse(r).sessions), () => {}) }, [])
   const load = async () => {
     const [l, me] = await Promise.all([authClient.listSessions(), authClient.getSession()])
     if (l.error) return setErr('Couldn’t load your devices. Check your connection.')
@@ -786,7 +841,7 @@ export function DevicesPage({ s }: { s: State }) {
         <ol className="ledger">
           {list.map(x => (
             <li key={x.id} className="row-in">
-              <span className="grow"><strong>{device(x.userAgent ?? '')}</strong><small>{x.id === current ? 'This device' : `Active ${new Date(x.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`}</small></span>
+              <span className="grow"><strong>{device(x.userAgent ?? '')}</strong><small>{x.id === current ? 'This device' : `Active ${new Date(x.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`}{pushing.includes(x.id) ? ' · Notifications on' : ''}</small></span>
               {x.id !== current && <button className="btn-sm ghost" onClick={() => void revoke(x.token)}>Sign out</button>}
             </li>
           ))}

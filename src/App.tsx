@@ -1,3 +1,4 @@
+import { resumePush } from './push'
 import { Suspense, lazy, useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
@@ -8,7 +9,7 @@ import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
 import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
-  RemindersPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
+  NotificationsPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
@@ -36,6 +37,7 @@ export default function App() {
     addEventListener('keydown', k)
     return () => removeEventListener('keydown', k)
   }, [sync.authed])
+  useEffect(() => { if (sync.authed && !sync.booting) void resumePush(sync.push, go) }, [sync.authed, sync.booting, sync.push])
   useEffect(() => {
     ensureFonts([s.theme, ...s.groups.map(g => g.theme)])
     document.body.style.background = theme(s.theme).c.bg
@@ -58,7 +60,7 @@ export default function App() {
   if (r[0] === 'delete' && r[1]) return <DeleteConfirm s={s} token={r[1]} />
   if (r[0] === 'join' && r[1]) return <JoinGroup s={s} code={r[1]} />
   if (r[0] === 'me') {
-    const Page = { profile: ProfilePage, theme: AppearancePage, tone: RemindersPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage, privacy: PrivacyPage }[r[1] ?? '']
+    const Page = { profile: ProfilePage, theme: AppearancePage, tone: NotificationsPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage, privacy: PrivacyPage }[r[1] ?? '']
     return Page ? <Page key={r[1]} s={s} /> : <AccountHub s={s} />
   }
   if (r[0] === 'import') return <ImportSplitwise s={s} />

@@ -7,7 +7,9 @@ import { db } from '../server/db.ts'
 import { createHash } from 'node:crypto'
 import { auditPayload, GENESIS } from '../src/logic.ts'
 import * as z from 'zod/mini'
-import { ActivityOut, AuditEvent, AuditOut, ClaimPreviewOut, ConflictOut, GroupsOut, InvitePreviewOut, SavedOut } from '../src/schema.ts'
+import { ActivityOut, AuditEvent, AuditOut, ClaimPreviewOut, ConflictOut, GroupsOut, InvitePreviewOut, NotifyOut, RemindLimitOut, RemindOut, SavedOut } from '../src/schema.ts'
+import { flush, nudge } from '../server/push.ts'
+import { quietUntil } from '../server/push-text.ts'
 /** The server's answers must match the shared contract the app reads them with. */
 const contract = (schema: z.ZodMiniType, body: unknown, what: string) => {
   const r = schema.safeParse(body)
@@ -232,6 +234,99 @@ try {
   assert.equal((await C.call('GET', '/api/me/activity')).body.unread, 0, 'seen never moves backwards')
   await db.group.deleteMany({ where: { id: g2 } })
   console.log('✓ activity: feed, money filter, unread badge, seen')
+
+  // (o) push: devices, the outbox, batching, quiet hours, preferences, the daily cap, Remind limits, sign-out
+  const endpoint = (who: string) => `https://fcm.googleapis.com/fcm/send/race-${who}-${run}`
+  const keys = { p256dh: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM', auth: 'tBHItJI5svbpez7KI4CCXg' }
+  assert.equal((await B.call('POST', '/api/me/push-devices', { platform: 'web', token: 'http://localhost:1/evil', keys })).status, 400, 'only real push services')
+  for (const [u, who] of [[A, 'a'], [B, 'b']] as const) assert.equal((await u.call('POST', '/api/me/push-devices', { platform: 'web', token: endpoint(who), keys, tz: 'Asia/Kolkata' })).status, 200)
+  const nb = (await B.call('GET', '/api/me/notify')).body
+  contract(NotifyOut, nb, 'notify'); assert.equal(nb.sessions.length, 1); assert.equal(nb.prefs.nudge, true)
+
+  const g3 = crypto.randomUUID(), selfA3 = crypto.randomUUID()
+  await A.call('PUT', `/api/groups/${g3}`, { name: 'Push', kind: 'friends', theme: 'classic', selfId: selfA3 })
+  const code3 = (await A.call('GET', `/api/groups/${g3}/invite`)).body.code
+  await B.call('POST', `/api/invites/${code3}/join`, {}); await C.call('POST', `/api/invites/${code3}/join`, {})
+  const [b3, c3] = [await db.member.findFirstOrThrow({ where: { groupId: g3, userId: B.id } }), await db.member.findFirstOrThrow({ where: { groupId: g3, userId: C.id } })]
+  const rows = (u: string, kind?: string) => db.notification.findMany({ where: { userId: u, groupId: g3, ...(kind && { kind }) }, orderBy: { createdAt: 'asc' } })
+  assert.deepEqual((await rows(A.id)).map(r => r.kind), ['member.joined', 'member.joined'], 'A hears about the joins; C has no device, so no rows')
+  assert.equal((await db.notification.count({ where: { userId: C.id } })), 0)
+  await db.notification.deleteMany({ where: { groupId: g3 } })
+  const third = (amount: number) => ({ [selfA3]: amount / 4, [b3.id]: amount / 2, [c3.id]: amount / 4 })
+  const spend = (title: string, amount: number) => A.call('PUT', `/api/groups/${g3}/expenses/${crypto.randomUUID()}`, { title, cat: 'food', date: '2026-09-27', amount, paid: { [selfA3]: amount }, owed: third(amount), base: null })
+  await spend('Chai', 40000); await spend('Samosa', 20000)
+  let bRows = await rows(B.id)
+  assert.deepEqual(bRows.map(r => [r.kind, (r.data as any).share]), [['expense.created', 20000], ['expense.created', 10000]], 'one row each, with B’s share')
+  assert.ok(bRows.every(r => r.dueAt.getTime() > Date.now() + 60_000), 'batched: due in ~2 minutes')
+  assert.equal((await rows(A.id)).length, 0, 'never the person who made the change')
+  // The first row falls due: the whole batch goes as one push.
+  await db.notification.update({ where: { id: bRows[0].id }, data: { dueAt: new Date() } })
+  const settled = async (ids: string[]) => { for (let i = 0; i < 40; i++) { const x = await db.notification.findMany({ where: { id: { in: ids } } }); if (x.every(r => r.sentAt && r.skipped !== undefined) && x.filter(r => r.skipped === null || r.skipped === 'merged').length === x.length) return x; await flush(); await new Promise(r => setTimeout(r, 250)) } return db.notification.findMany({ where: { id: { in: ids } } }) }
+  bRows = await settled(bRows.map(r => r.id))
+  assert.deepEqual(bRows.map(r => r.skipped).sort(), ['merged', null].sort() as any, 'one sent, one merged into it')
+
+  // Quiet hours hold pushes until 08:00 local; switched-off kinds are dropped; the daily cap stops the ninth.
+  const night = [...Array(27)].map((_, i) => `Etc/GMT${i - 12 < 0 ? '+' : '-'}${Math.abs(i - 12)}`).find(z => { try { return !!quietUntil(z) } catch { return false } })!
+  await db.user.update({ where: { id: B.id }, data: { tz: night } })
+  await spend('Late chai', 8000)
+  const late = (await rows(B.id)).at(-1)!
+  await db.notification.update({ where: { id: late.id }, data: { dueAt: new Date() } })
+  await flush(); await new Promise(r => setTimeout(r, 300))
+  const held = await db.notification.findUniqueOrThrow({ where: { id: late.id } })
+  assert.equal(held.sentAt, null, 'held for the morning'); assert.ok(held.dueAt.getTime() > Date.now(), 'due when quiet hours end')
+  await db.user.update({ where: { id: B.id }, data: { tz: 'Asia/Kolkata' } })
+  if (quietUntil('Asia/Kolkata')) await db.user.update({ where: { id: B.id }, data: { notify: { quiet: false } } }) // the test may run at night in India
+  await db.notification.deleteMany({ where: { userId: B.id } })
+
+  assert.equal((await B.call('PUT', '/api/me/notify', { activity: false })).body.prefs.activity, false)
+  await spend('Muted', 4000)
+  const muted = (await rows(B.id)).at(-1)!
+  await db.notification.update({ where: { id: muted.id }, data: { dueAt: new Date() } })
+  assert.equal((await settled([muted.id]).then(() => db.notification.findUniqueOrThrow({ where: { id: muted.id } }))).skipped, 'off')
+  await B.call('PUT', '/api/me/notify', { activity: true })
+
+  await db.notification.createMany({ data: [...Array(8)].map(() => ({ userId: B.id, kind: 'expense.created', groupId: g3, data: {}, sentAt: new Date() })) })
+  await spend('Ninth', 4000)
+  const ninth = (await rows(B.id)).at(-1)!
+  await db.notification.update({ where: { id: ninth.id }, data: { dueAt: new Date() } })
+  for (let i = 0; i < 20 && !(await db.notification.findUniqueOrThrow({ where: { id: ninth.id } })).skipped; i++) { await flush(); await new Promise(r => setTimeout(r, 250)) }
+  assert.equal((await db.notification.findUniqueOrThrow({ where: { id: ninth.id } })).skipped, 'cap', 'the daily cap')
+  console.log('✓ push: devices, outbox per change, batching, quiet hours, preferences, daily cap')
+
+  // Payments skip the batch and the cap: B marks a payment to A, A is told at once.
+  await B.call('PUT', `/api/groups/${g3}/expenses/${crypto.randomUUID()}`, { title: 'Settlement', cat: 'check', date: '2026-09-27', amount: 1000, paid: { [b3.id]: 1000 }, owed: { [selfA3]: 1000 }, settle: true, pending: true, base: null })
+  const claim = (await rows(A.id, 'payment.claimed'))[0]
+  assert.ok(claim && claim.dueAt.getTime() <= Date.now(), 'payment claims are due now')
+  assert.equal((claim.data as any).amount, 1000)
+
+  // Remind: needs an account with a device, a debt, and respects once a day per person per group.
+  const remind = (u: typeof A, m: string) => u.call('POST', `/api/groups/${g3}/remind`, { memberId: m, amount: 5000 })
+  r = await remind(A, b3.id); assert.equal(r.status, 200); contract(RemindOut, r.body, 'remind')
+  r = await remind(A, b3.id); assert.equal(r.status, 429); assert.equal(r.body.code, 'limit'); contract(RemindLimitOut, r.body, 'remind limit')
+  assert.ok(new Date(r.body.retryAt).getTime() > Date.now() + 23 * 3600e3)
+  r = await remind(A, c3.id); assert.equal(r.status, 409); assert.equal(r.body.code, 'no-device')
+  r = await remind(B, selfA3); assert.equal(r.status, 409); assert.equal(r.body.code, 'square', 'A owes nobody here')
+  console.log('✓ push: payments go now; Remind limited, and only to someone who owes and can get it')
+
+  // Weekly nudge: Sunday 11:00 local, to people with a device who have owed for over a week; once a week.
+  await db.notification.deleteMany({ where: { userId: B.id } })
+  await db.pushDevice.create({ data: { userId: B.id, sessionId: (await db.session.findFirstOrThrow({ where: { userId: B.id } })).id, platform: 'web', token: endpoint('b2'), keys } })
+  await db.expense.updateMany({ where: { groupId: g3 }, data: { createdAt: new Date('2026-09-01') } })
+  const sunday11 = new Date(Date.UTC(2026, 8, 27, 5, 30)) // 11:00 in India
+  assert.equal(await nudge(new Date(Date.UTC(2026, 8, 26, 5, 30))), 0, 'not on a Saturday')
+  await nudge(sunday11)
+  const nd = await db.notification.findFirstOrThrow({ where: { userId: B.id, kind: 'nudge' } })
+  assert.deepEqual(nd.data, { amount: 20000 + 10000 + 4000 + 2000 + 2000, groups: 1 }, 'what B owes; the payment still waiting to be confirmed doesn’t count yet')
+  await nudge(sunday11)
+  assert.equal(await db.notification.count({ where: { userId: B.id, kind: 'nudge' } }), 1, 'once a week')
+  console.log('✓ push: weekly nudge on Sunday morning, once')
+
+  // Signing out a device's session stops its pushes.
+  const sess = (await db.pushDevice.findFirstOrThrow({ where: { userId: B.id } })).sessionId
+  await db.session.delete({ where: { id: sess } })
+  assert.equal(await db.pushDevice.count({ where: { userId: B.id } }), 0)
+  await db.group.deleteMany({ where: { id: g3 } })
+  console.log('✓ push: signing out removes the device')
 
   console.log('\nall sync race checks passed')
 } finally {

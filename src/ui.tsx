@@ -7,7 +7,8 @@ import { Icon, type IconName } from './icons'
 import { IssuesBanner } from './history'
 import { friendBalance, friendsOf } from './people'
 import { API } from './auth-client'
-import { fileUrl, useSync } from './sync'
+import { api, fileUrl, useSync } from './sync'
+import { enablePush, mayAsk, notNow, pushState, type PushState } from './push'
 
 // ---------- routing ----------
 export function useRoute() {
@@ -642,6 +643,7 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
       {spent.length > 0 && !debts.length && <Seal t={t} burst={burst} />}
       <IssuesBanner gid={g.id} />
+      <PushAsk g={g} />
       <NeedsYou groups={[g]} />
       <SpendBar cats={byCat(spent, e => e.amount)} />
       {debts.length > 0 && <>
@@ -659,7 +661,7 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
               {!g.track && waiting(d) && d.to !== ME ? <small className="debt-wait">Paid {inr(waiting(d)!.amount)}. Waiting for {who(g, d.to)} to confirm.</small> : !g.track && (
                 <span className="debt-actions">
                   <button className="btn-sm" onClick={() => go(`/g/${g.id}/pay/${d.from}/${d.to}/${d.amount}`)}>Settle</button>
-                  {d.to === ME && <a className="btn-sm ghost" href={wa(reminder(s, g, d))} target="_blank" rel="noopener"><Icon n="bell" size={16} />Remind</a>}
+                  {d.to === ME && <RemindButton s={s} g={g} d={d} />}
                 </span>
               )}
             </li>
@@ -670,6 +672,44 @@ export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: Theme
       {list.length ? <ol className="ledger">{list.map(({ e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} />)}</ol>
         : <Peaceful />}
     </Screen>
+  )
+}
+
+/** Remind in the app when they're on Plico (a push, rate-limited on the server); otherwise, or if that can't reach them, WhatsApp. */
+function RemindButton({ s, g, d }: { s: State; g: Group; d: Transfer }) {
+  const [st, setSt] = useState<'idle' | 'busy' | 'sent'>('idle')
+  const [note, setNote] = useState('')
+  const whatsapp = wa(reminder(s, g, d))
+  if (!g.members.find(m => m.id === d.from)?.joined)
+    return <a className="btn-sm ghost" href={whatsapp} target="_blank" rel="noopener"><Icon n="bell" size={16} />Remind</a>
+  const send = async () => {
+    setSt('busy'); setNote('')
+    try { await api(`/api/groups/${g.id}/remind`, { method: 'POST', body: JSON.stringify({ memberId: d.from, amount: d.amount }) }); setSt('sent') }
+    catch (e) { setSt('idle'); setNote(navigator.onLine ? (e as Error).message : 'Reminders need a connection.') }
+  }
+  return <>
+    <button className="btn-sm ghost" disabled={st !== 'idle'} onClick={() => void send()}><Icon n={st === 'sent' ? 'check' : 'bell'} size={16} />{st === 'sent' ? 'Reminded' : 'Remind'}</button>
+    {note && <small className="remind-note" role="status">{note} <a href={whatsapp} target="_blank" rel="noopener">Send on WhatsApp</a></small>}
+  </>
+}
+
+/** Asks for notifications once the group gives a reason to (it exists; or you're waiting on a payment), at most once a fortnight. */
+function PushAsk({ g }: { g: Group }) {
+  const sync = useSync()
+  const [state, setState] = useState<PushState | null>(null)
+  const [hide, setHide] = useState(!mayAsk())
+  useEffect(() => { if (!hide) void pushState(sync.push).then(setState, () => setState('unsupported')) }, [sync.push, hide])
+  if (hide || state !== 'off') return null
+  const mine = g.expenses.find(e => e.pending && ends(e).from === ME)
+  return (
+    <section className="confirm-card push-ask">
+      <p><strong>{mine ? `Get told when ${who(g, ends(mine).to)} confirms your payment?` : 'Get told when someone adds an expense or pays you?'}</strong>
+        <small>Payments right away; everything else bundled, and never at night.</small></p>
+      <span className="debt-actions">
+        <button className="btn-sm" onClick={() => void enablePush(sync.push).catch(() => false).finally(() => setHide(true))}><Icon n="bell" size={16} />Turn on</button>
+        <button className="btn-sm ghost" onClick={() => { notNow(); setHide(true) }}>Not now</button>
+      </span>
+    </section>
   )
 }
 

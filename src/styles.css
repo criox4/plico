@@ -203,7 +203,10 @@ fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--mute
 .debt-flow { display: flex; align-items: center; gap: 8px; font-weight: 650; min-width: 0; }
 .debt .money { font-size: 1.125rem; }
 .flow-arrow { color: var(--muted); display: inline-flex; }
-.debt-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+.debt-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.remind-note { flex-basis: 100%; line-height: 1.4; }
+.remind-note a { color: var(--link); font-weight: 650; text-underline-offset: 3px; white-space: nowrap; }
+.push-ask { margin-top: 12px; }
 .btn-sm {
   display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 16px;
   border-radius: var(--pill); background: var(--accent); color: var(--on-accent); font-weight: 650; font-size: .9375rem; text-decoration: none;
@@ -851,6 +854,16 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .person-chip:hover { translate: 0 -2px; box-shadow: var(--elev-hi, var(--elev)); }
 .pc-name { max-width: 100%; font-weight: 600; font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .person-chip .money { font-size: .875rem; }
+
+/* ---------- notifications ---------- */
+.notify-device { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--elev); }
+.notify-device > .icon-svg { flex: none; color: var(--link); }
+.notify-device p { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.notify-device small { line-height: 1.4; }
+.check.pref { align-items: flex-start; padding: 8px 0; }
+.check.pref input { margin-top: 2px; }
+.check.pref span { display: grid; gap: 2px; }
+.check.pref small { font-weight: 500; line-height: 1.4; }
 
 /* ---------- home: the dashboard ---------- */
 /* Phones: one column, ordered by urgency. Wide screens: money and groups on the left, a rail of people and activity on the right. */
