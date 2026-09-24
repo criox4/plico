@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { auditPayload, effectOf, type AuditEntry, type Snap } from '../src/logic.ts'
 import { Prisma } from './generated/prisma/client.ts'
 import { db } from './db.ts'
+import { queuePush } from './push.ts'
 
 type Tx = Prisma.TransactionClient
 export type Entry = Pick<AuditEntry, 'kind' | 'expenseId' | 'memberId' | 'version' | 'revertOf' | 'byId' | 'byName' | 'before' | 'after'>
@@ -23,6 +24,7 @@ export async function audit(tx: Tx, groupId: string, e: Entry) {
     byId: e.byId ?? null, byName: e.byName, at: new Date(entry.at), before: json(e.before), after: json(e.after), effect, prevHash: entry.prevHash, hash,
   } })
   await tx.group.update({ where: { id: groupId }, data: { auditSeq: entry.seq, auditHash: hash } })
+  await queuePush(tx, groupId, { ...e, effect }) // same transaction: a push exists exactly when its change does
 }
 
 /** The fields of an object that differ, as { before, after } holding just those. */

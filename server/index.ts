@@ -7,6 +7,7 @@ import { ORIGINS, auth } from './auth.ts'
 import { api, publicApi } from './api.ts'
 import { BUCKET, getFile } from './storage.ts'
 import { aiReady } from './ai.ts'
+import { pushConfig, startPush } from './push.ts'
 
 const app = new Hono()
 
@@ -28,6 +29,7 @@ app.get('/api/config', c => c.json({
   googleWebClientId: process.env.GOOGLE_CLIENT_ID ?? null,
   googleIosClientId: process.env.GOOGLE_IOS_CLIENT_ID ?? null,
   ai: aiReady(),
+  push: pushConfig(), // which push channels this server can send on; web carries the VAPID public key
 }))
 // Public: profile pictures (random names; shown to anyone in a shared group, and <img> can't send a bearer token).
 app.get('/api/files/avatars/:uid/:name', async c => {
@@ -43,3 +45,4 @@ app.get('/health', c => c.text('ok'))
 
 const port = Number(process.env.PORT) || 8787
 serve({ fetch: app.fetch, port }, () => console.log(`Plico API on http://localhost:${port}`))
+startPush()
