@@ -30,7 +30,11 @@ model User {
   guardianConsentAt DateTime?
   aiConsentAt       DateTime? /// agreed to send photos/sentences to the AI reader; null = not asked or withdrawn
   activitySeenAt    DateTime? /// newest Activity entry this person has seen, on any device (the unread badge)
+  notify            Json? /// push preferences: { payments, activity, reminders, nudge, quiet, amounts }; missing keys mean on
+  tz                String? /// IANA time zone for quiet hours and the weekly nudge, from the person's device
   sessions      Session[]
+  pushDevices   PushDevice[]
+  notifications Notification[]
   accounts      Account[]
   members       Member[]
   groupsCreated Group[]
@@ -50,6 +54,7 @@ model Session {
   userAgent String?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pushDevices PushDevice[]
 
   @@unique([token])
   @@index([userId])
@@ -208,5 +213,48 @@ model ExpenseShare {
   @@id([expenseId, memberId])
   @@index([memberId])
   @@map("expense_share")
+  @@schema("splittr")
+}
+
+/// Where to push: a browser's Web Push subscription, or an iPhone (APNs) / Android (FCM) device token.
+/// Tied to the sign-in it was registered under, so signing out anywhere stops pushes to that device.
+model PushDevice {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId  String
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  platform   String /// web | ios | android
+  token      String /// web: the subscription endpoint; native: the device token
+  keys       Json? /// web: { p256dh, auth }
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@unique([token])
+  @@index([userId])
+  @@index([sessionId])
+  @@map("push_device")
+  @@schema("splittr")
+}
+
+/// The push outbox: written in the same transaction as the change it reports, sent by the worker.
+/// One row per person per event; the worker merges a person's rows per group into one push.
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String /// payment.claimed|confirmed|rejected|recorded, expense.created|changed, member.joined, remind, nudge
+  groupId   String?
+  byId      String? /// who caused it (reminders: who sent it)
+  data      Json /// what the text needs: { by, title, amount, share, delta, … }
+  dueAt     DateTime  @default(now())
+  sentAt    DateTime? /// sent, or settled without sending (see skipped)
+  skipped   String? /// why it wasn't pushed: off | cap | merged | nodevice
+  createdAt DateTime  @default(now())
+
+  @@index([sentAt, dueAt])
+  @@index([userId, createdAt])
+  @@index([groupId, kind, createdAt])
+  @@map("notification")
   @@schema("splittr")
 }
