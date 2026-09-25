@@ -183,7 +183,7 @@ Sources: [Hippo Split comparison](https://hipposplit.com/blog/splitwise-vs-trico
 | Ceiling | Upgrade path |
 |---|---|
 | Polling every 30 s (deltas only) | Server push (SSE) when groups get busy |
-| AI rate limit is in-memory per server process (40/hour/user) | Move it to Postgres or Redis when the server runs more than one instance (Vercel does) |
+| AI and chat rate limits are in-memory per server process (40 scans/hour; 30 chats/hour, 150/day) | Move it to Postgres or Redis when the server runs more than one instance (Vercel does) |
 | No per-user write rate limits on uploads, members or expenses | Add alongside the AI limiter |
 | Native auth token in app preferences, not Keychain/Keystore | Secure-storage plugin |
 | Supabase Storage reached through our API (extra hop for photos) | CDN in front of the public avatars bucket |
