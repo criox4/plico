@@ -60,7 +60,7 @@ export default function App() {
   if (r[0] === 'delete' && r[1]) return <DeleteConfirm s={s} token={r[1]} />
   if (r[0] === 'join' && r[1]) return <JoinGroup s={s} code={r[1]} />
   if (r[0] === 'me') {
-    const Page = { profile: ProfilePage, theme: AppearancePage, tone: NotificationsPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage, privacy: PrivacyPage }[r[1] ?? '']
+    const Page = { profile: ProfilePage, theme: AppearancePage, tone: NotificationsPage, notify: NotificationsPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage, privacy: PrivacyPage }[r[1] ?? '']
     return Page ? <Page key={r[1]} s={s} /> : <AccountHub s={s} />
   }
   if (r[0] === 'import') return <ImportSplitwise s={s} />
