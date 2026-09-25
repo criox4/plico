@@ -38,6 +38,7 @@
 <h3>Collected automatically</h3>
 <ul>
 <li><strong>Sign-in sessions:</strong> IP address, device and browser type (user agent), and when each session started and expires. We use these to keep your account secure and to show you the Devices page.</li>
+<li><strong>Notifications:</strong> if you turn on notifications, a push token or browser subscription for that device, tied to that sign-in, and your time zone (for quiet hours and the weekly reminder). Your notification choices are kept with your account. We keep a record of each notification for 30 days, to bundle them and hold to the daily limit.</li>
 <li><strong>Technical logs:</strong> our hosting keeps short-lived request logs (such as IP address, time and error details) to run and protect the service.</li>
 </ul>
 <p>We do not use analytics or advertising SDKs, cookies for tracking, fingerprinting, location, contacts, SMS, microphone or bank data. The camera and photo library are used only when you choose to attach or scan a photo.</p>
@@ -48,6 +49,7 @@
 <tr><td>Running your account, groups, balances and settlements, and syncing them across your devices</td><td>Account, groups, expenses, people you add, photos</td><td>Your consent when you sign up (DPDP s.6); performance of our contract with you (GDPR art. 6(1)(b))</td></tr>
 <tr><td>Inviting people you add, and emails you ask for (verification, password reset, “you were added”, “marked as paid”)</td><td>Names, emails, group names, amounts</td><td>Consent; contract; legitimate use for the specified purpose (DPDP s.7(a))</td></tr>
 <tr><td>Reading receipts, screenshots and typed expenses with AI</td><td>The photo or sentence, and the first names in that group</td><td>Your separate, explicit consent, which you can withdraw in Privacy and data</td></tr>
+<tr><td>Notifications about your groups (payments, new expenses, reminders from friends, a weekly reminder of what you owe)</td><td>Push token, time zone, names, group names, expense titles and amounts</td><td>Your consent when you turn notifications on; you can switch each kind, or all of them, off at any time</td></tr>
 <tr><td>Security, abuse prevention, rate limiting</td><td>Sessions, IP address, logs</td><td>Legitimate uses (DPDP s.7); legitimate interests (GDPR art. 6(1)(f))</td></tr>
 <tr><td>Children’s accounts</td><td>As above, plus the parent’s details</td><td>Verifiable consent of a parent or lawful guardian (DPDP s.9)</td></tr>
 <tr><td>Meeting legal obligations and answering lawful requests</td><td>What the request requires</td><td>Legal obligation</td></tr>
@@ -62,6 +64,7 @@
   <li>Supabase: database and file storage (Mumbai, India region).</li>
   <li>Vercel: hosting of the website and API (global infrastructure; requests may be processed outside India).</li>
   <li>Resend (United States) and Zoho ZeptoMail (India): sending emails.</li>
+  <li>Apple (Apple Push Notification service), Google (Firebase Cloud Messaging) and your browser’s push service (for example Google, Mozilla, Apple or Microsoft): only if you turn on notifications, to deliver them to your device. They carry the notification’s text; you can hide amounts from it in Notifications.</li>
   <li>Google: only if you choose “Continue with Google”, to confirm who you are.</li>
   <li>Apple: only if you choose “Sign in with Apple” on iPhone, to confirm who you are.</li>
   <li>OpenRouter (United States) routing to OpenAI: only if you turn on AI reading. We ask OpenRouter to use only providers that do not store or train on your data.</li>
@@ -75,6 +78,7 @@
 <ul>
 <li>Your account and profile: until you delete your account.</li>
 <li>Expenses in shared groups: they stay for the other members after you leave or delete your account, with your name shown as a guest, because they are also the other members’ records. You can ask us to remove your name from them.</li>
+<li>Notification records: 30 days. A device’s push token: until you turn notifications off, sign out of that device, or the push service tells us it’s no longer valid.</li>
 <li>Sign-in sessions: until they expire (7 days after last use) or you sign out.</li>
 <li>Verification, reset and consent links: until used or expired (1 hour for sign-in links, 14 days for a parent’s consent link).</li>
 <li>If a parent declines consent, the child’s account is deleted immediately.</li>

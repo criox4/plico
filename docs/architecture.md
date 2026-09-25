@@ -171,7 +171,7 @@ Sources: [Hippo Split comparison](https://hipposplit.com/blog/splitwise-vs-trico
 | Where Splitwise is ahead | Our plan |
 |---|---|
 | ~~Edit history and activity feed, undelete~~ | Done in Sync v2, with per-version restore on top |
-| Push notifications | Server push after Sync v2 |
+| ~~Push notifications~~ | Done: web, iPhone, Android, batched and rate-limited (see PLAN.md, Push notifications) |
 | Multi-currency | Not planned yet: INR-first by product choice |
 | 14 years of scale and polish | — |
 | Native feel on both platforms | Capacitor is close but not native; the widgets and share extension are native |
