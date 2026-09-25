@@ -865,6 +865,58 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .check.pref span { display: grid; gap: 2px; }
 .check.pref small { font-weight: 500; line-height: 1.4; }
 
+/* ---------- Ask Plico ---------- */
+/* Phones: a round Plico just above the dock's right side; a bottom sheet. Wide screens: bottom-right, a side panel. */
+.chat-fab {
+  position: fixed; z-index: 8; right: 16px; bottom: calc(88px + env(safe-area-inset-bottom));
+  width: 52px; height: 52px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--surface); box-shadow: var(--elev-hi, var(--elev)), 0 0 0 1px var(--line);
+  transition: translate var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.chat-fab:hover { translate: 0 -2px; }
+.chat-scrim { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; background: color-mix(in srgb, #000 32%, transparent); }
+.chat {
+  width: 100%; height: min(86dvh, 760px); display: flex; flex-direction: column;
+  background: var(--bg); color: var(--ink); border-radius: var(--radius) var(--radius) 0 0; box-shadow: 0 -8px 40px rgb(0 0 0 / .18);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@media (prefers-reduced-motion: no-preference) { .chat { animation: rise calc(var(--dur) * 1.4) var(--ease) both; } }
+.chat-head { display: flex; align-items: center; gap: 10px; padding: 12px 8px 8px 16px; border-bottom: 1px solid var(--line); }
+.chat-head h2 { flex: 1; font: 650 1.0625rem/1.2 var(--ui); }
+.chat-log { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.chat-empty { display: grid; gap: 14px; margin: auto 0; }
+.chat-empty p { color: var(--muted); line-height: 1.5; }
+.chat-empty strong { display: block; color: var(--ink); font-size: 1.0625rem; }
+.chat-empty ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-empty .chip { text-align: left; }
+.bubble { max-width: 88%; display: grid; gap: 8px; padding: 10px 14px; border-radius: 18px; line-height: 1.5; overflow-wrap: anywhere; }
+.bubble p + p, .bubble ul { margin: 0; }
+.bubble ul { padding-left: 18px; display: grid; gap: 2px; }
+.bubble.user { align-self: flex-end; background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 6px; }
+.bubble.assistant { align-self: flex-start; background: var(--surface); box-shadow: var(--elev); border-bottom-left-radius: 6px; }
+.bubble.err { background: color-mix(in srgb, var(--neg) 8%, var(--surface)); }
+.chat-busy { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .875rem; font-weight: 600; }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .4; }
+@media (prefers-reduced-motion: no-preference) { .dots i { animation: blink 1s infinite both; } .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; } }
+@keyframes blink { 50% { opacity: 1; } }
+.action-card { display: grid; gap: 10px; padding: 12px; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--line); }
+.action-card > p:first-child { display: flex; gap: 10px; align-items: flex-start; font-weight: 600; line-height: 1.4; }
+.action-card > p:first-child .icon-svg { flex: none; margin-top: 2px; color: var(--link); }
+.action-card .btn-sm { justify-self: start; }
+.action-done { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--settled); font-weight: 650; }
+.action-done .link { min-height: 32px; }
+.chat-in { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px 4px; border-top: 1px solid var(--line); }
+.chat-in textarea { flex: 1; min-height: 48px; max-height: 140px; resize: none; padding: 12px 14px; font: 500 1rem/1.4 var(--ui); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 24px; field-sizing: content; }
+.chat-send { width: 48px; height: 48px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--on-accent); }
+.chat-send:disabled { opacity: .4; }
+.chat-fine { padding: 2px 16px 10px; color: var(--muted); font-size: .75rem; text-align: center; }
+@media (min-width: 900px) {
+  .chat-fab { right: 28px; bottom: 28px; width: 58px; height: 58px; }
+  .chat-scrim { align-items: stretch; justify-content: flex-end; background: color-mix(in srgb, #000 18%, transparent); }
+  .chat { width: 420px; height: auto; margin: 12px; border-radius: var(--radius); }
+}
+
 /* ---------- home: the dashboard ---------- */
 /* Phones: one column, ordered by urgency. Wide screens: money and groups on the left, a rail of people and activity on the right. */
 .dash, .dash-main, .dash-rail { display: flex; flex-direction: column; }

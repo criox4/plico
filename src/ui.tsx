@@ -9,6 +9,7 @@ import { friendBalance, friendsOf } from './people'
 import { API } from './auth-client'
 import { api, fileUrl, useSync } from './sync'
 import { enablePush, mayAsk, notNow, pushState, type PushState } from './push'
+import { ChatButton } from './chat'
 
 // ---------- routing ----------
 export function useRoute() {
@@ -191,6 +192,7 @@ export function Screen({ t, title, back, action, fab, children }: {
         </span>
       </header>
       <main className="main">{children}</main>
+      {shell && fab && sync.ai && s.user?.ai && <ChatButton />}
       {shell && fab && (
         <nav className="dock" aria-label="Main">
           <Tab to="/" icon="home" label="Home" on={!here[0]} />

@@ -144,6 +144,8 @@ function queueNow() {
 // Web: same-origin session cookie; native: bearer token. Send whichever exists.
 const headers = (): Record<string, string> => ({ 'Content-Type': 'application/json', ...(token.get() && { Authorization: `Bearer ${token.get()}` }) })
 const req = (path: string, init: RequestInit = {}) => fetch(API + path, { ...init, headers: headers(), credentials: 'include' })
+/** A signed-in request whose response you read yourself (e.g. a stream). */
+export const request = req
 
 /** Push queued changes now (e.g. right after a parent's consent unlocks the account). */
 export const syncNow = () => flush()
@@ -449,6 +451,7 @@ export async function signOut() {
   token.clear()
   outbox = []; issues = []
   saveOutbox(); saveIssues(); setCursor(null)
+  for (const k of Object.keys(localStorage)) if (k.startsWith('plico-chat:')) localStorage.removeItem(k) // Ask Plico history lives on the device only
   setRemote(d => { Object.assign(d, structuredClone(blank)) })
   snap = getState()
   setStatus({ authed: false, error: '' })
