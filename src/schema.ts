@@ -63,6 +63,12 @@ export const PushTokenIn = z.object({ token: z.string().check(z.minLength(8), z.
 const on = z.optional(z.boolean())
 export const NotifyIn = z.object({ payments: on, activity: on, reminders: on, nudge: on, quiet: on, amounts: on })
 export const RemindIn = z.object({ memberId: Id, amount: Paise.check(z.minimum(1)) })
+export const ChatIn = z.object({
+  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().check(z.maxLength(4000)) })).check(
+    z.minLength(1), z.maxLength(20),
+    z.refine(ms => ms.at(-1)!.role === 'user' && !!ms.at(-1)!.content.trim() && ms.at(-1)!.content.length <= 1000, 'Ask something, up to 1,000 characters.')),
+  today: Day,
+})
 export const Token = z.string().check(z.regex(/^[a-f0-9]{32}$/))
 export const InviteCode = z.string().check(z.maxLength(40))
 
@@ -128,6 +134,23 @@ export const NotifyOut = z.object({
 })
 export const RemindOut = z.object({ ok: z.literal(true) })
 export const RemindLimitOut = z.object({ error: z.string(), code: z.enum(['limit', 'not-on-plico', 'no-device', 'square', 'tracking']), retryAt: z.nullish(When) })
+
+/** Ask Plico: what the app can be asked to do. Ids are server member ids. */
+export const ChatCard = z.union([
+  z.object({ type: z.literal('expense'), groupId: Id, group: z.string(), title: z.string(), cat: z.string(), date: Day, amount: Paise, paid: Money, owed: Money, summary: z.string() }),
+  z.object({ type: z.literal('settle'), groupId: Id, group: z.string(), from: Id, to: Id, amount: Paise, summary: z.string() }),
+  z.object({ type: z.literal('remind'), groupId: Id, group: z.string(), memberId: Id, name: z.string(), amount: Paise, summary: z.string() }),
+])
+export const ChatEvent = z.union([
+  z.object({ type: z.literal('text'), d: z.string() }),
+  z.object({ type: z.literal('tool'), name: z.string() }),
+  z.object({ type: z.literal('card'), card: ChatCard }),
+  z.object({ type: z.literal('declined'), reason: z.enum(['off_topic', 'abuse']) }),
+  z.object({ type: z.literal('done') }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+])
+export type ChatCard = z.infer<typeof ChatCard>
+export type ChatEvent = z.infer<typeof ChatEvent>
 
 export type GroupInput = z.input<typeof GroupIn>
 export type MemberInput = z.input<typeof MemberIn>

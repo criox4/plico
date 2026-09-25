@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
+import { streamSSE } from 'hono/streaming'
 import { bodyLimit } from 'hono/body-limit'
 import * as z from 'zod/mini'
-import { AgeIn, AiConsentIn, ExpenseIn, FileName, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, NotifyIn, ParentConsentIn, PushDeviceIn, PushTokenIn, ReadIn, RemindIn, SeenIn, Token } from '../src/schema.ts'
+import { AgeIn, AiConsentIn, ChatIn, ExpenseIn, FileName, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, NotifyIn, ParentConsentIn, PushDeviceIn, PushTokenIn, ReadIn, RemindIn, SeenIn, Token } from '../src/schema.ts'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
 import { mail } from './email.ts'
@@ -10,6 +11,7 @@ import { BUCKET, deleteFile, getFile, imageType, putFile, storageReady } from '.
 import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
 import { prefsOf } from './push-text.ts'
+import { chat } from './chat.ts'
 import { createHash } from 'node:crypto'
 import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
@@ -760,5 +762,27 @@ api.post('/groups/:gid/remind', async c => {
     if (retryAt) return c.json({ error: `${them.name} was reminded recently. You can nudge again ${retryAt.toLocaleString('en-IN', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })}.`, code: 'limit', retryAt }, 429)
     await tx.notification.create({ data: { userId: them.userId!, kind: 'remind', groupId: gid, byId: uid, data: { by: c.get('userName'), amount: Math.min(amount, -(net.get(them.id) ?? 0)) } } })
     return c.json({ ok: true as const })
+  })
+})
+
+// ---------- Ask Plico ----------
+const chats = new Map<string, number[]>() // ponytail: per-process limiter, like AI reading; move to the DB with several instances
+api.post('/chat', async c => {
+  if (!aiReady()) return c.json({ error: 'Chat isn’t set up yet' }, 503)
+  const uid = c.get('userId')
+  const me = await db.user.findUnique({ where: { id: uid }, select: { aiOffAt: true } })
+  if (!me || me.aiOffAt) return c.json({ error: 'AI features are off. Turn them on in Privacy and data.', code: 'ai-consent' }, 403)
+  const b = ChatIn.parse(await c.req.json())
+  const now = Date.now(), recent = (chats.get(uid) ?? []).filter(t => now - t < 864e5)
+  if (recent.filter(t => now - t < 3600_000).length >= 30 || recent.length >= 150)
+    return c.json({ error: 'That’s a lot of questions for now. Try again a little later.', code: 'limit' }, 429)
+  chats.set(uid, [...recent, now])
+  return streamSSE(c, async s => {
+    try {
+      for await (const ev of chat(uid, b.messages, b.today)) await s.writeSSE({ data: JSON.stringify(ev) })
+    } catch (e) {
+      console.error('[chat]', (e as Error).message)
+      await s.writeSSE({ data: JSON.stringify({ type: 'error', message: 'I couldn’t answer that right now. Try again in a moment.' }) })
+    }
   })
 })
