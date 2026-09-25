@@ -28,7 +28,8 @@ model User {
   guardianEmail     String? /// a teen's parent or guardian, who must consent (DPDP Act s.9)
   guardianName      String?
   guardianConsentAt DateTime?
-  aiConsentAt       DateTime? /// agreed to send photos/sentences to the AI reader; null = not asked or withdrawn
+  aiConsentAt       DateTime? /// legacy: when AI reading was opt-in, when they opted in. Unused since AI reading became on by default.
+  aiOffAt           DateTime? /// AI reading switched off (it's on by default); null = on
   activitySeenAt    DateTime? /// newest Activity entry this person has seen, on any device (the unread badge)
   notify            Json? /// push preferences: { payments, activity, reminders, nudge, quiet, amounts }; missing keys mean on
   tz                String? /// IANA time zone for quiet hours and the weekly nudge, from the person's device

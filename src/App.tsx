@@ -185,7 +185,6 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   const [capErr, setCapErr] = useState('')
   const [items, setItems] = useState<Item[] | null>(null)
   const [extras, setExtras] = useState(0)
-  const [askAi, setAskAi] = useState<Blob | null>(null) // a photo waiting for the one-time AI consent
 
   useEffect(() => { if (eid && !old) location.replace('#/g/' + g.id) }, [eid, old, g.id])
   useEffect(() => {
@@ -237,13 +236,13 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   const typeIt = async (text = quick) => {
     if (!text.trim()) return
     applyQuick(parseQuick(text, g.members)) // instant and offline; AI refines when it can
-    if (!sync.ai || !s.user?.ai || !navigator.onLine) return // AI only with consent (Privacy and data)
+    if (!sync.ai || !s.user?.ai || !navigator.onLine) return // unless AI reading is switched off (Privacy and data)
     setReading(true); setCapErr('')
     try { fromRead(await readExpense({ text, groupId: g.id })) } catch { /* the rule-based read already filled what it could */ } finally { setReading(false) }
   }
   const scan = (f: Blob) => {
     if (!sync.ai) return setCapErr('Reading photos isn’t set up yet. Type it in instead.')
-    if (!s.user?.ai) return setAskAi(f)
+    if (!s.user?.ai) return setCapErr('AI reading is off. Turn it on in You › Privacy and data, or type it in.')
     void readPhoto(f)
   }
   const readPhoto = async (f: Blob) => {
@@ -317,19 +316,7 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
             </label>
           </div>
         )}
-        {askAi && (
-          <section className="confirm-card" aria-label="Read it with AI?">
-            <p><strong>Read it with AI?</strong>
-              <small>Plico sends this photo and the first names in {g.name} to OpenRouter, which runs an OpenAI model to read the amount and items. Only providers that don’t store or train on it are used. You can turn this off in Privacy and data.</small></p>
-            <span className="debt-actions">
-              <button type="button" className="btn-sm" onClick={async () => {
-                const f = askAi; setAskAi(null)
-                try { await api('/api/me/ai', { method: 'POST', body: JSON.stringify({ consent: true }) }); await refreshUser(); void readPhoto(f!) } catch (e) { setCapErr((e as Error).message) }
-              }}>Allow and read</button>
-              <button type="button" className="btn-sm ghost" onClick={() => setAskAi(null)}>Not now</button>
-            </span>
-          </section>
-        )}
+        {!old && sync.ai && s.user?.ai && <p className="legal-line">Photos and typed text are read by AI (OpenAI, via OpenRouter; not stored or trained on). <a href="#/me/privacy">Turn off</a></p>}
         {reading && <p className="reading" role="status"><Plico mood="thinking" size={28} />Reading it…</p>}
         {capErr && <p className="error" role="alert">{capErr}</p>}
         {items && (

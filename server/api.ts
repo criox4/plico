@@ -136,7 +136,7 @@ api.post('/me/guardian', async c => {
 
 api.post('/me/ai', async c => {
   const { consent } = AiConsentIn.parse(await c.req.json())
-  await db.user.update({ where: { id: c.get('userId') }, data: { aiConsentAt: consent ? new Date() : null } })
+  await db.user.update({ where: { id: c.get('userId') }, data: { aiOffAt: consent ? null : new Date() } })
   return c.json({ ok: true })
 })
 
@@ -599,8 +599,8 @@ api.get('/groups/:gid/files/:name', async c => {
 const reads = new Map<string, number[]>() // ponytail: per-process limiter; move to the DB if we run several instances
 api.post('/ai/read', bodyLimit({ maxSize: 7 << 20, onError: c => c.json({ error: 'That photo is too large' }, 413) }), async c => {
   if (!aiReady()) return c.json({ error: 'Reading receipts isn’t set up yet' }, 503)
-  const me = await db.user.findUnique({ where: { id: c.get('userId') }, select: { aiConsentAt: true } })
-  if (!me?.aiConsentAt) return c.json({ error: 'Turn on AI reading first', code: 'ai-consent' }, 403)
+  const me = await db.user.findUnique({ where: { id: c.get('userId') }, select: { aiOffAt: true } })
+  if (!me || me.aiOffAt) return c.json({ error: 'AI reading is off. Turn it on in Privacy and data.', code: 'ai-consent' }, 403)
   const b = ReadIn.parse(await c.req.json())
   const uid = c.get('userId'), now = Date.now()
   const recent = (reads.get(uid) ?? []).filter(t => now - t < 3600_000)

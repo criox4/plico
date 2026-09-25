@@ -397,9 +397,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ---------- auth lifecycle ----------
 type AuthUser = { id: string; email: string; name: string; phone?: string | null; emailVerified?: boolean; image?: string | null; upi?: string | null; theme?: string | null; tone?: string | null
-  ageGroup?: string | null; guardianEmail?: string | null; guardianConsentAt?: string | Date | null; aiConsentAt?: string | Date | null }
+  ageGroup?: string | null; guardianEmail?: string | null; guardianConsentAt?: string | Date | null; aiOffAt?: string | Date | null }
 /** The account facts the app gates on (age, parental consent, AI consent). */
-const gates = (u: AuthUser) => ({ ageGroup: u.ageGroup ?? null, guardianEmail: u.guardianEmail ?? null, guardianConsent: !!u.guardianConsentAt, ai: !!u.aiConsentAt })
+const gates = (u: AuthUser) => ({ ageGroup: u.ageGroup ?? null, guardianEmail: u.guardianEmail ?? null, guardianConsent: !!u.guardianConsentAt, ai: !u.aiOffAt }) // AI reading is on unless switched off
 
 /** After sign-in/up: adopt the account's profile, upload anything made on this device before, then sync. */
 export async function signedIn(u: AuthUser) {

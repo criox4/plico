@@ -632,7 +632,7 @@ export function PrivacyPage({ s }: { s: State }) {
     <Page s={s} title="Privacy and data">
       <h2 className="form-h">AI reading</h2>
       <label className="check"><input type="checkbox" checked={!!s.user?.ai} disabled={busy} onChange={e => void setAi(e.target.checked)} />Read receipts, screenshots and typed expenses with AI</label>
-      <p className="muted-p">When on, the photo or sentence and the first names in that group go to OpenRouter, which runs an OpenAI model to read it. Only providers that don’t store or train on it are used. When off, typing still works on your phone and nothing is sent.</p>
+      <p className="muted-p">On by default. When on, the photo or sentence and the first names in that group go to OpenRouter, which runs an OpenAI model to read it. Only providers that don’t store or train on it are used. When off, typing still works on your phone and nothing is sent.</p>
       <h2 className="form-h">Your data</h2>
       <button className="btn secondary" disabled={busy} onClick={() => void download()}>Download my data</button>
       <p className="muted-p">A JSON file with your account, groups, expenses and sign-in history. To delete everything, use Delete account.</p>

@@ -58,7 +58,7 @@ export const auth = betterAuth({
       ageGroup: { type: 'string', required: false, input: false },
       guardianEmail: { type: 'string', required: false, input: false },
       guardianConsentAt: { type: 'date', required: false, input: false },
-      aiConsentAt: { type: 'date', required: false, input: false },
+      aiOffAt: { type: 'date', required: false, input: false },
     },
     changeEmail: {
       enabled: true,
