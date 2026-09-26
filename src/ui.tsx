@@ -466,8 +466,15 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
   const rows = all.filter(r => r.g.kind !== 'direct') // friends' balances count in the total, but aren't groups
   const live = all.filter(r => !r.g.track)
   const total = live.reduce((a, r) => a + r.net, 0)
-  const collect = live.reduce((a, r) => a + Math.max(r.net, 0), 0)
-  const pay = live.reduce((a, r) => a + Math.max(-r.net, 0), 0)
+  // Net per person across groups, like Needs you and People: owing Bala in one group and being owed more in another is
+  // nothing to pay. Collect is derived so the tiles always add up to the total.
+  const each = new Map<string, number>()
+  for (const { g } of live) for (const m of g.members) if (m.id !== ME) {
+    const k = m.email?.toLowerCase() ?? `${g.id}:${m.id}`
+    each.set(k, (each.get(k) ?? 0) + pairwise(g, ME, m.id))
+  }
+  const pay = [...each.values()].reduce((a, n) => a + Math.max(-n, 0), 0)
+  const collect = total + pay
   const open = rows.filter(r => r.net && !r.g.track).length
   const people = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
     .map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name)).slice(0, 6)
@@ -566,8 +573,13 @@ const monthOf = (back: number) => {
   const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - back)
   return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, name: d.toLocaleString('en-IN', { month: 'long' }) }
 }
-const byCat = (es: Expense[], val: (e: Expense) => number) =>
-  Object.entries(es.reduce<Record<string, number>>((m, e) => ((m[e.cat] = (m[e.cat] ?? 0) + val(e)), m), {})).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 5)
+/** Top four categories, the rest folded into Other, so the bar adds up to the total above it. */
+const byCat = (es: Expense[], val: (e: Expense) => number) => {
+  const all = Object.entries(es.reduce<Record<string, number>>((m, e) => ((m[e.cat] = (m[e.cat] ?? 0) + val(e)), m), {})).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
+  if (all.length <= 5) return all
+  const top = all.slice(0, 4).filter(([c]) => c !== 'other')
+  return [...top, ['other', all.filter(x => !top.includes(x)).reduce((a, [, v]) => a + v, 0)] as [string, number]]
+}
 
 /** Your share of spending this month, by category, against last month. */
 function ThisMonth({ groups }: { groups: Group[] }) {
