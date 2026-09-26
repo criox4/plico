@@ -112,8 +112,36 @@ export function pairwise(g: Group, a: Id, b: Id): number {
 /** A settlement waits for the payee unless the payee recorded it or can't confirm (a guest without an account). */
 export const needsConfirm = (g: Group, to: Id) => to !== ME && !!g.members.find(m => m.id === to)?.joined
 
-/** Greedy largest-debtor → largest-creditor: at most n-1 payments. */
+/** The fewest payments that settle everyone. The minimum is (people with a balance) − (the most groups they can be
+ * split into that each sum to zero), and each such group settles in (its size − 1) payments. Finding that split is
+ * NP-hard (subset sum), so it's solved exactly by dynamic programming over subsets up to EXACT people with a
+ * balance (any real group), and by the greedy method beyond that. Anyone may pay anyone within a group. */
+export const EXACT = 16
 export function simplify(bal: Record<Id, number>): Transfer[] {
+  const ids = Object.keys(bal).filter(k => bal[k]).sort()
+  if (ids.length > EXACT || ids.length < 4) return greedy(bal)
+  const n = ids.length, N = 1 << n
+  const sum = new Float64Array(N), best = new Uint8Array(N), via = new Uint8Array(N)
+  for (let m = 1; m < N; m++) {
+    const low = 31 - Math.clz32(m & -m)
+    sum[m] = sum[m & (m - 1)] + bal[ids[low]]
+    let b = -1
+    for (let i = 0; i < n; i++) if (m >> i & 1 && best[m ^ (1 << i)] > b) { b = best[m ^ (1 << i)]; via[m] = i }
+    best[m] = b + (sum[m] === 0 ? 1 : 0)
+  }
+  // Walk the best removal order back: each time the remaining people sum to zero, what was removed since is one group.
+  const out: Transfer[] = []
+  let m = N - 1, group: Id[] = []
+  while (m) {
+    const i = via[m]
+    group.push(ids[i]); m ^= 1 << i
+    if (sum[m] === 0) { out.push(...greedy(Object.fromEntries(group.map(k => [k, bal[k]])))); group = [] }
+  }
+  return out
+}
+
+/** Greedy largest-debtor → largest-creditor: at most n-1 payments. */
+export function greedy(bal: Record<Id, number>): Transfer[] {
   const cr = Object.entries(bal).filter(([, v]) => v > 0).map(([k, v]) => ({ k, v }))
   const dr = Object.entries(bal).filter(([, v]) => v < 0).map(([k, v]) => ({ k, v: -v }))
   const out: Transfer[] = []

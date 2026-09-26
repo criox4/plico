@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
-import { ME, balances, simplify, today, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
+import { ME, balances, pairwise, simplify, today, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import { update, useStore, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
@@ -530,7 +530,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
         </div>
 
         <aside className="dash-rail" aria-label="People and activity">
-          {(!fresh || s.groups.length > 0) && <DashNeeds groups={s.groups} />}
+          {(!fresh || s.groups.length > 0) && <DashNeeds s={s} />}
           {people.length > 0 && <section className="d-people" aria-labelledby="d-people">
             <SectionHead title="People" id="d-people" action={<button className="link" onClick={() => go('/friends')}>All friends</button>} />
             <ol className="d-list">
@@ -588,21 +588,31 @@ function ThisMonth({ groups }: { groups: Group[] }) {
 }
 
 /** Money waiting on you: payments to confirm, payments that bounced, and what you owe. */
-function DashNeeds({ groups }: { groups: Group[] }) {
+/** Money waiting on you: payments to confirm, payments that bounced, and who you owe, net across every group you share
+ *  (if Bala owes you more elsewhere, you don't owe Bala). Tracking-only groups never ask for money. */
+function DashNeeds({ s }: { s: State }) {
+  const groups = s.groups
   const cards = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup />),
     ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup />)])
-  const owe = groups.filter(g => !g.track).flatMap(g => simplify(balances(g)).filter(d => d.from === ME && !g.expenses.some(e => e.pending && ends(e).from === ME && ends(e).to === d.to)).map(d => ({ g, d })))
-    .sort((x, y) => y.d.amount - x.d.amount)
+  const owe = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
+    .map(f => {
+      const live = f.spots.filter(x => !x.g.track)
+      const n = live.reduce((a, x) => a + pairwise(x.g, ME, x.id), 0)
+      const waiting = live.some(x => x.g.expenses.some(e => e.pending && ends(e).from === ME && ends(e).to === x.id))
+      const where = live.filter(x => pairwise(x.g, ME, x.id) !== 0)
+      return { f, n, waiting, where }
+    })
+    .filter(x => x.n < 0 && !x.waiting).sort((a, b) => a.n - b.n)
   return (
     <section className="d-needs" aria-labelledby="d-needs">
       <SectionHead title="Needs you" id="d-needs" />
       {cards.length || owe.length ? <ol className="debts">
         {cards}
-        {owe.map(({ g, d }) => (
-          <li className="debt" key={g.id + d.to}>
-            <span className="grow"><strong>You owe {who(g, d.to)}</strong><small>{g.kind === 'direct' ? 'Outside groups' : groupTitle(g)}</small></span>
-            <span className="money neg">{inr(d.amount)}</span>
-            <span className="debt-actions"><button className="btn-sm" onClick={() => go(`/g/${g.id}/pay/${d.from}/${d.to}/${d.amount}`)}>Settle</button></span>
+        {owe.map(({ f, n, where }) => (
+          <li className="debt" key={f.email}>
+            <span className="grow"><strong>You owe {f.name}</strong><small>{where.length > 1 ? `Net across ${count(where.length, 'group', 'groups')}` : where[0]?.g.kind === 'direct' ? 'Outside groups' : where[0] ? groupTitle(where[0].g) : ''}</small></span>
+            <span className="money neg">{inr(-n)}</span>
+            <span className="debt-actions"><button className="btn-sm" onClick={() => go(`/f/${encodeURIComponent(f.email)}/settle`)}>Settle</button></span>
           </li>
         ))}
       </ol> : <p className="d-clear"><Icon n="check" size={18} />Nothing needs you right now.</p>}
@@ -635,6 +645,7 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
   const paid = spent.reduce((a, e) => a + (e.paid[ME] ?? 0), 0)
   const debts = simplify(bal)
   const toMe = debts.filter(d => d.to === ME)
+  const friends = friendsOf(s)
   const burst = useJustSettled(g.id, debts.length)
   const cover = useGroupImage(g.id, g.cover)
   const waiting = (d: Transfer) => g.expenses.find(e => e.pending && ends(e).from === d.from && ends(e).to === d.to)
@@ -669,6 +680,12 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
                   {d.to === ME && <RemindButton s={s} g={g} d={d} />}
                 </span>
               )}
+              {!g.track && d.from === ME && (() => {
+                // They owe you more elsewhere: settle the net once instead of paying here.
+                const f = friends.find(x => x.email === g.members.find(m => m.id === d.to)?.email?.toLowerCase())
+                const n = f ? friendBalance(f) : 0
+                return f && n >= 0 && <small className="debt-wait">{f.name} {n > 0 ? `owes you ${inr(n)} overall` : 'and you are square overall'}, counting your other groups. <button className="link" onClick={() => go(`/f/${encodeURIComponent(f.email)}${n > 0 ? '/settle' : ''}`)}>{n > 0 ? 'Settle the net' : 'See why'}</button></small>
+              })()}
             </li>
           ))}
         </ol>

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -159,3 +159,29 @@ assert.deepEqual(friendParts(900, { [ME]: 900 }, { [ME]: 300, 'b@x.in': 300, 'r@
 assert.match((friendParts(900, { 'b@x.in': 900 }, { [ME]: 300, 'b@x.in': 300, 'r@x.in': 300 }) as { error: string }).error, /make it a group/)
 assert.match((friendParts(900, { [ME]: 900 }, { [ME]: 900 }) as { error: string }).error, /Pick who/)
 console.log('friends outside groups ok')
+
+// fewest payments: exact for real groups; never more payments than greedy, always settles everyone
+{
+  const settle = (bal: Record<string, number>, t: { from: string; to: string; amount: number }[]) => {
+    const b = { ...bal }; for (const x of t) { b[x.from] += x.amount; b[x.to] -= x.amount }
+    return Object.values(b).every(v => v === 0) && t.every(x => x.amount > 0)
+  }
+  // Splitwise's article example: 9 debts, 3 payments.
+  const art = { gabe: -4000, bob: 0, david: -1000, fred: -6000, charlie: 5000, ema: 6000 }
+  assert.equal(simplify(art).length, 3); assert.ok(settle(art, simplify(art)))
+  // Greedy's blind spot: pairing the largest amounts first takes 5 payments; spotting that c (+3) and a (−3) cancel takes 4.
+  const tricky = { a: -300, b: 200, c: 300, d: 400, e: 200, f: -800 }
+  assert.equal(greedy(tricky).length, 5); assert.equal(simplify(tricky).length, 4); assert.ok(settle(tricky, simplify(tricky)))
+  let seed = 7; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
+  for (let t = 0; t < 400; t++) {
+    const bal: Record<string, number> = {}; let tot = 0
+    const size = 3 + Math.floor(rnd() * 9)
+    for (let i = 0; i < size - 1; i++) { const v = Math.round((rnd() * 20 - 10)) * 100; bal['p' + i] = v; tot += v }
+    bal['p' + (size - 1)] = -tot
+    const out = simplify(bal)
+    assert.ok(settle(bal, out), 'settles everyone')
+    const nz = Object.values(bal).filter(v => v).length
+    assert.ok(out.length <= Math.max(nz - 1, 0), 'never more than n-1')
+  }
+}
+console.log('simplify ok')

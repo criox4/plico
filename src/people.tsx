@@ -224,10 +224,18 @@ export function FriendSettle({ s, email }: { s: State; email: string }) {
   const record = (paise: number) => {
     let left = paise
     update(d => {
-      const spots = f.spots.map(x => ({ g: d.groups.find(y => y.id === x.g.id)!, id: x.id })).filter(x => x.g)
-        .map(x => ({ ...x, n: pairwise(x.g, ME, x.id) })).filter(x => (iPay ? x.n < 0 : x.n > 0)).sort((a, b) => Math.abs(b.n) - Math.abs(a.n))
+      const all = f.spots.map(x => ({ g: d.groups.find(y => y.id === x.g.id)!, id: x.id })).filter(x => x.g).map(x => ({ ...x, n: pairwise(x.g, ME, x.id) }))
+      const spots = all.filter(x => (iPay ? x.n < 0 : x.n > 0)).sort((a, b) => Math.abs(b.n) - Math.abs(a.n))
       const pay = (g: Group, id: Id, amt: number) => g.expenses.push({ id: uid(), title: 'Settlement', cat: 'check', date: today(), amount: amt,
         paid: { [iPay ? ME : id]: amt }, owed: { [iPay ? id : ME]: amt }, settle: true, ...(iPay && needsConfirm(g, id) && { pending: true }) })
+      // They're paying you the net: groups where you owe them are cleared against it, so every group ends square.
+      // Those offsets only reduce what you collect, and you're recording the payment yourself, so nothing waits on anyone.
+      // (When you pay the net, your payment waits for their confirmation, so no offsets are recorded ahead of it.)
+      if (!iPay && paise >= Math.abs(n)) for (const x of all.filter(x => x.n < 0)) {
+        const amt = Math.abs(x.n)
+        x.g.expenses.push({ id: uid(), title: 'Settlement (netted across groups)', cat: 'check', date: today(), amount: amt, paid: { [ME]: amt }, owed: { [x.id]: amt }, settle: true })
+        left += amt
+      }
       for (const x of spots) {
         if (left <= 0) break
         const amt = Math.min(left, Math.abs(x.n))
