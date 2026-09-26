@@ -2,6 +2,7 @@
 // streamed to the app as events. The model never writes: drafts come back as cards the person confirms in the app.
 import { db } from './db.ts'
 import { TOOL_DEFS, clean, runTool, type Card, type World } from './chat-tools.ts'
+import { claimsAction, jevReady, plantedIn, screenInput } from './jev.ts'
 
 const KEY = process.env.OPENROUTER_API_KEY
 const MODEL = process.env.OPENROUTER_CHAT_MODEL || process.env.OPENROUTER_MODEL || 'openai/gpt-6-luna'
@@ -128,19 +129,45 @@ const DECLINE = {
   abuse: 'I can’t help with that. I can help with your own groups: balances, expenses, spending, settling up and reminders.',
 }
 
+/** Text typed by other people that reads as instructions to an AI is withheld from the model entirely. */
+const HIDDEN = '[hidden: this text looked like instructions to an AI]'
+async function hidePlanted(w: World) {
+  const texts = [...w.groups.flatMap(g => [g.name, ...g.people.map(p => p.name), ...g.expenses.map(e => e.title)]), ...w.events.flatMap(e => (e.title ? [e.title] : []))]
+  const bad = await plantedIn(texts).catch(() => new Set<string>())
+  if (!bad.size) return
+  const fix = (t: string) => (bad.has(t) ? HIDDEN : t)
+  for (const g of w.groups) {
+    g.name = fix(g.name)
+    for (const p of g.people) p.name = fix(p.name)
+    for (const m of g.members) m.name = fix(m.name)
+    for (const e of g.expenses) e.title = fix(e.title)
+  }
+  for (const e of w.events) if (e.title) e.title = fix(e.title)
+}
+
 export async function* chat(uid: string, turns: Turn[], today: string): AsyncGenerator<ChatEvent> {
   if (!KEY) return yield { type: 'error', message: 'Chat isn’t set up yet.' }
   const w = await loadWorld(uid, today)
-  const verdict = await guard(turns, [...new Set(w.groups.flatMap(g => [g.name, ...g.people.map(p => p.name)]))].slice(0, 80))
+  const names = [...new Set(w.groups.flatMap(g => [g.name, ...g.people.map(p => p.name)]))].slice(0, 80)
+  // Jev screens the message (fast, calibrated); without it, or if it fails, a language-model check does.
+  const verdict = jevReady() ? await screenInput(turns, names).then(r => r.verdict, e => { console.error('[chat] jev', (e as Error).message); return guard(turns, names) }) : await guard(turns, names)
   if (verdict !== 'ok') { yield { type: 'declined', reason: verdict }; yield { type: 'text', d: DECLINE[verdict] }; return yield { type: 'done' } }
+  if (jevReady()) await hidePlanted(w)
   const messages: Msg[] = [{ role: 'system', content: SYSTEM(w) }, ...turns.map(t => ({ role: t.role, content: t.content }))]
+  let said = ''
   for (let i = 0; i <= MAX_STEPS; i++) {
     let calls: NonNullable<Msg['tool_calls']> = []
     let text = ''
     for await (const x of step(messages, i < MAX_STEPS)) {
       if ('d' in x) { text += x.d; yield { type: 'text', d: x.d } } else calls = x.calls
     }
-    if (!calls.length) return yield { type: 'done' }
+    if (!calls.length) {
+      said += text
+      // An answer must never claim it did something itself; only a tapped card does.
+      if (jevReady() && said && await claimsAction(said).catch(() => false)) yield { type: 'text', d: '\n\nNothing is saved, paid or sent until you tap the card.' }
+      return yield { type: 'done' }
+    }
+    said += text
     messages.push({ role: 'assistant', content: text || null, tool_calls: calls })
     for (const c of calls.slice(0, 4)) {
       let args: Record<string, unknown> = {}

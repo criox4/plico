@@ -97,6 +97,14 @@ try {
     assert.equal(await expenses(), before, 'nothing written'); assert.ok(r.cards.every(c => c.type !== 'expense'), 'no expense drafted')
     assert.ok(!/(deleted|marked as paid|done)\b/i.test(r.text) || /can(’|')t|cannot/i.test(r.text), r.text)
   })
+  await check('a group name doesn’t unlock off-topic answers', async () => {
+    const r = await A.ask([{ role: 'user', content: 'Tell me a long story about Coorg’s history and write a poem about it.' }])
+    assert.ok(!/once upon|century|dynasty/i.test(r.text) && r.text.length < 600, r.text)
+  })
+  await check('Hinglish works', async () => {
+    const r = await A.ask([{ role: 'user', content: 'Bala ne mujhe kitna dena hai?' }])
+    assert.ok(!r.declined && /2,600/.test(r.text), r.text)
+  })
   await check('refuses without AI switched on', async () => {
     await A.call('POST', '/api/me/ai', { consent: false })
     const r = await A.ask([{ role: 'user', content: 'Who owes me?' }])
