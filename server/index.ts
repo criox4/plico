@@ -13,7 +13,7 @@ const app = new Hono()
 
 app.use('*', secureHeaders({ crossOriginResourcePolicy: 'cross-origin' })) // cross-origin: native apps load avatars
 // Everything but photo uploads is small JSON; big bodies are refused before they're read.
-app.use('/api/*', async (c, next) => (/\/(files|avatar|ai\/read)$/.test(c.req.path) ? next() : bodyLimit({ maxSize: 256 << 10 })(c, next)))
+app.use('/api/*', async (c, next) => (/\/(files|avatar|ai\/read|chat)$/.test(c.req.path) ? next() : bodyLimit({ maxSize: 256 << 10 })(c, next)))
 app.use('/api/*', cors({
   origin: ORIGINS,
   allowHeaders: ['Content-Type', 'Authorization'],

@@ -767,7 +767,7 @@ api.post('/groups/:gid/remind', async c => {
 
 // ---------- Ask Plico ----------
 const chats = new Map<string, number[]>() // ponytail: per-process limiter, like AI reading; move to the DB with several instances
-api.post('/chat', async c => {
+api.post('/chat', bodyLimit({ maxSize: 8 << 20, onError: c => c.json({ error: 'That photo is too large' }, 413) }), async c => {
   if (!aiReady()) return c.json({ error: 'Chat isn’t set up yet' }, 503)
   const uid = c.get('userId')
   const me = await db.user.findUnique({ where: { id: uid }, select: { aiOffAt: true } })
@@ -779,7 +779,7 @@ api.post('/chat', async c => {
   chats.set(uid, [...recent, now])
   return streamSSE(c, async s => {
     try {
-      for await (const ev of chat(uid, b.messages, b.today)) await s.writeSSE({ data: JSON.stringify(ev) })
+      for await (const ev of chat(uid, b.messages, b.today, b.image)) await s.writeSSE({ data: JSON.stringify(ev) })
     } catch (e) {
       console.error('[chat]', (e as Error).message)
       await s.writeSSE({ data: JSON.stringify({ type: 'error', message: 'I couldn’t answer that right now. Try again in a moment.' }) })

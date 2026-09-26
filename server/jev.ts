@@ -77,3 +77,18 @@ const CLAIM = yes('`reply` is from an assistant that can only prepare drafts; th
 export async function claimsAction(reply: string) {
   return noul((await jev({ reply }, { claim: CLAIM })).claim) >= 0.7
 }
+
+// ---------- receipts: which of the person's rules each item falls under ----------
+/** One Choice per item over the rules plus "none". Sure means the model is confident and picked a rule. */
+export async function classifyItems(items: string[], rules: string[]) {
+  const criteria = { ...Object.fromEntries(rules.map((r, i) => [`r${i}`, r])), none: 'None of these clearly describes this item' }
+  const questions = Object.fromEntries(items.map((name, i) => [`i${i}`, {
+    type: 'choice' as const, instructions: { task: 'Which description fits this line item from a restaurant or shop bill? Judge the item itself (e.g. dishes with chicken, mutton, fish or egg are non-vegetarian; paneer, dal and vegetables are vegetarian).', item: name }, criteria,
+  }]))
+  const a = await jev({ items }, questions)
+  return items.map((_, i) => {
+    const x = a[`i${i}`]
+    if (x?.type !== 'choice' || x.choice === 'none') return { rule: null, sure: false }
+    return { rule: Number(x.choice.slice(1)), sure: x.confidence >= 0.6 }
+  })
+}

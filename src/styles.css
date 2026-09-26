@@ -906,7 +906,29 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .action-card .btn-sm { justify-self: start; }
 .action-done { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--settled); font-weight: 650; }
 .action-done .link { min-height: 32px; }
-.chat-in { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px 4px; border-top: 1px solid var(--line); }
+.xcard { display: grid; gap: 10px; padding: 14px; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--line); }
+.xcard-where { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8125rem; font-weight: 650; }
+.xcard-where small { font-weight: 500; }
+.xcard-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.xcard-title strong { font-size: 1.0625rem; font-weight: 650; overflow-wrap: anywhere; }
+.xcard-title .money { font: 600 1.25rem/1 var(--num); letter-spacing: -.01em; }
+.xcard-paid { color: var(--muted); font-size: .8125rem; line-height: 1.4; }
+.xitems { list-style: none; margin: 0; padding: 0; display: grid; }
+.xitems > li { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; padding: 10px 0; border-top: 1px solid color-mix(in srgb, var(--line) 75%, transparent); }
+.xitems > li.unsure { margin: 0 -8px; padding: 10px 8px; border-radius: var(--radius-sm); border-top-color: transparent; background: color-mix(in srgb, #F4A340 14%, var(--bg)); }
+.xitem-name { display: grid; gap: 2px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.xitem-name small { color: var(--ink); font-weight: 600; }
+.xitem-who { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.xitem-who .who-chip { min-height: 32px; font-size: .8125rem; }
+.xshares { list-style: none; margin: 0; padding: 10px 0 0; display: grid; gap: 4px; border-top: 1px solid var(--line); }
+.xshares li { display: flex; justify-content: space-between; gap: 12px; font-size: .9375rem; }
+.xcard .btn-sm { justify-self: start; }
+.bubble-photo { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; font-weight: 650; opacity: .85; }
+.chat-attached { position: absolute; left: 12px; bottom: calc(100% + 6px); display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--elev); }
+.chat-attached img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; }
+.chat-clip { width: 48px; height: 48px; flex: none; cursor: pointer; background: var(--surface2); }
+.chat-clip:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 2px; }
+.chat-in { position: relative; display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px 4px; border-top: 1px solid var(--line); }
 .chat-in textarea { flex: 1; min-height: 48px; max-height: 140px; resize: none; padding: 12px 14px; font: 500 1rem/1.4 var(--ui); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 24px; field-sizing: content; }
 .chat-send { width: 48px; height: 48px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--on-accent); }
 .chat-send:disabled { opacity: .4; }

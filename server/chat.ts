@@ -1,8 +1,11 @@
 // Ask Plico: the chat loop. A topic check, then the model with tools (chat-tools.ts), up to MAX_STEPS rounds,
 // streamed to the app as events. The model never writes: drafts come back as cards the person confirms in the app.
 import { db } from './db.ts'
+import { inr } from '../src/logic.ts'
 import { TOOL_DEFS, clean, runTool, type Card, type World } from './chat-tools.ts'
-import { claimsAction, jevReady, plantedIn, screenInput } from './jev.ts'
+import { claimsAction, classifyItems, jevReady, plantedIn, screenInput } from './jev.ts'
+import { readExpense } from './ai.ts'
+import { createHash } from 'node:crypto'
 
 const KEY = process.env.OPENROUTER_API_KEY
 const MODEL = process.env.OPENROUTER_CHAT_MODEL || process.env.OPENROUTER_MODEL || 'openai/gpt-6-luna'
@@ -16,6 +19,19 @@ export type ChatEvent =
   | { type: 'done' }
   | { type: 'error'; message: string }
 export type Turn = { role: 'user' | 'assistant'; content: string }
+
+/** Receipts read in chat, by image hash, so a follow-up ("give the fries to Karan") doesn't read the photo again. */
+const receipts = new Map<string, NonNullable<World['receipt']>>() // ponytail: per-process, last 50
+async function readReceipt(image: string, names: string[], today: string) {
+  const key = createHash('sha256').update(image).digest('hex')
+  const hit = receipts.get(key)
+  if (hit) return hit
+  const r = await readExpense({ image, members: names, today })
+  const p = (n: number | null) => Math.round((n ?? 0) * 100)
+  const out = { title: r.title, amount: r.amount === null ? null : p(r.amount), items: r.items.map(i => ({ name: i.name, amount: p(i.amount) })).filter(i => i.amount > 0), extras: p(r.extras) }
+  receipts.set(key, out); if (receipts.size > 50) receipts.delete(receipts.keys().next().value!)
+  return out
+}
 
 /** Everything the tools may see: this person's groups, their people, live expenses and recent activity. */
 export async function loadWorld(uid: string, today: string): Promise<World> {
@@ -145,15 +161,27 @@ async function hidePlanted(w: World) {
   for (const e of w.events) if (e.title) e.title = fix(e.title)
 }
 
-export async function* chat(uid: string, turns: Turn[], today: string): AsyncGenerator<ChatEvent> {
+export async function* chat(uid: string, turns: Turn[], today: string, image?: string): AsyncGenerator<ChatEvent> {
   if (!KEY) return yield { type: 'error', message: 'Chat isn’t set up yet.' }
   const w = await loadWorld(uid, today)
   const names = [...new Set(w.groups.flatMap(g => [g.name, ...g.people.map(p => p.name)]))].slice(0, 80)
   // Jev screens the message (fast, calibrated); without it, or if it fails, a language-model check does.
   const verdict = jevReady() ? await screenInput(turns, names).then(r => r.verdict, e => { console.error('[chat] jev', (e as Error).message); return guard(turns, names) }) : await guard(turns, names)
   if (verdict !== 'ok') { yield { type: 'declined', reason: verdict }; yield { type: 'text', d: DECLINE[verdict] }; return yield { type: 'done' } }
-  if (jevReady()) await hidePlanted(w)
+  if (jevReady()) { await hidePlanted(w); w.classify = classifyItems }
   const messages: Msg[] = [{ role: 'system', content: SYSTEM(w) }, ...turns.map(t => ({ role: t.role, content: t.content }))]
+  if (image) {
+    // The attached receipt, read like a tool result: data for the model, never instructions.
+    yield { type: 'tool', name: 'read_receipt' }
+    w.receipt = await readReceipt(image, names, today)
+    const r = w.receipt
+    messages.push({ role: 'assistant', content: null, tool_calls: [{ id: 'receipt', type: 'function', function: { name: 'read_receipt', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'receipt', content: JSON.stringify(r.items.length || r.amount ? {
+        title: clean(r.title), total: r.amount ? inr(r.amount) : null, taxes_tips_discounts: inr(r.extras),
+        items: r.items.map((it, i) => ({ item: i, name: clean(it.name, 60), amount: inr(it.amount) })),
+        next: 'To add it, call draft_expense (for a group or with friends). If the person said who had what, use item_rules / item_assignments; otherwise split the total.',
+      } : { error: 'Couldn’t read an amount or items from that photo.' }) })
+  }
   let said = ''
   for (let i = 0; i <= MAX_STEPS; i++) {
     let calls: NonNullable<Msg['tool_calls']> = []
@@ -173,7 +201,7 @@ export async function* chat(uid: string, turns: Turn[], today: string): AsyncGen
       let args: Record<string, unknown> = {}
       try { args = JSON.parse(c.function.arguments || '{}') } catch { /* empty args */ }
       yield { type: 'tool', name: c.function.name }
-      const out = runTool(w, c.function.name, args)
+      const out = await runTool(w, c.function.name, args)
       if (out.card) yield { type: 'card', card: out.card }
       messages.push({ role: 'tool', tool_call_id: c.id, content: JSON.stringify(out.result).slice(0, 12_000) })
     }

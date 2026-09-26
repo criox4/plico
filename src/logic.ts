@@ -333,6 +333,21 @@ export function itemSplit(items: Item[], extras: number): { owed: Record<Id, num
   return { owed: Object.fromEntries(Object.keys(sub).map(id => [id, sub[id] + (ex[id] ?? 0)])) }
 }
 
+// ---------- expenses with friends, outside any group ----------
+/** Each pair of friends has its own two-person ledger. An expense with one friend goes there whole. With several
+ * friends and no group, it can only be recorded when you paid: each friend's share goes on your ledger with them.
+ * (If a friend paid for you and a third person, that third person would owe them on a ledger you're not part of.)
+ * Keys: ME, or a friend's email. Returns one expense per friend ledger, keyed the same way. */
+export type PairPart = { email: string; amount: number; paid: Record<string, number>; owed: Record<string, number> }
+export function friendParts(amount: number, paid: Record<string, number>, owed: Record<string, number>): { parts: PairPart[] } | { error: string } {
+  const friends = [...new Set([...Object.keys(paid), ...Object.keys(owed)])].filter(k => k !== ME)
+  if (!friends.length) return { error: 'Pick who this is with.' }
+  if (friends.length === 1) return { parts: [{ email: friends[0], amount, paid, owed }] }
+  if (Object.keys(paid).some(k => k !== ME && paid[k] > 0)) return { error: 'When a friend pays for several people, make it a group so everyone sees the same balances.' }
+  const parts = friends.filter(f => (owed[f] ?? 0) > 0).map(f => ({ email: f, amount: owed[f], paid: { [ME]: owed[f] }, owed: { [f]: owed[f] } }))
+  return parts.length ? { parts } : { error: 'Nobody else owes anything on this one.' }
+}
+
 // ---------- sync: the outbox and edit history ----------
 /** A queued server change. `base` = the expense version it started from (null = new, absent = not an expense). */
 export type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown; base?: number | null }

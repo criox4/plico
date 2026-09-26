@@ -374,6 +374,8 @@ export async function uploadImage<T>(path: string, f: Blob, max: number): Promis
   return out as T
 }
 
+/** A photo as a data URL, shrunk for the AI (e.g. a receipt attached in chat). */
+export const photoData = async (b: Blob) => dataUrl(await shrink(b, 1600))
 const dataUrl = (b: Blob) => new Promise<string>((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => no(r.error); r.readAsDataURL(b) })
 /** Ask the server to read an expense out of a sentence or a photo (receipt, order, UPI screenshot). */
 export async function readExpense(src: { text?: string; image?: Blob; groupId?: string }) {

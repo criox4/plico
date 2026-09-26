@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -150,3 +150,12 @@ assert.deepEqual(effectOf(st, { ...st, pending: false }), { a: -500, b: 500 })
 const ent = { groupId: 'g', seq: 1, kind: 'expense.created', byName: 'A', at: '2026-09-01T00:00:00.000Z', effect: { b: -1, a: 1 }, prevHash: '0' }
 assert.equal(auditPayload(ent), auditPayload({ ...ent, effect: { a: 1, b: -1 } }))
 console.log('friends + audit ok')
+
+// expenses with friends outside groups: one friend whole; several only when you paid, one part per friend ledger
+assert.deepEqual(friendParts(900, { [ME]: 900 }, { [ME]: 450, 'b@x.in': 450 }), { parts: [{ email: 'b@x.in', amount: 900, paid: { [ME]: 900 }, owed: { [ME]: 450, 'b@x.in': 450 } }] })
+assert.deepEqual(friendParts(900, { 'b@x.in': 900 }, { [ME]: 900 }), { parts: [{ email: 'b@x.in', amount: 900, paid: { 'b@x.in': 900 }, owed: { [ME]: 900 } }] })
+assert.deepEqual(friendParts(900, { [ME]: 900 }, { [ME]: 300, 'b@x.in': 300, 'r@x.in': 300 }).parts?.map(p => [p.email, p.amount, p.owed]),
+  [['b@x.in', 300, { 'b@x.in': 300 }], ['r@x.in', 300, { 'r@x.in': 300 }]])
+assert.match((friendParts(900, { 'b@x.in': 900 }, { [ME]: 300, 'b@x.in': 300, 'r@x.in': 300 }) as { error: string }).error, /make it a group/)
+assert.match((friendParts(900, { [ME]: 900 }, { [ME]: 900 }) as { error: string }).error, /Pick who/)
+console.log('friends outside groups ok')

@@ -2,12 +2,16 @@
 // model runs. The model can name groups and people, but only inside this world: nothing else is reachable from here.
 // Money is computed and written out here, so the model never does arithmetic. Drafts only describe an action; the
 // app performs it when the person taps.
-import { allocate, balances, inr, pairwise, simplify, type Expense, type Group } from '../src/logic.ts'
+import { ME, allocate, balances, friendParts, inr, itemSplit, pairwise, simplify, type Expense, type Group } from '../src/logic.ts'
 
 export type WMember = { id: string; name: string; email: string | null; joined: boolean }
 export type WGroup = Group & { meId: string; people: WMember[]; kind: string }
 export type WEvent = { groupId: string; kind: string; byName: string; at: string; title: string | null; amount: number | null; effect: Record<string, number> }
-export type World = { me: { name: string; email: string }; today: string; groups: WGroup[]; events: WEvent[] }
+/** A receipt the person attached, as read (paise). */
+export type Receipt = { title: string; amount: number | null; items: { name: string; amount: number }[]; extras: number }
+/** Sorts receipt items into the person's rules ("non-veg food"). rule = index, or null when none fits; sure = confident. */
+export type Classify = (items: string[], rules: string[]) => Promise<{ rule: number | null; sure: boolean }[]>
+export type World = { me: { name: string; email: string }; today: string; groups: WGroup[]; events: WEvent[]; receipt?: Receipt; classify?: Classify }
 
 /** Text other people typed (titles, names) is data: strip control and direction characters, cap the length. */
 export const clean = (s: unknown, max = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
@@ -52,13 +56,17 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '')
 const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : undefined)
 const day = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined)
 
+export type Target = { kind: 'group'; groupId: string; group: string } | { kind: 'friends'; people: { email: string; name: string }[] }
+/** Amount keys: member ids for a group; "me" and friends' emails outside groups. `names` labels every key. */
 export type Card =
-  | { type: 'expense'; groupId: string; group: string; title: string; cat: string; date: string; amount: number; paid: Record<string, number>; owed: Record<string, number>; summary: string }
+  | { type: 'expense'; target: Target; title: string; cat: string; date: string; amount: number; paid: Record<string, number>; owed: Record<string, number>
+      names: Record<string, string>; items?: { name: string; amount: number; who: string[]; unsure?: boolean }[]; extras?: number; summary: string }
   | { type: 'settle'; groupId: string; group: string; from: string; to: string; amount: number; summary: string }
   | { type: 'remind'; groupId: string; group: string; memberId: string; name: string; amount: number; summary: string }
 export type ToolOut = { result: unknown; card?: Card }
+type Out = ToolOut | Promise<ToolOut>
 
-const TOOLS: Record<string, (w: World, a: Args) => ToolOut> = {
+const TOOLS: Record<string, (w: World, a: Args) => Out> = {
   list_groups: w => ({ result: w.groups.map(g => {
     const n = balances(g)[g.meId] ?? 0
     return { group: gname(g), kind: g.kind === 'direct' ? 'friend (outside groups)' : g.kind, people: g.people.length, your_balance: signed(n), meaning: n > 0 ? 'you are owed' : n < 0 ? 'you owe' : 'settled', tracking_only: !!g.track }
@@ -131,25 +139,7 @@ const TOOLS: Record<string, (w: World, a: Args) => ToolOut> = {
     }) } }
   },
 
-  draft_expense: (w, a) => {
-    const f = findGroup(w, str(a.group)); if ('error' in f) return { result: f }
-    const g = f.ok
-    const amount = Math.round((num(a.amount) ?? 0) * 100)
-    if (amount < 100 || amount > 1e9) return { result: { error: 'Need an amount between ₹1 and ₹1,00,00,000.' } }
-    const payer = str(a.paid_by) ? findPerson(g, str(a.paid_by)) : { ok: g.people.find(p => p.id === g.meId)! }
-    if ('error' in payer) return { result: payer }
-    const names = Array.isArray(a.split_between) ? a.split_between.map(String).slice(0, 50) : []
-    const among: string[] = []
-    for (const n of names) { const p = findPerson(g, n); if ('error' in p) return { result: p }; among.push(p.ok.id) }
-    const ids = [...new Set(among.length ? among : g.people.map(p => p.id))]
-    const owed = allocate(amount, Object.fromEntries(ids.map(id => [id, 1])))
-    const title = clean(a.title, 60) || 'Expense'
-    const cat = ['food', 'groceries', 'stay', 'transport', 'drinks', 'fun', 'rent', 'bills', 'help', 'other'].includes(str(a.category)) ? str(a.category) : 'other'
-    const date = day(a.date) ?? w.today
-    const summary = `${title}: ${rs(amount)} in ${gname(g)}, paid by ${who(g, payer.ok.id)}, split equally between ${ids.map(id => who(g, id)).join(', ')} (${rs(Math.min(...Object.values(owed)))}${new Set(Object.values(owed)).size > 1 ? '–' + rs(Math.max(...Object.values(owed))) : ''} each).`
-    return { result: { drafted: summary, next: 'Shown to the person as a card with an Add button. Nothing is saved until they tap it.' },
-      card: { type: 'expense', groupId: g.id, group: gname(g), title, cat, date, amount, paid: { [payer.ok.id]: amount }, owed, summary } }
-  },
+  draft_expense: (w, a) => draftExpense(w, a),
 
   draft_settlement: (w, a) => {
     const gs = str(a.group) ? (() => { const f = findGroup(w, str(a.group)); return 'error' in f ? f : { ok: [f.ok] } })() : { ok: w.groups }
@@ -180,10 +170,105 @@ const TOOLS: Record<string, (w: World, a: Args) => ToolOut> = {
   },
 }
 
-export function runTool(w: World, name: string, args: Args): ToolOut {
+/** Friends across the person's groups, by name, for expenses outside any group. */
+function findFriend(w: World, name: string) {
+  const byEmail = new Map<string, { email: string; name: string }>()
+  for (const g of w.groups) for (const p of g.people) if (p.id !== g.meId && p.email) byEmail.set(p.email, { email: p.email, name: p.name })
+  return pick([...byEmail.values()], name, f => f.name, 'friend')
+}
+
+/** Who an expense is between: a group's members, or you and some friends. Keys and labels for the amounts. */
+type Party = { target: Target; keys: string[]; me: string; label: (k: string) => string; find: (name: string) => Found<string> }
+function partyOf(w: World, a: Args): Found<Party> {
+  const withNames = Array.isArray(a.with) ? a.with.map(String).filter(Boolean).slice(0, 20) : []
+  if (str(a.group) && withNames.length) return { error: 'Use a group or friends, not both.' }
+  if (withNames.length) {
+    const people: { email: string; name: string }[] = []
+    for (const n of withNames) { const f = findFriend(w, n); if ('error' in f) return f; if (!people.some(p => p.email === f.ok.email)) people.push(f.ok) }
+    const label = (k: string) => (k === ME ? 'you' : clean(people.find(p => p.email === k)?.name ?? k, 40))
+    const find = (n: string): Found<string> => {
+      if (isMe(n)) return { ok: ME }
+      const p = pick(people, n, x => x.name, 'friend in this expense')
+      return 'error' in p ? p : { ok: p.ok.email }
+    }
+    return { ok: { target: { kind: 'friends', people }, keys: [ME, ...people.map(p => p.email)], me: ME, label, find } }
+  }
+  const f = findGroup(w, str(a.group)); if ('error' in f) return f
+  const g = f.ok
+  return { ok: {
+    target: { kind: 'group', groupId: g.id, group: gname(g) }, keys: g.people.map(p => p.id), me: g.meId, label: id => who(g, id),
+    find: n => { const p = findPerson(g, n); return 'error' in p ? p : { ok: p.ok.id } },
+  } }
+}
+
+async function draftExpense(w: World, a: Args): Promise<ToolOut> {
+  const pf = partyOf(w, a); if ('error' in pf) return { result: pf }
+  const P = pf.ok
+  const payer = str(a.paid_by) ? P.find(str(a.paid_by)) : { ok: P.me }
+  if ('error' in payer) return { result: payer }
+  const among: string[] = []
+  for (const n of Array.isArray(a.split_between) ? a.split_between.map(String).slice(0, 50) : []) { const k = P.find(n); if ('error' in k) return { result: k }; among.push(k.ok) }
+  const everyone = [...new Set(among.length ? among : P.keys)]
+  const title = clean(a.title, 60) || w.receipt?.title && clean(w.receipt.title, 60) || 'Expense'
+  const cat = ['food', 'groceries', 'stay', 'transport', 'drinks', 'fun', 'rent', 'bills', 'help', 'other'].includes(str(a.category)) ? str(a.category) : 'other'
+  const date = day(a.date) ?? w.today
+  let owed: Record<string, number>, amount: number
+  let items: NonNullable<Extract<Card, { type: 'expense' }>['items']> | undefined
+  let fallback = everyone
+  const rules = Array.isArray(a.item_rules) ? (a.item_rules as { rule?: unknown; people?: unknown }[]).slice(0, 8) : []
+  if (rules.length || Array.isArray(a.item_assignments)) {
+    const r = w.receipt
+    if (!r?.items.length) return { result: { error: 'There’s no receipt with items to split. Ask the person to attach one, or split the total.' } }
+    const ruleKeys: string[][] = []
+    for (const rule of rules) {
+      const ks: string[] = []
+      for (const n of Array.isArray(rule.people) ? rule.people.map(String) : []) { const k = P.find(n); if ('error' in k) return { result: k }; ks.push(k.ok) }
+      ruleKeys.push([...new Set(ks)])
+    }
+    // Items the rules don't settle go to `leftover_people` (default: everyone in the expense) and are marked for a look.
+    const rest: string[] = []
+    for (const n of Array.isArray(a.leftover_people) ? a.leftover_people.map(String) : []) { const k = P.find(n); if ('error' in k) return { result: k }; rest.push(k.ok) }
+    if (rest.length) fallback = [...new Set(rest)]
+    const explicit = new Map<number, string[]>()
+    for (const x of Array.isArray(a.item_assignments) ? (a.item_assignments as { item?: unknown; people?: unknown }[]) : []) {
+      const i = num(x.item); if (i === undefined || !r.items[i]) continue
+      const ks: string[] = []
+      for (const n of Array.isArray(x.people) ? x.people.map(String) : []) { const k = P.find(n); if ('error' in k) return { result: k }; ks.push(k.ok) }
+      explicit.set(i, [...new Set(ks)])
+    }
+    const sorted = rules.length && w.classify ? await w.classify(r.items.map(i => i.name), rules.map(x => clean(x.rule, 80))) : r.items.map(() => ({ rule: null, sure: false }))
+    items = r.items.map((it, i) => {
+      if (explicit.has(i)) return { name: clean(it.name, 60), amount: it.amount, who: explicit.get(i)! }
+      const m = sorted[i]
+      const who = m.rule !== null && ruleKeys[m.rule]?.length ? ruleKeys[m.rule] : fallback
+      return { name: clean(it.name, 60), amount: it.amount, who, ...(!(m.rule !== null && m.sure) && { unsure: true }) }
+    })
+    const res = itemSplit(items.map(i => ({ name: i.name, amount: i.amount, who: i.who })), r.extras)
+    if ('error' in res) return { result: { error: res.error } }
+    owed = res.owed; amount = Object.values(owed).reduce((x, y) => x + y, 0)
+  } else {
+    amount = Math.round((num(a.amount) ?? (w.receipt?.amount ? w.receipt.amount / 100 : 0)) * 100)
+    if (amount < 100 || amount > 1e9) return { result: { error: 'Need an amount between ₹1 and ₹1,00,00,000.' } }
+    owed = allocate(amount, Object.fromEntries(everyone.map(k => [k, 1])))
+  }
+  const paid = { [payer.ok]: amount }
+  if (P.target.kind === 'friends') { const fp = friendParts(amount, paid, owed); if ('error' in fp) return { result: fp } }
+  const names = Object.fromEntries(P.keys.map(k => [k, P.label(k)]))
+  const where = P.target.kind === 'group' ? `in ${P.target.group}` : `with ${P.target.people.map(p => clean(p.name, 40)).join(', ')} (no group)`
+  const shares = Object.entries(owed).filter(([, v]) => v).map(([k, v]) => `${P.label(k)} ${rs(v)}`).join(', ')
+  const unsure = items?.filter(i => i.unsure).map(i => i.name) ?? []
+  const summary = `${title}: ${rs(amount)} ${where}, paid by ${P.label(payer.ok)}. ${items ? 'By item' : 'Split equally'}: ${shares}.`
+  return {
+    result: { drafted: summary, ...(unsure.length && { check_with_person: `Not sure who had: ${unsure.join(', ')}. They were split between ${fallback.map(P.label).join(', ')}.` }),
+      next: 'Shown to the person as a card they can adjust and then Add. Nothing is saved until they tap it.' },
+    card: { type: 'expense', target: P.target, title, cat, date, amount, paid, owed, names, ...(items && { items, extras: w.receipt!.extras }), summary },
+  }
+}
+
+export async function runTool(w: World, name: string, args: Args): Promise<ToolOut> {
   const t = TOOLS[name]
   if (!t) return { result: { error: `No tool called ${clean(name, 40)}.` } }
-  try { return t(w, args && typeof args === 'object' ? args : {}) } catch { return { result: { error: 'That didn’t work. Try asking another way.' } } }
+  try { return await t(w, args && typeof args === 'object' ? args : {}) } catch { return { result: { error: 'That didn’t work. Try asking another way.' } } }
 }
 
 const S = (description: string, properties: Record<string, unknown> = {}, required: string[] = []) => ({ type: 'object', additionalProperties: false, description, properties, required })
@@ -203,11 +288,16 @@ export const TOOL_DEFS = [
     by: { type: 'string', enum: ['category', 'month', 'group', 'person'] }, from: s('YYYY-MM-DD'), to: s('YYYY-MM-DD'), group: GROUP,
   })],
   ['activity', 'Recent changes in the person’s groups (who added, edited or deleted what), newest first.', S('', { group: GROUP, days: n('How far back, 1–90. Default 14.') })],
-  ['draft_expense', 'Prepare a new expense for the person to confirm. Equal split. Does not save anything.', S('', {
-    group: s('Group name'), title: s('Short label'), amount: n('Total in rupees'), paid_by: s('Who paid; omit for the person themselves'),
-    split_between: { type: 'array', items: { type: 'string' }, description: 'Names to split between, including "me" if the person is in it. Omit for everyone in the group.' },
+  ['draft_expense', 'Prepare a new expense for the person to confirm and adjust. It can be in a group, or with friends outside any group. Saves nothing. With an attached receipt, split it by item: describe groups of items in item_rules (e.g. {rule: "non-vegetarian food", people: ["Bala","Karan"]}); every item is sorted into a rule for you.', S('', {
+    group: s('Group name. Omit when it is with friends outside a group.'),
+    with: { type: 'array', items: { type: 'string' }, description: 'Friends’ names for an expense outside any group (not including the person).' },
+    title: s('Short label'), amount: n('Total in rupees; omit when splitting a receipt by item'), paid_by: s('Who paid; omit for the person themselves'),
+    split_between: { type: 'array', items: { type: 'string' }, description: 'Names to split between equally, including "me" if the person is in it. Omit for everyone.' },
+    item_rules: { type: 'array', description: 'Receipt only: kinds of items and who shares each kind, from what the person said.', items: { type: 'object', additionalProperties: false, required: ['rule', 'people'], properties: { rule: s('A kind of item, e.g. "vegetarian food", "alcoholic drinks", "desserts"'), people: { type: 'array', items: { type: 'string' } } } } },
+    item_assignments: { type: 'array', description: 'Receipt only: specific items by number and who had them, when the person named items directly.', items: { type: 'object', additionalProperties: false, required: ['item', 'people'], properties: { item: n('Item number from the receipt'), people: { type: 'array', items: { type: 'string' } } } } },
+    leftover_people: { type: 'array', items: { type: 'string' }, description: 'Receipt only: who shares items no rule covers. Omit for everyone.' },
     category: CATS, date: s('YYYY-MM-DD; omit for today'),
-  }, ['group', 'title', 'amount'])],
+  }, ['title'])],
   ['draft_settlement', 'Prepare settling up between the person and someone. Opens the settle-up screen when tapped.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
   ['draft_reminder', 'Prepare a reminder to someone who owes the person money. Sent only when tapped.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
 ].map(([name, description, parameters]) => ({ type: 'function', function: { name, description, parameters } }))

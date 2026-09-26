@@ -68,6 +68,8 @@ export const ChatIn = z.object({
     z.minLength(1), z.maxLength(20),
     z.refine(ms => ms.at(-1)!.role === 'user' && !!ms.at(-1)!.content.trim() && ms.at(-1)!.content.length <= 1000, 'Ask something, up to 1,000 characters.')),
   today: Day,
+  /** A receipt or screenshot attached to the latest message. */
+  image: z.optional(z.string().check(z.regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/), z.maxLength(7_000_000))),
 })
 export const Token = z.string().check(z.regex(/^[a-f0-9]{32}$/))
 export const InviteCode = z.string().check(z.maxLength(40))
@@ -137,7 +139,12 @@ export const RemindLimitOut = z.object({ error: z.string(), code: z.enum(['limit
 
 /** Ask Plico: what the app can be asked to do. Ids are server member ids. */
 export const ChatCard = z.union([
-  z.object({ type: z.literal('expense'), groupId: Id, group: z.string(), title: z.string(), cat: z.string(), date: Day, amount: Paise, paid: Money, owed: Money, summary: z.string() }),
+  z.object({
+    type: z.literal('expense'),
+    target: z.union([z.object({ kind: z.literal('group'), groupId: Id, group: z.string() }), z.object({ kind: z.literal('friends'), people: z.array(z.object({ email: z.string(), name: z.string() })) })]),
+    title: z.string(), cat: z.string(), date: Day, amount: Paise, paid: z.record(z.string(), Paise), owed: z.record(z.string(), Paise), names: z.record(z.string(), z.string()),
+    items: z.optional(z.array(z.object({ name: z.string(), amount: Paise, who: z.array(z.string()), unsure: z.optional(z.boolean()) }))), extras: z.optional(z.int()), summary: z.string(),
+  }),
   z.object({ type: z.literal('settle'), groupId: Id, group: z.string(), from: Id, to: Id, amount: Paise, summary: z.string() }),
   z.object({ type: z.literal('remind'), groupId: Id, group: z.string(), memberId: Id, name: z.string(), amount: Paise, summary: z.string() }),
 ])
