@@ -132,7 +132,7 @@ function NewGroup({ s, preset }: { s: State; preset?: string }) {
     location.replace('#/g/' + id)
   }
   return (
-    <Screen t={KINDS[kind].theme} back={preset ? true : () => setKind(null)} title={`New ${KINDS[kind].label.toLowerCase()} group`}>
+    <Screen t={s.theme} back={preset ? true : () => setKind(null)} title={`New ${KINDS[kind].label.toLowerCase()} group`}>
       <form className="form" onSubmit={e => { e.preventDefault(); create() }}>
         <label className="field"><span>Group name</span>
           <input value={name} onChange={e => setName(e.target.value)} placeholder={KINDS[kind].hint} maxLength={40} autoFocus />
@@ -206,7 +206,7 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   if (old?.settle) {
     const [from, to] = [Object.keys(old.paid)[0], Object.keys(old.owed)[0]]
     return (
-      <Screen t={g.theme} back title="Settlement">
+      <Screen t={s.theme} back title="Settlement">
         <section className="pay">
           <p className="pay-who">{who(g, from)} paid {who(g, to)}</p>
           <p className="pay-amt"><span className="money settled-ink">{inr(old.amount)}</span></p>
@@ -304,7 +304,7 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   }
 
   return (
-    <Screen t={g.theme} back title={old ? 'Edit expense' : 'Add expense'}>
+    <Screen t={s.theme} back title={old ? 'Edit expense' : 'Add expense'}>
       <form className="form" onSubmit={e => { e.preventDefault(); save() }}>
         {!old && (
           <div className="capture">
@@ -555,7 +555,7 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
   const [adding, setAdding] = useState<Pick[]>([])
   const addAll = () => { set(x => { x.members.push(...adding.map(p => ({ id: uid(), name: p.name, email: p.email }))) }); setAdding([]) }
   return (
-    <Screen t={g.theme} back title={direct ? `You and ${groupTitle(g)}` : 'Group settings'}>
+    <Screen t={s.theme} back title={direct ? `You and ${groupTitle(g)}` : 'Group settings'}>
       <div className="form">
         {!direct && <>
           <label className="field"><span>Name</span><input value={g.name} maxLength={40} onChange={e => set(x => { x.name = e.target.value })} /></label>

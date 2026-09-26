@@ -215,7 +215,7 @@ export function AuditLog({ s, g }: { s: State; g: Group }) {
   ])
   const events = [...(log?.events ?? [])].reverse()
   return (
-    <Screen t={g.theme} back title="Audit log">
+    <Screen t={s.theme} back title="Audit log">
       {check && (check.ok
         ? <p className="verified"><Icon n="shield" size={20} /><span><strong>Verified: {count(log!.events.length, 'entry', 'entries')}, unbroken</strong><small>Checked on this phone. Every entry is sealed to the one before it, so no past record can be changed or removed without it showing here.</small></span></p>
         : <p className="error" role="alert">Entry #{check.at} doesn’t match its seal. The log may have been altered after it was written. Please report this to privacy@plico.space.</p>)}
@@ -291,7 +291,7 @@ export function ExpenseHistory({ s, g, eid }: { s: State; g: Group; eid: Id }) {
     setBusy(0)
   }
   return (
-    <Screen t={g.theme} back title="History">
+    <Screen t={s.theme} back title="History">
       <h2 className="hist-title">{title}</h2>
       {deleted && <p className="muted-p">Deleted by {latest!.byId === s.user?.id ? 'you' : latest!.byName}, {when(latest!.at)}.</p>}
       {err && <p className="error" role="alert">{err}</p>}

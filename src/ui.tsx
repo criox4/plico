@@ -296,7 +296,7 @@ export function Converge({ s, g, e }: { s: State; g: Group; e: Expense }) {
   const vals = Object.values(e.owed)
   const line = ids.length < 2 ? `${inr(e.amount)} added` : vals.every(v => v === vals[0]) ? `${inr(vals[0])} each` : `${inr(e.amount)}, ${ids.length} ways`
   return (
-    <div className="converge" data-theme={g.theme} style={themeVars(g.theme)} role="status" aria-label={`Added ${e.title}: ${line}`}>
+    <div className="converge" data-theme={s.theme} style={themeVars(s.theme)} role="status" aria-label={`Added ${e.title}: ${line}`}>
       <div className="cv-ring" aria-hidden>
         {ids.slice(0, 8).map((id, i, a) => {
           const ang = (i / a.length) * 2 * Math.PI - Math.PI / 2
@@ -623,7 +623,10 @@ function SpendBar({ cats }: { cats: [string, number][] }) {
   )
 }
 
-export function GroupView({ s, g, t = g.theme }: { s: State; g: Group; t?: ThemeId }) {
+/** A group's page wears the group's theme, unless you've turned group themes off; every other screen wears yours. */
+export const pageTheme = (s: State, g: Group) => (s.groupThemes === false ? s.theme : g.theme)
+
+export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t?: ThemeId }) {
   const bal = balances(g)
   const net = bal[ME] ?? 0
   const spent = g.expenses.filter(e => !e.settle)
@@ -715,7 +718,7 @@ function PushAsk({ g }: { g: Group }) {
   )
 }
 
-export function Settle({ s, g, from, to, amount, t = g.theme, onRecord }: {
+export function Settle({ s, g, from, to, amount, t = s.theme, onRecord }: {
   s: State; g: Group; from: Id; to: Id; amount: number; t?: ThemeId; onRecord?: (paise: number, vpa: string) => void
 }) {
   const payee = realName(s, g, to)

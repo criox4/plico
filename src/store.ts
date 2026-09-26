@@ -5,6 +5,8 @@ export type State = {
   user?: { id: string; email: string; emailVerified?: boolean; image?: string | null; ageGroup?: string | null; guardianEmail?: string | null; guardianConsent?: boolean; ai?: boolean }
   me: { name: string; upi: string; phone?: string }
   theme: Theme
+  /** Show each group's own theme on its page (everything else always wears `theme`). Missing = on. */
+  groupThemes?: boolean
   tone: Tone
   groups: Group[]
 }

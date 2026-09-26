@@ -669,7 +669,14 @@ export function ProfilePage({ s }: { s: State }) {
 }
 
 export function AppearancePage({ s }: { s: State }) {
-  return <Page s={s} title="Appearance"><ThemePicker value={s.theme} onChange={t => update(d => { d.theme = t })} /><small>Each group can also have its own theme in its settings.</small></Page>
+  return (
+    <Page s={s} title="Appearance">
+      <ThemePicker value={s.theme} onChange={t => update(d => { d.theme = t })} />
+      <small>Your theme is used everywhere in Plico.</small>
+      <label className="check pref"><input type="checkbox" checked={s.groupThemes !== false} onChange={e => update(d => { d.groupThemes = e.target.checked })} />
+        <span><strong>Show group themes on group pages</strong><small>A group’s own page can wear the theme its members picked. Settling up, adding expenses and everything else stays in yours.</small></span></label>
+    </Page>
+  )
 }
 
 /** Pushes on this device, what's worth a push, and how reminders to others sound. */
