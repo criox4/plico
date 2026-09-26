@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { bodyLimit } from 'hono/body-limit'
 import * as z from 'zod/mini'
@@ -12,6 +12,7 @@ import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
 import { prefsOf } from './push-text.ts'
 import { chat } from './chat.ts'
+import { clientIp, limiter } from './ip.ts'
 import { createHash } from 'node:crypto'
 import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
@@ -47,14 +48,8 @@ publicApi.post('/guardian/:token', async c => {
 
 // Invite previews: what a link shows before anyone signs up. Just enough to decide (the group, who invited you),
 // never member names, emails or amounts, so a forwarded link doesn't leak the group.
-// ponytail: in-memory per-IP limit; move to the database or Redis when the API runs as more than one process.
-const peeks = new Map<string, number[]>()
-const peekLimit = (c: { req: { header: (h: string) => string | undefined } }) => {
-  const ip = c.req.header('x-vercel-forwarded-for') ?? c.req.header('x-forwarded-for')?.split(',')[0] ?? 'local'
-  const now = Date.now(), recent = (peeks.get(ip) ?? []).filter(t => now - t < 60_000)
-  peeks.set(ip, [...recent, now])
-  return recent.length >= 30
-}
+const peeks = limiter(60_000, 30)
+const peekLimit = (c: Context) => { const ip = clientIp(c); if (peeks.full(ip)) return true; peeks.hit(ip); return false }
 const inviterOf = async (groupId: string, memberId?: string) => {
   const e = await db.auditEvent.findFirst({ where: { groupId, ...(memberId ? { memberId, kind: 'member.invited' } : { kind: 'group.created' }) }, orderBy: { seq: 'asc' }, select: { byName: true } })
   return e?.byName ?? 'A friend'

@@ -6,6 +6,7 @@ import { mail } from './email.ts'
 import { linkByEmail } from './audit.ts'
 import { isVpa } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
+import { IP_HEADER } from './ip.ts'
 
 // Web dev/preview, Capacitor iOS (capacitor://) and Android (https://localhost), plus the deployed web app.
 export const ORIGINS = ['http://localhost:5173', 'http://localhost:4173', 'capacitor://localhost', 'https://localhost',
@@ -28,8 +29,8 @@ export const auth = betterAuth({
   trustedOrigins: ORIGINS,
   // Brute-force protection on sign-in, sign-up and reset (per IP). Better Auth's own stricter per-path rules still apply.
   rateLimit: { enabled: true, window: 60, max: 60 },
-  // Behind Vercel the client IP arrives in a header the platform sets (clients can't spoof it there).
-  advanced: { ipAddress: { ipAddressHeaders: ['x-vercel-forwarded-for', 'x-forwarded-for'] } },
+  // index.ts sets this header from a source clients can't forge (see ip.ts), replacing anything they sent.
+  advanced: { ipAddress: { ipAddressHeaders: [IP_HEADER] } },
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,

@@ -8,6 +8,7 @@ import { api, publicApi } from './api.ts'
 import { BUCKET, getFile } from './storage.ts'
 import { aiReady } from './ai.ts'
 import { pushConfig, startPush } from './push.ts'
+import { IP_HEADER, clientIp, limiter } from './ip.ts'
 
 const app = new Hono()
 
@@ -22,6 +23,20 @@ app.use('/api/*', cors({
   credentials: true,
   maxAge: 600,
 }))
+// The caller's IP, from a source they can't forge, for Better Auth's per-IP limits and ours.
+app.use('/api/*', async (c, next) => { c.req.raw.headers.set(IP_HEADER, clientIp(c)); await next() })
+// Per account, on top of per IP: someone guessing one person's password from many addresses still stops after 10 misses.
+// Keyed by the email typed, so a lockout lasts 15 minutes at most and a reset link always works.
+const misses = limiter(15 * 60_000, 10)
+app.post('/api/auth/sign-in/email', async (c, next) => {
+  const body = await c.req.raw.clone().json().catch(() => null) as { email?: unknown } | null
+  const who = String(body?.email ?? '').trim().toLowerCase().slice(0, 254)
+  if (who && misses.full(who)) return c.json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many wrong passwords for this account. Wait 15 minutes, or reset your password.' }, 429)
+  await next()
+  if (!who) return
+  if (c.res.status === 401) misses.hit(who)
+  else if (c.res.ok) misses.clear(who)
+})
 app.on(['GET', 'POST'], '/api/auth/*', c => auth.handler(c.req.raw))
 // Public: which sign-in methods exist (the client hides Google until it's configured).
 app.get('/api/config', c => c.json({
