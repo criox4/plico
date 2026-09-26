@@ -13,6 +13,7 @@ export type Member = {
   email?: string; phone?: string // invite targets for people without the app
   joined?: boolean // linked to an account
   invited?: boolean // an invite has gone out
+  addedBy?: string // not joined yet and added by someone else: only they can change the UPI IDs and email (their name)
   image?: string // their account's profile picture (photo path, emoji:…, plico:…)
 }
 export type Expense = {

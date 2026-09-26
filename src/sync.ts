@@ -248,6 +248,7 @@ export function toClient(sg: ServerGroup, userId: string): Group {
     members: sg.members.map(m => (m.id === self?.id ? { id: ME, name: 'Me' } : {
       id: m.id, name: m.name, upi: m.upi ?? undefined, upi2: m.upi2 ?? undefined, email: (m.email ?? m.user?.email)?.toLowerCase() || undefined, phone: m.phone ?? undefined,
       joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined, image: m.user?.image ?? undefined,
+      addedBy: !m.userId && m.addedById && m.addedById !== userId ? sg.members.find(x => x.userId === m.addedById)?.name : undefined,
     })),
     expenses: sg.expenses.filter(e => !e.deletedAt).map(e => expenseFromServer(e, self?.id)),
   }

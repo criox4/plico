@@ -92,7 +92,7 @@ export const ServerExpense = z.extend(Snap, {
 })
 export const ServerMember = z.object({
   id: z.string(), name: z.string(), upi: z.nullable(z.string()), upi2: z.nullish(z.string()), userId: z.nullable(z.string()), email: z.nullable(z.string()),
-  phone: z.nullable(z.string()), invitedAt: z.nullable(When), user: z.nullish(z.object({ image: z.nullable(z.string()), email: z.string() })),
+  phone: z.nullable(z.string()), invitedAt: z.nullable(When), addedById: z.nullish(z.string()), user: z.nullish(z.object({ image: z.nullable(z.string()), email: z.string() })),
 })
 export const ServerGroup = z.object({
   id: z.string(), name: z.string(), kind: Kind, theme: Theme, track: z.boolean(), emoji: z.nullable(z.string()), cover: z.nullable(z.string()),

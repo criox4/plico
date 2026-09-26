@@ -679,6 +679,7 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
         <div className="person-body">
           {m.joined ? <p className="muted-p">{m.name} manages their own details. {m.upi && <>UPI: <code className="vpa">{m.upi}</code></>}</p> : <>
             <label className="field"><span>Name</span><CommitInput value={m.name} maxLength={40} onCommit={v => v && setMember(g, m.id, y => { y.name = v })} /></label>
+            {m.addedBy ? <p className="muted-p">{m.addedBy} added {m.name}, so only they can change {m.name}’s email and UPI ID.{m.email && <><br />Email: {m.email}</>}{m.upi && <><br />UPI: <code className="vpa">{m.upi}</code></>}</p> : <>
             <label className="field"><span>Email</span>
               <CommitInput type="email" value={m.email ?? ''} autoCapitalize="none" aria-invalid={!!m.email && !emailOk(m.email)}
                 onCommit={v => emailOk(v) && setMember(g, m.id, y => { y.email = v.toLowerCase() })} />
@@ -688,6 +689,7 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
               <CommitInput value={m.upi ?? ''} placeholder="name@okaxis" inputMode="email" autoCapitalize="none" spellCheck={false}
                 aria-invalid={!!m.upi && !isVpa(m.upi)} onCommit={v => setMember(g, m.id, y => { y.upi = v || undefined })} />
             </label>
+            </>}
             <div className="person-actions">
               {m.email && emailOk(m.email) && <button type="button" className="btn-sm" onClick={() => void resend()}><Icon n="send" size={16} />{m.invited ? 'Resend email' : 'Email invite'}</button>}
               {link && <a className="btn-sm" href={wa(msg)} target="_blank" rel="noopener"><Icon n="send" size={16} />WhatsApp</a>}

@@ -370,9 +370,15 @@ api.put('/groups/:gid/members/:mid', async c => {
     const dup = await db.member.findFirst({ where: { groupId: gid, id: { not: mid }, OR: [{ email: { equals: email, mode: 'insensitive' } }, { user: { email: { equals: email, mode: 'insensitive' } } }] } })
     if (dup) return c.json({ error: `${dup.name} is already in this group with that email.` }, 409)
   }
+  // Until someone joins, their UPI IDs and email belong to whoever added them. Anyone else changing them could send
+  // everyone's "Pay Riya" to their own UPI ID, or move Riya's invite (and spot) to an address they control.
+  if (m && !m.userId && m.addedById && m.addedById !== uid && (data.upi !== m.upi || data.upi2 !== m.upi2 || data.email !== m.email)) {
+    const adder = await db.member.findFirst({ where: { groupId: gid, userId: m.addedById }, select: { name: true } })
+    if (adder) return c.json({ error: `Only ${adder.name}, who added ${m.name}, can change their UPI ID or email.`, code: 'not-yours' }, 403)
+  }
   if (!m) {
     await db.$transaction(async tx => {
-      await tx.member.create({ data: { id: mid, groupId: gid, ...data } })
+      await tx.member.create({ data: { id: mid, groupId: gid, addedById: uid, ...data } })
       await audit(tx, gid, { kind: 'member.invited', memberId: mid, ...by, after: { name: data.name, email } })
     })
   } else {
@@ -707,7 +713,7 @@ api.post('/friends', async c => {
   const by = { byId: uid, byName: me.name }
   await db.$transaction(async tx => {
     await tx.group.create({ data: { id, name: b.name, kind: 'direct', theme: 'classic', directKey: key, inviteCode: inviteCode(), createdById: uid,
-      members: { create: [{ id: selfId, name: me.name, userId: uid, email: me.email.toLowerCase() }, { id: friendId, name: b.name, email }] } } })
+      members: { create: [{ id: selfId, name: me.name, userId: uid, email: me.email.toLowerCase() }, { id: friendId, name: b.name, email, addedById: uid }] } } })
     await audit(tx, id, { kind: 'group.created', memberId: selfId, ...by, after: { kind: 'direct' } })
     await audit(tx, id, { kind: 'member.invited', memberId: friendId, ...by, after: { name: b.name, email } })
   }).catch(async e => {

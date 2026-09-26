@@ -135,6 +135,7 @@ model Member {
   phone       String? /// invite target via WhatsApp link (never auto-linked: phones aren't verified)
   inviteToken String?        @unique /// one-time claim link sent to this person
   invitedAt   DateTime?
+  addedById   String? /// who added this person: until they join, only that member may change their UPI IDs or email
   userId      String?
   user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
   shares      ExpenseShare[]
