@@ -216,7 +216,8 @@ async function draftExpense(w: World, a: Args): Promise<ToolOut> {
   let items: NonNullable<Extract<Card, { type: 'expense' }>['items']> | undefined
   let fallback = everyone
   const rules = Array.isArray(a.item_rules) ? (a.item_rules as { rule?: unknown; people?: unknown }[]).slice(0, 8) : []
-  if (rules.length || Array.isArray(a.item_assignments)) {
+  const named = Array.isArray(a.item_assignments) ? a.item_assignments : []
+  if (rules.length || named.length) { // models often send empty lists for optional arguments
     const r = w.receipt
     if (!r?.items.length) return { result: { error: 'There’s no receipt with items to split. Ask the person to attach one, or split the total.' } }
     const ruleKeys: string[][] = []
@@ -253,7 +254,7 @@ async function draftExpense(w: World, a: Args): Promise<ToolOut> {
   }
   const paid = { [payer.ok]: amount }
   if (P.target.kind === 'friends') { const fp = friendParts(amount, paid, owed); if ('error' in fp) return { result: fp } }
-  const names = Object.fromEntries(P.keys.map(k => [k, P.label(k)]))
+  const names = Object.fromEntries(P.keys.map(k => [k, k === P.me ? 'You' : P.label(k)]))
   const where = P.target.kind === 'group' ? `in ${P.target.group}` : `with ${P.target.people.map(p => clean(p.name, 40)).join(', ')} (no group)`
   const shares = Object.entries(owed).filter(([, v]) => v).map(([k, v]) => `${P.label(k)} ${rs(v)}`).join(', ')
   const unsure = items?.filter(i => i.unsure).map(i => i.name) ?? []

@@ -1,4 +1,6 @@
 import { resumePush } from './push'
+import { AddScreen, WithPicker } from './add'
+import { commitDraft, type Target } from './draft'
 import { Suspense, lazy, useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
@@ -71,7 +73,7 @@ export default function App() {
   if (r[0] === 'search') return <Search s={s} />
   if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} email={decodeURIComponent(r[1])} /> : <FriendPage s={s} email={decodeURIComponent(r[1])} />
   if (r[0] === 'new' || (r[0] === 'add' && !s.groups.length)) return <NewGroup key={r[1]} s={s} preset={r[0] === 'new' ? r[1] : undefined} />
-  if (r[0] === 'add') return <ExpenseForm key={r[1] ?? 'add'} s={s} shared={r[1] === 'shared'} />
+  if (r[0] === 'add') return <ExpenseForm key={r.slice(1).join('/') || 'add'} s={s} shared={r[1] === 'shared'} friend={r[1] === 'f' && r[2] ? decodeURIComponent(r[2]) : undefined} />
   const g = r[0] === 'g' ? s.groups.find(x => x.id === r[1]) : undefined
   if (g) {
     if (r[2] === 'add') return <ExpenseForm key="add" s={s} gid={g.id} />
@@ -158,9 +160,18 @@ const MODES: { id: SplitMode; label: string; unit: string }[] = [
 ]
 const strs = (o: Record<Id, number>, k = 1) => Object.fromEntries(Object.entries(o).map(([i, v]) => [i, String(v / k)]))
 
-function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; shared?: boolean }) {
-  const [groupId, setGroupId] = useState(gid ?? s.groups[0].id)
-  const g = s.groups.find(x => x.id === groupId) ?? s.groups[0]
+function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?: Id; shared?: boolean; friend?: string }) {
+  // Who it's with: preset when you came from a group or a friend; from the + button, you choose.
+  const [target, setTarget] = useState<Target | null>(() => {
+    if (gid) return { kind: 'group', groupId: gid }
+    const f = friend ? friendsOf(s).find(x => x.email === friend) : undefined
+    return f ? { kind: 'friends', people: [{ email: f.email, name: f.name }] } : null
+  })
+  const real = target?.kind === 'group' ? s.groups.find(x => x.id === target.groupId) : undefined
+  // Outside groups, the form works on a stand-in group: you and the friends, keyed by email.
+  const g: Group = real ?? { id: '', name: '', kind: 'direct', theme: s.theme, expenses: [],
+    members: [{ id: ME, name: 'Me' }, ...(target?.kind === 'friends' ? target.people.map(p => ({ id: p.email, name: p.name, email: p.email, joined: true })) : [])] }
+  const targetKey = target ? (target.kind === 'group' ? target.groupId : target.people.map(p => p.email).join()) : ''
   const old = eid ? g.expenses.find(e => e.id === eid) : undefined
   const flags = (grp: Group, on = '1') => Object.fromEntries(grp.members.map(m => [m.id, on]))
   const payers0 = old ? Object.keys(old.paid) : [ME]
@@ -188,6 +199,14 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   const [extras, setExtras] = useState(0)
 
   useEffect(() => { if (eid && !old) location.replace('#/g/' + g.id) }, [eid, old, g.id])
+  const [open, setOpen] = useState<'' | 'payer' | 'split'>('')
+  const [saving, setSaving] = useState(false)
+  // A different group or set of friends means different people: start the who-paid and split over.
+  useEffect(() => {
+    if (old || !targetKey) return
+    setPayer(ME); setMulti(false); setPaidIn({}); setMode('equal'); setInp(flags(g)); setItems(null)
+    if (!real) setReceipt(undefined)
+  }, [targetKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!shared) return
     void takeShared().then(p => {
@@ -239,7 +258,7 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
     applyQuick(parseQuick(text, g.members)) // instant and offline; AI refines when it can
     if (!sync.ai || !s.user?.ai || !navigator.onLine) return // unless AI reading is switched off (Privacy and data)
     setReading(true); setCapErr('')
-    try { fromRead(await readExpense({ text, groupId: g.id })) } catch { /* the rule-based read already filled what it could */ } finally { setReading(false) }
+    try { fromRead(await readExpense({ text, groupId: real?.id })) } catch { /* the rule-based read already filled what it could */ } finally { setReading(false) }
   }
   const scan = (f: Blob) => {
     if (!sync.ai) return setCapErr('Reading photos isn’t set up yet. Type it in instead.')
@@ -249,8 +268,8 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   const readPhoto = async (f: Blob) => {
     setReading(true); setCapErr('')
     try {
-      const [r] = await Promise.all([readExpense({ image: f, groupId: g.id }),
-        uploadImage<{ name: string }>(`/api/groups/${g.id}/files`, f, 1600).then(x => setReceipt(x.name)).catch(() => {})])
+      const [r] = await Promise.all([readExpense({ image: f, groupId: real?.id }),
+        real && uploadImage<{ name: string }>(`/api/groups/${real.id}/files`, f, 1600).then(x => setReceipt(x.name)).catch(() => {})])
       if (!r.amount && !r.items.length) setCapErr('Couldn’t find an amount in that photo. Type it in instead.')
       fromRead(r)
     } catch (e) { setCapErr((e as Error).message) } finally { setReading(false) }
@@ -266,10 +285,6 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
     setItems(null); setCapErr('')
   }
 
-  const pickGroup = (id: Id) => {
-    const ng = s.groups.find(x => x.id === id)!
-    setGroupId(id); setReceipt(undefined); setPayer(ME); setMulti(false); setPaidIn({}); setMode('equal'); setInp(flags(ng))
-  }
   const switchMode = (m: SplitMode) => { setMode(m); setInp(flags(g, m === 'equal' ? '1' : '')) }
 
   const total = toPaise(amt)
@@ -285,8 +300,18 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
   const paidSum = Object.values(paid).reduce((a, b) => a + b, 0)
   const error = 'error' in res ? res.error : paidSum !== total ? `Payers add up to ${inr(paidSum)}, not ${inr(total)}` : ''
 
-  const save = () => {
-    if (!total || error) return
+  const outside = target?.kind === 'friends'
+  const block = !target ? 'Choose who it’s with' : outside && target.people.length > 1 && Object.keys(paid).some(k => k !== ME) ? 'When a friend pays for several people, make it a group so everyone sees the same balances.' : ''
+  const save = async () => {
+    if (!total || error || block || saving) return
+    if (outside) {
+      setSaving(true); setCapErr('')
+      try {
+        const saved = await commitDraft({ target, title: title.trim() || CATS.find(c => c.id === cat)!.label, cat, date, amount: total, paid, owed, mode, input, repeat })
+        go(saved.length > 1 ? '/friends' : `/f/${encodeURIComponent(saved[0].friend!)}`)
+      } catch (e) { setCapErr((e as Error).message) } finally { setSaving(false) }
+      return
+    }
     const day = +date.slice(8)
     const e: Expense = {
       id: old?.id ?? uid(), title: title.trim() || CATS.find(c => c.id === cat)!.label, cat, date, amount: total, paid, owed, mode, input, receipt,
@@ -304,22 +329,21 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
     setTimeout(leave, 1500)
   }
 
-  return (
-    <Screen t={s.theme} back title={old ? 'Edit expense' : 'Add expense'}>
-      <form className="form" onSubmit={e => { e.preventDefault(); save() }}>
-        {!old && (
-          <div className="capture">
-            <input className="quick-in" placeholder="Type it: Dinner 3200, Karan paid, except Riya" aria-label="Type the expense in a sentence" value={quick} maxLength={200}
-              enterKeyHint="done" onChange={e => setQuick(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void typeIt() } }} onBlur={() => void typeIt()} />
-            <label className="iconbtn scan" aria-label="Scan a receipt or screenshot" title="Scan a receipt or screenshot">
-              <input type="file" accept="image/*" className="sr-only" disabled={reading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) scan(f) }} />
-              <Icon n="qr" />
-            </label>
-          </div>
-        )}
-        {!old && sync.ai && s.user?.ai && <p className="legal-line">Photos and typed text are read by AI (OpenAI, via OpenRouter; not stored or trained on). <a href="#/me/privacy">Turn off</a></p>}
-        {reading && <p className="reading" role="status"><Plico mood="thinking" size={28} />Reading it…</p>}
-        {capErr && <p className="error" role="alert">{capErr}</p>}
+  const n = g.members.filter(m => input[m.id]).length
+  const payerLabel = multi ? `${Object.keys(paid).length || 'several'} people` : who(g, payer)
+  const saveLabel = old ? 'Save changes' : block && !target ? block : !total ? 'Add expense'
+    : `Add ${inr(total)} ${real ? `to ${groupTitle(real)}` : outside ? `with ${target.people.length === 1 ? target.people[0].name.split(' ')[0] : count(target.people.length, 'friend', 'friends')}` : ''}`
+  const form = (
+    <form className="form add-form" onSubmit={e => { e.preventDefault(); void save() }}>
+      {!old && <WithPicker s={s} value={target} onChange={setTarget} locked={!!gid} />}
+      {!old && !(sync.ai && s.user?.ai) && (
+        <div className="capture">
+          <input className="quick-in" placeholder="Type it: Dinner 3200, Karan paid, except Riya" aria-label="Type the expense in a sentence" value={quick} maxLength={200}
+            enterKeyHint="done" onChange={e => setQuick(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void typeIt() } }} onBlur={() => void typeIt()} />
+        </div>
+      )}
+      {reading && <p className="reading" role="status"><Plico mood="thinking" size={28} />Reading it…</p>}
+      {capErr && <p className="error" role="alert">{capErr}</p>}
         {items && (
           <section className="items" aria-label="Split by item">
             <h2 className="form-h">Who had what?</h2>
@@ -344,79 +368,95 @@ function ExpenseForm({ s, gid, eid, shared }: { s: State; gid?: Id; eid?: Id; sh
             </div>
           </section>
         )}
+      <div className="add-amount">
         <label className="amount-field">
           <span className="sr-only">Amount in rupees</span>
           <span className="amount-cur" aria-hidden>₹</span>
-          <input className="amount-in" inputMode="decimal" placeholder="0" value={amt} autoFocus={!old} onChange={e => setAmt(digits(e.target.value))} />
+          <input className="amount-in" inputMode="decimal" placeholder="0" value={amt} autoFocus={!old && !!target} onChange={e => setAmt(digits(e.target.value))} />
         </label>
-        <input className="title-in" placeholder="What was it for?" aria-label="Description" value={title} maxLength={80} onChange={e => setTitle(e.target.value)} />
-        <div className="chips scroll" role="radiogroup" aria-label="Category">
-          {CATS.map(c => <Chip key={c.id} on={cat === c.id} onClick={() => setCat(c.id)}><Icon n={c.id} size={18} />{c.label}</Chip>)}
-        </div>
+        {!old && sync.ai && s.user?.ai && (
+          <label className="scan-bill" title="Scan a bill or UPI screenshot">
+            <input type="file" accept="image/*" className="sr-only" disabled={reading} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) scan(f) }} />
+            <Icon n="qr" size={20} /><span>Scan bill</span>
+          </label>
+        )}
+      </div>
+      <input className="title-in" placeholder="What was it for?" aria-label="Description" value={title} maxLength={80} onChange={e => setTitle(e.target.value)} />
+      <div className="chips scroll" role="radiogroup" aria-label="Category">
+        {CATS.map(c => <Chip key={c.id} on={cat === c.id} onClick={() => setCat(c.id)}><Icon n={c.id} size={18} />{c.label}</Chip>)}
+      </div>
 
-        {!old && s.groups.length > 1 && <>
-          <h2 className="form-h">Group</h2>
-          <div className="chips scroll" role="radiogroup" aria-label="Group">
-            {s.groups.map(x => <Chip key={x.id} on={x.id === g.id} onClick={() => pickGroup(x.id)}><Icon n={x.kind} size={18} />{groupTitle(x)}</Chip>)}
+      {target && <>
+        <p className="add-sentence">
+          <button type="button" aria-expanded={open === 'payer'} onClick={() => setOpen(open === 'payer' ? '' : 'payer')}><small>Paid by</small><strong>{payerLabel}</strong></button>
+          <button type="button" aria-expanded={open === 'split'} onClick={() => setOpen(open === 'split' ? '' : 'split')}><small>Split</small><strong>{MODES.find(m => m.id === mode)!.label.toLowerCase()} · {count(n, 'person', 'people')}</strong></button>
+        </p>
+        {open === 'payer' && (
+          <div className="add-panel">
+            <div className="chips" role="radiogroup" aria-label="Paid by">
+              {g.members.map(m => <Chip key={m.id} on={!multi && payer === m.id} onClick={() => { setMulti(false); setPayer(m.id); setOpen('') }}>{who(g, m.id)}</Chip>)}
+              {g.members.length > 2 && <Chip on={multi} onClick={() => setMulti(true)}>Several people</Chip>}
+            </div>
+            {multi && (
+              <ul className="rows">
+                {g.members.map(m => (
+                  <li className="row-in" key={m.id}>
+                    <span className="grow">{who(g, m.id)}</span>
+                    <input className="num" inputMode="decimal" placeholder="0" aria-label={`${who(g, m.id)} paid, rupees`}
+                      value={paidIn[m.id] ?? ''} onChange={e => setPaidIn({ ...paidIn, [m.id]: digits(e.target.value) })} />
+                    <span className="unit">₹</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        </>}
-
-        <h2 className="form-h">Paid by</h2>
-        <div className="chips" role="radiogroup" aria-label="Paid by">
-          {g.members.map(m => <Chip key={m.id} on={!multi && payer === m.id} onClick={() => { setMulti(false); setPayer(m.id) }}>{who(g, m.id)}</Chip>)}
-          <Chip on={multi} onClick={() => { setMulti(true); setAdjust(true) }}>Several people</Chip>
-        </div>
-        {multi && (
-          <ul className="rows">
-            {g.members.map(m => (
-              <li className="row-in" key={m.id}>
-                <span className="grow">{who(g, m.id)}</span>
-                <input className="num" inputMode="decimal" placeholder="0" aria-label={`${who(g, m.id)} paid, rupees`}
-                  value={paidIn[m.id] ?? ''} onChange={e => setPaidIn({ ...paidIn, [m.id]: digits(e.target.value) })} />
-                <span className="unit">₹</span>
-              </li>
-            ))}
+        )}
+        {open === 'split' && (
+          <div className="add-panel">
+            <div className="seg" role="radiogroup" aria-label="Split method">
+              {MODES.map(m => <button type="button" key={m.id} role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} onClick={() => switchMode(m.id)}>{m.label}</button>)}
+            </div>
+            <ul className="rows">
+              {g.members.map(m => (
+                <li className="row-in" key={m.id}>
+                  {mode === 'equal' ? (
+                    <label className="check">
+                      <input type="checkbox" checked={inp[m.id] !== '0'} onChange={e => setInp({ ...inp, [m.id]: e.target.checked ? '1' : '0' })} />
+                      {who(g, m.id)}
+                    </label>
+                  ) : <>
+                    <span className="grow">{who(g, m.id)}</span>
+                    <input className="num" inputMode="decimal" placeholder={mode === 'shares' ? '1' : '0'} aria-label={`${who(g, m.id)}, ${MODES.find(x => x.id === mode)!.label.toLowerCase()}`}
+                      value={inp[m.id] ?? ''} onChange={e => setInp({ ...inp, [m.id]: digits(e.target.value) })} />
+                    <span className="unit">{MODES.find(x => x.id === mode)!.unit}</span>
+                  </>}
+                  <span className="share">{owed[m.id] ? inr(owed[m.id]) : '–'}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {open !== 'split' && total > 0 && !error && (
+          <ul className="add-shares" aria-label="Each person’s share">
+            {g.members.filter(m => owed[m.id]).map(m => <li key={m.id}><span>{who(g, m.id)}</span><span className="money">{inr(owed[m.id])}</span></li>)}
           </ul>
         )}
-
-        <div className="section-head">
-          <h2 className="form-h">Split {MODES.find(m => m.id === mode)!.label.toLowerCase()}</h2>
-          {!adjust && <button type="button" className="link" onClick={() => setAdjust(true)}>Adjust split</button>}
-        </div>
-        {adjust && (
-          <div className="seg" role="radiogroup" aria-label="Split method">
-            {MODES.map(m => <button type="button" key={m.id} role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} onClick={() => switchMode(m.id)}>{m.label}</button>)}
-          </div>
-        )}
-        <ul className="rows">
-          {g.members.map(m => (
-            <li className="row-in" key={m.id}>
-              {mode === 'equal' ? (
-                <label className="check">
-                  <input type="checkbox" checked={inp[m.id] !== '0'} onChange={e => setInp({ ...inp, [m.id]: e.target.checked ? '1' : '0' })} />
-                  {who(g, m.id)}
-                </label>
-              ) : <>
-                <span className="grow">{who(g, m.id)}</span>
-                <input className="num" inputMode="decimal" placeholder={mode === 'shares' ? '1' : '0'} aria-label={`${who(g, m.id)}, ${MODES.find(x => x.id === mode)!.label.toLowerCase()}`}
-                  value={inp[m.id] ?? ''} onChange={e => setInp({ ...inp, [m.id]: digits(e.target.value) })} />
-                <span className="unit">{MODES.find(x => x.id === mode)!.unit}</span>
-              </>}
-              <span className="share">{owed[m.id] ? inr(owed[m.id]) : '–'}</span>
-            </li>
-          ))}
-        </ul>
-
-        <label className="check"><input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} />Repeats every month</label>
-        <label className="field"><span>Date</span><input type="date" value={date} onChange={e => setDate(e.target.value || today())} /></label>
-        <ReceiptField gid={g.id} name={receipt} onChange={setReceipt} />
-        {total > 0 && error && <p className="error" role="alert">{error}</p>}
-        <button className="btn primary" disabled={!total || !!error}>{old ? 'Save changes' : total ? `Add ${inr(total)}` : 'Add expense'}</button>
-        {old && <button type="button" className="link center-link" onClick={() => go(`/g/${g.id}/e/${old.id}/history`)}>See history: who changed what</button>}
-        {old && <button type="button" className="link danger" onClick={del}>Delete expense</button>}
-      </form>
-    </Screen>
+        <details className="add-more">
+          <summary>{date === today() ? 'Today' : new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}{repeat ? ' · every month' : ''}{receipt ? ' · bill attached' : ''}<span className="link">Date, repeat{real ? ', bill photo' : ''}</span></summary>
+          <label className="field"><span>Date</span><input type="date" value={date} onChange={e => setDate(e.target.value || today())} /></label>
+          <label className="check"><input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} />Repeats every month</label>
+          {real && <ReceiptField gid={real.id} name={receipt} onChange={setReceipt} />}
+        </details>
+      </>}
+      {total > 0 && (error || (target && block)) && <p className="error" role="alert">{error || block}</p>}
+      <div className="add-foot">
+        <button className="btn primary" disabled={!total || !!error || !!block || saving}>{saving ? 'Adding…' : saveLabel}</button>
+      </div>
+      {old && <button type="button" className="link center-link" onClick={() => go(`/g/${g.id}/e/${old.id}/history`)}>See history: who changed what</button>}
+      {old && <button type="button" className="link danger" onClick={del}>Delete expense</button>}
+    </form>
   )
+  return old ? <Screen t={s.theme} back title="Edit expense">{form}</Screen> : <AddScreen s={s} form={form} />
 }
 
 /** Receipt photo: uploaded to the group's private files; shown only to its members. */

@@ -70,5 +70,6 @@ assert.equal(Object.values(it.owed).reduce((a: number, b) => a + (b as number), 
 const named = (await R('draft_expense', { group: 'goa', title: 'Toit', item_rules: [{ rule: 'non-veg food', people: ['Bala'] }], item_assignments: [{ item: 2, people: ['Chitra'] }] })).card
 assert.deepEqual(named.items[2].who, ['goa-c'], 'a named item overrides the rules')
 delete w.receipt
+assert.equal((await R('draft_expense', { group: 'goa', title: 'Fuel', amount: 900, item_rules: [], item_assignments: [] })).card.amount, 90000, 'empty item lists mean no item split')
 assert.match((await R('draft_expense', { group: 'goa', title: 'x', item_rules: [{ rule: 'veg', people: ['me'] }] })).result.error, /no receipt/)
 console.log('chat tools ok')

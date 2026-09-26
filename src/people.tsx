@@ -175,11 +175,7 @@ export function FriendPage({ s, email }: { s: State; email: string }) {
   if (!f) return <Screen t={s.theme} back title="Friend"><p className="empty">Not found. They may have left your groups.</p></Screen>
   const n = friendBalance(f)
   const parts = f.spots.map(x => ({ ...x, n: pairwise(x.g, ME, x.id) })).filter(x => x.n)
-  const addExpense = async () => {
-    if (f.direct) return go(`/g/${f.direct.id}/add`)
-    setBusy(true); setErr('')
-    try { go(`/g/${await directWith(f.email, f.name)}/add`) } catch (x) { setErr(navigator.onLine ? (x as Error).message : 'The first expense with a friend needs a connection.') } finally { setBusy(false) }
-  }
+  const addExpense = () => go(`/add/f/${encodeURIComponent(f.email)}`) // the ledger with them is made on save if it doesn't exist yet
   const nudge = `${TONES[s.tone](inr(n), s.me.name || 'me', 'Plico')}${s.me.upi ? `\nUPI: ${s.me.upi}` : ''}`
   const list = (f.direct?.expenses ?? []).map((e, i) => ({ e, i })).sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
   return (
