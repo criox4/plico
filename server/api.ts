@@ -248,7 +248,7 @@ api.get('/me/activity', async c => {
   const unread = () => db.auditEvent.count({ where: { groupId: { in: [...byGroup.keys()] }, byId: { not: uid }, ...(me.activitySeenAt && { at: { gt: me.activitySeenAt } }) } })
   if (c.req.query('peek')) return c.json({ unread: await unread() }) // just the badge, on every sync
   const before = c.req.query('before')
-  const where = { groupId: { in: [...byGroup.keys()] }, ...(money && { kind: { startsWith: 'expense.' } }), ...(before && { at: { lt: new Date(before) } }) }
+  const where = { groupId: { in: [...byGroup.keys()] }, ...(money && { kind: { startsWith: 'expense.' } }), ...(before && !isNaN(Date.parse(before)) && { at: { lt: new Date(before) } }) }
   // ponytail: "money" filters after the query (the member id differs per group); fine at hundreds of entries a page.
   const rows = await db.auditEvent.findMany({ where, orderBy: { at: 'desc' }, take: money ? 200 : 50 })
   const events = rows
@@ -272,7 +272,7 @@ api.get('/me/audit', async c => {
   const me = new Map(mine.map(m => [m.groupId, m]))
   const before = c.req.query('before')
   const rows = await db.auditEvent.findMany({
-    where: { groupId: { in: [...me.keys()] }, kind: { startsWith: 'expense.' }, ...(before && { at: { lt: new Date(before) } }) },
+    where: { groupId: { in: [...me.keys()] }, kind: { startsWith: 'expense.' }, ...(before && !isNaN(Date.parse(before)) && { at: { lt: new Date(before) } }) },
     orderBy: { at: 'desc' }, take: 300,
   })
   const events = rows.filter(e => (e.effect as Record<string, number>)[me.get(e.groupId)!.id])
@@ -740,6 +740,10 @@ api.post('/me/push-devices', async c => {
   const b = PushDeviceIn.parse(await c.req.json())
   const uid = c.get('userId'), sessionId = c.get('sessionId')
   const data = { userId: uid, sessionId, platform: b.platform, keys: b.keys ?? Prisma.DbNull, lastSeenAt: new Date() }
+  // A browser subscription moves to another account only with its own secret: knowing the address isn't enough.
+  const held = await db.pushDevice.findUnique({ where: { token: b.token }, select: { userId: true, keys: true } })
+  if (held && held.userId !== uid && b.platform === 'web' && (held.keys as { auth?: string } | null)?.auth !== b.keys?.auth)
+    return c.json({ error: 'That notification subscription belongs to another account' }, 409)
   await db.pushDevice.upsert({ where: { token: b.token }, create: { token: b.token, ...data }, update: data })
   if (b.tz) await db.user.update({ where: { id: uid }, data: { tz: b.tz } })
   return c.json({ ok: true })

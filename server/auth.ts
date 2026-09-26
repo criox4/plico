@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth'
 import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { bearer } from 'better-auth/plugins'
+import { APIError } from 'better-auth/api'
 import { db } from './db.ts'
 import { mail } from './email.ts'
 import { linkByEmail } from './audit.ts'
@@ -97,13 +98,17 @@ export const auth = betterAuth({
       create: { after: async u => { if (u.emailVerified) await linkByEmail(u.id, u.email) } },
       // Profile fields are user input shown to others (UPI IDs end up in pay links): validate at the boundary.
       update: {
-        before: async data => {
-          if (data.upi && !isVpa(String(data.upi))) return false
-          if (data.theme && !THEMES.some(t => t.id === data.theme)) return false
-          if (data.tone && !TONES.includes(String(data.tone))) return false
-          if (data.phone && !/^\+?[0-9 ()-]{7,20}$/.test(String(data.phone))) return false
-          // Profile picture: our uploaded file, a Google photo, an emoji, or a Plico face seed.
-          if (data.image && !/^(\/api\/files\/avatars\/[\w/-]+\.(jpg|png|webp)|https:\/\/[^\s"<>]{1,500}|plico:[0-9a-f]{6}|emoji:(?=.*\p{Extended_Pictographic})\S{1,16})$/u.test(String(data.image))) return false
+        before: async (data, ctx) => {
+          // Someone editing their profile hears what's wrong; internal updates (sign-in) just skip the bad field's update.
+          const no = (message: string) => { if (ctx?.path === '/update-user') throw new APIError('BAD_REQUEST', { message }); return false as const }
+          if (data.upi && !isVpa(String(data.upi))) return no('That UPI ID doesn’t look right')
+          if (data.upi2 && !isVpa(String(data.upi2))) return no('That backup UPI ID doesn’t look right')
+          if (data.theme && !THEMES.some(t => t.id === data.theme)) return no('Unknown theme')
+          if (data.tone && !TONES.includes(String(data.tone))) return no('Unknown reminder tone')
+          if (data.phone && !/^\+?[0-9 ()-]{7,20}$/.test(String(data.phone))) return no('That phone number doesn’t look right')
+          // Profile picture: our uploaded file, a Google photo, an emoji, or a Plico face seed. No other web addresses:
+          // a picture group-mates load from anywhere would tell its owner their IP addresses.
+          if (data.image && !/^(\/api\/files\/avatars\/[\w/-]+\.(jpg|png|webp)|https:\/\/lh\d\.googleusercontent\.com\/[^\s"<>]{1,500}|plico:[0-9a-f]{6}|emoji:(?=.*\p{Extended_Pictographic})\S{1,16})$/u.test(String(data.image))) return no('That picture can’t be used')
           return { data }
         },
         after: async u => { if (u.emailVerified) await linkByEmail(u.id, u.email) },
