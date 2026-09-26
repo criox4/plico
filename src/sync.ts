@@ -74,9 +74,9 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const sid = (g: Group, id: string) => (id === ME ? g.selfId! : id)
 const mapKeys = (g: Group, o?: Record<string, number>) => o && Object.fromEntries(Object.entries(o).map(([k, v]) => [sid(g, k), v]))
 const groupBody = (g: Group) => ({ name: g.name.trim() || 'Group', kind: g.kind, theme: g.theme, track: !!g.track, emoji: g.emoji || null, cover: g.cover || null, selfId: g.selfId })
-const selfBody = (s: State) => ({ name: s.me.name.trim() || 'Me', upi: isVpa(s.me.upi) ? s.me.upi : null })
+const selfBody = (s: State) => ({ name: s.me.name.trim() || 'Me', upi: isVpa(s.me.upi) ? s.me.upi : null, upi2: s.me.upi2 && isVpa(s.me.upi2) ? s.me.upi2 : null })
 const memberBody = (m: Group['members'][number]) => ({
-  name: m.name.trim() || 'Someone', upi: m.upi && isVpa(m.upi) ? m.upi : null,
+  name: m.name.trim() || 'Someone', upi: m.upi && isVpa(m.upi) ? m.upi : null, upi2: m.upi2 && isVpa(m.upi2) ? m.upi2 : null,
   email: m.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email) ? m.email.trim().toLowerCase() : null,
   phone: m.phone && /^\+?[0-9 ()-]{7,20}$/.test(m.phone) ? m.phone.trim() : null,
 })
@@ -89,6 +89,7 @@ const profileBody = (s: State) => ({
   ...(s.me.name.trim() && { name: s.me.name.trim() }),
   ...(isPhone(s.me.phone) ? { phone: s.me.phone!.trim() } : !s.me.phone && { phone: '' }),
   ...(isVpa(s.me.upi) ? { upi: s.me.upi } : !s.me.upi && { upi: '' }),
+  ...(s.me.upi2 && isVpa(s.me.upi2) ? { upi2: s.me.upi2 } : !s.me.upi2 && { upi2: '' }),
   theme: s.theme, tone: s.tone,
 })
 
@@ -245,7 +246,7 @@ export function toClient(sg: ServerGroup, userId: string): Group {
   return {
     id: sg.id, name: sg.name, kind: sg.kind, theme: sg.theme, track: sg.track || undefined, emoji: sg.emoji ?? undefined, cover: sg.cover ?? undefined, selfId: self?.id, mine: sg.createdById === userId,
     members: sg.members.map(m => (m.id === self?.id ? { id: ME, name: 'Me' } : {
-      id: m.id, name: m.name, upi: m.upi ?? undefined, email: (m.email ?? m.user?.email)?.toLowerCase() || undefined, phone: m.phone ?? undefined,
+      id: m.id, name: m.name, upi: m.upi ?? undefined, upi2: m.upi2 ?? undefined, email: (m.email ?? m.user?.email)?.toLowerCase() || undefined, phone: m.phone ?? undefined,
       joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined, image: m.user?.image ?? undefined,
     })),
     expenses: sg.expenses.filter(e => !e.deletedAt).map(e => expenseFromServer(e, self?.id)),
@@ -400,10 +401,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 // ---------- auth lifecycle ----------
-type AuthUser = { id: string; email: string; name: string; phone?: string | null; emailVerified?: boolean; image?: string | null; upi?: string | null; theme?: string | null; tone?: string | null
+type AuthUser = { id: string; email: string; name: string; phone?: string | null; emailVerified?: boolean; image?: string | null; upi?: string | null; upi2?: string | null; onboardedAt?: string | Date | null; theme?: string | null; tone?: string | null
   ageGroup?: string | null; guardianEmail?: string | null; guardianConsentAt?: string | Date | null; aiOffAt?: string | Date | null }
 /** The account facts the app gates on (age, parental consent, AI consent). */
-const gates = (u: AuthUser) => ({ ageGroup: u.ageGroup ?? null, guardianEmail: u.guardianEmail ?? null, guardianConsent: !!u.guardianConsentAt, ai: !u.aiOffAt }) // AI reading is on unless switched off
+const gates = (u: AuthUser) => ({ ageGroup: u.ageGroup ?? null, guardianEmail: u.guardianEmail ?? null, guardianConsent: !!u.guardianConsentAt, ai: !u.aiOffAt, onboarded: !!u.onboardedAt }) // AI reading is on unless switched off
 
 /** After sign-in/up: adopt the account's profile, upload anything made on this device before, then sync. */
 export async function signedIn(u: AuthUser) {
@@ -418,6 +419,7 @@ export async function signedIn(u: AuthUser) {
     d.user = { id: u.id, email: u.email, emailVerified: !!u.emailVerified, image: u.image, ...gates(u) }
     d.me.name = u.name || d.me.name
     d.me.upi = u.upi || d.me.upi
+    d.me.upi2 = u.upi2 || d.me.upi2
     d.me.phone = u.phone || d.me.phone
     if (u.theme) d.theme = u.theme as Theme
     if (u.tone) d.tone = u.tone as Tone
@@ -479,7 +481,7 @@ export function startSync() {
   const session = authClient.getSession().then(async r => {
     const u = r.data?.user
     if (u && !getState().user) return signedIn(u) // back from Google's redirect with a session cookie
-    if (u) setRemote(d => { if (d.user) Object.assign(d.user, { emailVerified: u.emailVerified, image: u.image }) })
+    if (u) setRemote(d => { if (d.user) Object.assign(d.user, { emailVerified: u.emailVerified, image: u.image, ...gates(u as AuthUser) }) })
     if (r.data === null && !r.error && getState().user) expired() // the server says no session; a network error only means offline
   }).catch(() => {})
   void Promise.race([Promise.all([config, session]), new Promise(r => setTimeout(r, 800))]).then(() => setStatus({ booting: false }))

@@ -21,7 +21,9 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   upi           String?
+  upi2          String? /// backup UPI ID, for when the first bank's UPI is down
   phone         String?
+  onboardedAt   DateTime? /// finished the first-run profile (name, face, UPI IDs)
   theme         String?   @default("classic")
   tone          String?   @default("gentle")
   ageGroup          String? /// "adult" (18+) or "teen" (13-17); null until the person answers
@@ -128,6 +130,7 @@ model Member {
   group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
   name        String
   upi         String?
+  upi2        String? /// backup UPI ID
   email       String? /// invite target; auto-links when a user with this verified email exists or signs up
   phone       String? /// invite target via WhatsApp link (never auto-linked: phones aren't verified)
   inviteToken String?        @unique /// one-time claim link sent to this person

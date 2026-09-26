@@ -172,6 +172,62 @@ export function AgeGate({ s }: { s: State }) {
   )
 }
 
+/** First run, once: what friends call you, your face, where they pay you. Everything saves as you go and syncs;
+ *  only the UPI step can be put off, because without it nobody can pay you. */
+export function Onboarding({ s }: { s: State }) {
+  const [step, setStep] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const first = s.me.name.trim().split(/\s+/)[0]
+  const upiBad = !!s.me.upi && !isVpa(s.me.upi), upi2Bad = !!s.me.upi2 && !isVpa(s.me.upi2)
+  const same = !!s.me.upi2 && s.me.upi2.toLowerCase() === s.me.upi.toLowerCase()
+  const finish = async () => {
+    setBusy(true); setErr('')
+    try { await syncNow(); await api('/api/me/onboarded', { method: 'POST' }); await refreshUser() }
+    catch (e) { setErr(navigator.onLine ? msg(e) : 'Almost there: this last step needs a connection.') } finally { setBusy(false) }
+  }
+  const steps = ['You', 'Your face', 'Getting paid']
+  return (
+    <Screen t={s.theme} title="Set up your profile">
+      <form className="form onboard" onSubmit={e => { e.preventDefault(); if (step < 2) setStep(step + 1); else void finish() }}>
+        <ol className="onboard-steps" aria-label={`Step ${step + 1} of 3: ${steps[step]}`}>
+          {steps.map((x, i) => <li key={x} className={i < step ? 'done' : i === step ? 'on' : ''} aria-current={i === step ? 'step' : undefined}><span>{x}</span></li>)}
+        </ol>
+        {step === 0 && <>
+          <div className="hello"><Plico mood="idle" size={56} /><p><strong>Hi{first ? `, ${first}` : ''}! Let’s get you set up.</strong>Three quick things, so your friends know it’s you and can pay you back.</p></div>
+          <label className="field"><span>What should friends call you?</span>
+            <input value={s.me.name} maxLength={40} autoComplete="name" autoFocus required onChange={e => update(d => { d.me.name = e.target.value })} /></label>
+          <label className="field"><span>Phone <em>optional</em></span>
+            <input type="tel" value={s.me.phone ?? ''} placeholder="+91 98765 43210" autoComplete="tel" aria-invalid={!!s.me.phone && !isPhone(s.me.phone)} onChange={e => update(d => { d.me.phone = e.target.value })} />
+            <small>Only people in your groups see it, for reminders on WhatsApp.</small></label>
+          <button className="btn primary" disabled={!s.me.name.trim() || (!!s.me.phone && !isPhone(s.me.phone))}>Continue</button>
+        </>}
+        {step === 1 && <>
+          <div className="hello"><Plico mood="owed" size={56} /><p><strong>Pick your face.</strong>A photo, an emoji or a Plico. It’s how you show up in groups and on reminders.</p></div>
+          <AvatarPicker s={s} />
+          <button className="btn primary">Continue</button>
+          <button type="button" className="link center-link" onClick={() => setStep(0)}>Back</button>
+        </>}
+        {step === 2 && <>
+          <div className="hello"><Plico mood="settled" size={56} /><p><strong>Where do friends pay you?</strong>Your UPI ID goes on your pay links and QR codes. Plico shows your name above it, so nobody pays the wrong person.</p></div>
+          <label className="field"><span>UPI ID</span>
+            <input value={s.me.upi} placeholder="name@okhdfcbank" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus
+              aria-invalid={upiBad} onChange={e => update(d => { d.me.upi = e.target.value.trim() })} />
+            {upiBad && <small className="error">That doesn’t look like a UPI ID. It’s usually name@bank, like asha@okaxis.</small>}</label>
+          <label className="field"><span>Backup UPI ID <em>optional</em></span>
+            <input value={s.me.upi2 ?? ''} placeholder="name@ybl" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+              aria-invalid={upi2Bad || same} onChange={e => update(d => { d.me.upi2 = e.target.value.trim() })} />
+            <small className={upi2Bad || same ? 'error' : ''}>{upi2Bad ? 'That doesn’t look like a UPI ID.' : same ? 'That’s the same as your UPI ID.' : 'From another bank or app. If the first one’s bank is down, friends can pay you here instead.'}</small></label>
+          {err && <p className="error" role="alert">{err}</p>}
+          <button className="btn primary" disabled={busy || !s.me.upi || upiBad || upi2Bad || same}>{busy ? 'Saving…' : 'Done'}</button>
+          <button type="button" className="link center-link" disabled={busy} onClick={() => { update(d => { d.me.upi = ''; d.me.upi2 = '' }); void finish() }}>I’ll add it later</button>
+          <button type="button" className="link center-link" onClick={() => setStep(1)}>Back</button>
+        </>}
+      </form>
+    </Screen>
+  )
+}
+
 /** A 13-17 year old waiting for their parent. Checks back whenever the app comes to the front. */
 export function GuardianWait({ s }: { s: State }) {
   const [email, setEmail] = useState('')
@@ -663,6 +719,11 @@ export function ProfilePage({ s }: { s: State }) {
         <input value={s.me.upi} placeholder="name@okhdfcbank" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
           aria-invalid={!!s.me.upi && !isVpa(s.me.upi)} onChange={e => update(d => { d.me.upi = e.target.value.trim() })} />
         <small>Friends pay you here. It appears on your pay links and QR codes.</small>
+      </label>
+      <label className="field"><span>Backup UPI ID</span>
+        <input value={s.me.upi2 ?? ''} placeholder="name@ybl" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+          aria-invalid={!!s.me.upi2 && !isVpa(s.me.upi2)} onChange={e => update(d => { d.me.upi2 = e.target.value.trim() })} />
+        <small>Optional, from another bank or app. Friends can switch to it if the first one isn’t working.</small>
       </label>
     </Page>
   )

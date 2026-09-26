@@ -178,7 +178,7 @@ export function Screen({ t, title, back, action, fab, children }: {
   const here = location.hash.replace(/^#\/?/, '').split('/')
   // The app's navigation, for anyone signed in and past the age question: a sidebar on wide screens,
   // bottom tabs on phones (only on the top-level screens, which pass `fab`).
-  const shell = sync.authed && !!s.user?.ageGroup
+  const shell = sync.authed && !!s.user?.ageGroup && s.user.onboarded !== false
   return (
     <div className={`screen${shell ? ' has-nav' : ''}`} data-theme={t} style={themeVars(t)}>
       {shell && <Sidebar s={s} add={fab ?? '/add'} unread={sync.unread} here={here} />}
@@ -739,7 +739,10 @@ export function Settle({ s, g, from, to, amount, t = s.theme, onRecord }: {
   s: State; g: Group; from: Id; to: Id; amount: number; t?: ThemeId; onRecord?: (paise: number, vpa: string) => void
 }) {
   const payee = realName(s, g, to)
-  const vpa = upiOf(s, g, to)
+  const [backup, setBackup] = useState(false)
+  const m = g.members.find(x => x.id === to)
+  const alt = to === ME ? s.me.upi2 : m?.upi2
+  const vpa = backup && alt ? alt : upiOf(s, g, to)
   const [asked, setAsked] = useState(false)
   const note = g.kind === 'direct' ? 'Plico settlement' : `${g.name} settlement`
   const link = isVpa(vpa) ? upiLink(vpa, payee, amount, note) : ''
@@ -749,7 +752,9 @@ export function Settle({ s, g, from, to, amount, t = s.theme, onRecord }: {
       <section className="pay" aria-label="Payment details">
         <p className="pay-who">{who(g, from) === 'You' ? 'You are paying' : `${who(g, from)} is paying`}</p>
         <p className="payee">{payee}</p>
-        {vpa ? <code className="vpa">{vpa}</code> : <p className="pay-who">No UPI ID yet. Add one in group settings.</p>}
+        {vpa ? <code className="vpa">{vpa}</code> : <p className="pay-who">{to === ME ? 'Add your UPI ID in You › Profile so friends can pay you.'
+          : m?.joined ? `${payee} hasn’t added a UPI ID yet. Ask them to add it in Plico, or pay another way.` : 'No UPI ID yet. Add theirs in group settings.'}</p>}
+        {alt && isVpa(alt) && upiOf(s, g, to) && <button type="button" className="link" onClick={() => setBackup(!backup)}>{`${backup ? 'Use' : 'Not working? Use'} ${to === ME ? 'your' : 'their'} ${backup ? 'main' : 'backup'} UPI ID`}</button>}
         <p className="pay-amt"><span className={`money ${to === ME ? 'pos' : from === ME ? 'neg' : ''}`}>{inr(amount)}</span></p>
         <p className="pay-for">For {note}</p>
         {qr && <div className="qr-plate"><img src={qr} alt={`UPI QR code to pay ${payee} ${inr(amount)}`} /></div>}

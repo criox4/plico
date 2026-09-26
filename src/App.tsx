@@ -9,7 +9,7 @@ import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
 import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
-  NotificationsPage, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
+  NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
@@ -55,6 +55,7 @@ export default function App() {
   if (!sync.authed) return <AuthFlow s={s} notice={r[0] === 'verified' ? 'Email verified. Sign in to continue.' : undefined} />
   if (s.user && !s.user.ageGroup) return <AgeGate s={s} />
   if (s.user?.ageGroup === 'teen' && !s.user.guardianConsent) return <GuardianWait s={s} />
+  if (s.user?.onboarded === false) return <Onboarding s={s} />
   if (r[0] === 'verified') return <Verified />
   if (r[0] === 'claim' && r[1]) return <Claim s={s} token={r[1]} />
   if (r[0] === 'delete' && r[1]) return <DeleteConfirm s={s} token={r[1]} />

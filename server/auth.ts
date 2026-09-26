@@ -51,6 +51,7 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       upi: { type: 'string', required: false },
+      upi2: { type: 'string', required: false },
       phone: { type: 'string', required: false },
       theme: { type: 'string', required: false, defaultValue: 'classic' },
       tone: { type: 'string', required: false, defaultValue: 'gentle' },
@@ -59,6 +60,7 @@ export const auth = betterAuth({
       guardianEmail: { type: 'string', required: false, input: false },
       guardianConsentAt: { type: 'date', required: false, input: false },
       aiOffAt: { type: 'date', required: false, input: false },
+      onboardedAt: { type: 'date', required: false, input: false },
     },
     changeEmail: {
       enabled: true,

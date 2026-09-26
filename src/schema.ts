@@ -27,7 +27,7 @@ const When = z.string()
 export const GroupIn = z.object({
   name: text(60), kind: Kind, theme: Theme, track: z.optional(z.boolean()), emoji: z.nullish(Emoji), cover: z.nullish(FileName), selfId: Id,
 })
-export const MemberIn = z.object({ name: text(60), upi: Upi, email: Email, phone: Phone })
+export const MemberIn = z.object({ name: text(60), upi: Upi, upi2: z.optional(Upi), email: Email, phone: Phone })
 export const ExpenseIn = z.object({
   title: text(120), cat: z.string().check(z.maxLength(20)), date: Day, amount: Paise.check(z.minimum(1)),
   paid: Money, owed: Money,
@@ -91,7 +91,7 @@ export const ServerExpense = z.extend(Snap, {
   repeatDay: z.nullable(z.int()), version: z.int(), deletedAt: z.nullable(When), updatedAt: When,
 })
 export const ServerMember = z.object({
-  id: z.string(), name: z.string(), upi: z.nullable(z.string()), userId: z.nullable(z.string()), email: z.nullable(z.string()),
+  id: z.string(), name: z.string(), upi: z.nullable(z.string()), upi2: z.nullish(z.string()), userId: z.nullable(z.string()), email: z.nullable(z.string()),
   phone: z.nullable(z.string()), invitedAt: z.nullable(When), user: z.nullish(z.object({ image: z.nullable(z.string()), email: z.string() })),
 })
 export const ServerGroup = z.object({

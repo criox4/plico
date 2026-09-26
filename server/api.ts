@@ -136,6 +136,12 @@ api.post('/me/guardian', async c => {
   return c.json({ ok: true })
 })
 
+/** The first-run profile is done (name, face, UPI IDs); the app stops showing it. */
+api.post('/me/onboarded', async c => {
+  await db.user.update({ where: { id: c.get('userId') }, data: { onboardedAt: new Date() } })
+  return c.json({ ok: true })
+})
+
 api.post('/me/ai', async c => {
   const { consent } = AiConsentIn.parse(await c.req.json())
   await db.user.update({ where: { id: c.get('userId') }, data: { aiOffAt: consent ? null : new Date() } })
@@ -151,7 +157,7 @@ api.get('/me/export', async c => {
   const groups = await db.group.findMany({
     where: { members: { some: { userId: uid } } },
     select: { id: true, name: true, kind: true, theme: true, emoji: true, createdAt: true,
-      members: { select: { id: true, name: true, upi: true, email: true, phone: true, userId: true } },
+      members: { select: { id: true, name: true, upi: true, upi2: true, email: true, phone: true, userId: true } },
       expenses: { select: { id: true, title: true, cat: true, date: true, amount: true, settle: true, pending: true, rejected: true, receipt: true, createdAt: true, version: true, deletedAt: true, shares: { select: { memberId: true, paid: true, owed: true } } } } },
   })
   const history = await db.auditEvent.findMany({ where: { byId: uid }, orderBy: { at: 'asc' }, select: { groupId: true, seq: true, kind: true, expenseId: true, memberId: true, at: true, before: true, after: true, effect: true } })
@@ -358,7 +364,7 @@ api.put('/groups/:gid/members/:mid', async c => {
   // redirect that person's incoming payments, so those edits are ignored (not errors: they may be stale outbox ops).
   if (m?.userId && m.userId !== uid) return c.json({ ok: true, ignored: true })
   const email = b.email?.toLowerCase() || null
-  const data = { name: b.name, upi: b.upi || null, email: m?.userId ? m.email : email, phone: b.phone || null }
+  const data = { name: b.name, upi: b.upi || null, upi2: b.upi2 || null, email: m?.userId ? m.email : email, phone: b.phone || null }
   // Everyone in a group is a real person: an account, or an email that becomes one when they join.
   if (!m?.userId && !email) return c.json({ error: 'Add their email so they can join Plico and see this group.' }, 400)
   if (!m) {
@@ -375,7 +381,7 @@ api.put('/groups/:gid/members/:mid', async c => {
       await audit(tx, gid, { kind: 'member.invited', memberId: mid, ...by, after: { name: data.name, email } })
     })
   } else {
-    const diff = changed({ name: m.name, upi: m.upi, email: m.email, phone: m.phone }, data)
+    const diff = changed({ name: m.name, upi: m.upi, upi2: m.upi2, email: m.email, phone: m.phone }, data)
     if (!diff) return c.json({ ok: true })
     // A corrected email retires the old personal link: it may have gone to the wrong person.
     const retire = !m.userId && email !== m.email ? { inviteToken: null, invitedAt: null } : {}

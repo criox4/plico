@@ -9,6 +9,7 @@ export type Tone = 'gentle' | 'normal' | 'shameless'
 
 export type Member = {
   id: Id; name: string; upi?: string
+  upi2?: string // backup UPI ID
   email?: string; phone?: string // invite targets for people without the app
   joined?: boolean // linked to an account
   invited?: boolean // an invite has gone out
