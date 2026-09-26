@@ -348,6 +348,14 @@ api.get('/groups/:id/invite', async c => {
   return c.json({ code: g.inviteCode })
 })
 
+// A leaked link lets anyone join: any member can retire it. The old link stops working at once.
+api.post('/groups/:id/invite/reset', async c => {
+  const id = Id.parse(c.req.param('id'))
+  if (!(await membership(id, c.get('userId')))) return c.json(notFound, 404)
+  const g = await db.group.update({ where: { id }, data: { inviteCode: inviteCode() }, select: { inviteCode: true } })
+  return c.json({ code: g.inviteCode })
+})
+
 api.put('/groups/:gid/members/:mid', async c => {
   const [gid, mid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('mid'))]
   const b = MemberIn.parse(await c.req.json())

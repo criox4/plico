@@ -722,6 +722,10 @@ function Invite({ g }: { g: Group }) {
       {qr && <div className="qr-plate qr-sm"><img src={qr} alt={`QR code to join ${g.name}`} /></div>}
       <a className="btn secondary" href={wa(`Join “${g.name}” on Plico so we can split and settle up: ${link}`)} target="_blank" rel="noopener"><Icon n="send" />Share invite on WhatsApp</a>
       <button type="button" className="link center-link" onClick={() => navigator.clipboard?.writeText(link)}><Icon n="copy" size={18} />Copy invite link</button>
+      <button type="button" className="link center-link" onClick={() => {
+        if (confirm('Make a new invite link? The old one stops working, so anyone who has it can’t join with it.'))
+          api<{ code: string }>(`/api/groups/${g.id}/invite/reset`, { method: 'POST', body: '{}' }).then(r => { setCode(r.code); setErr('') }, e => setErr((e as Error).message))
+      }}><Icon n="lock" size={18} />Reset link</button>
     </> : <p className="muted-p">{err || 'Loading invite link…'}</p>}
   </>
 }
