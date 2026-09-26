@@ -262,3 +262,16 @@ model Notification {
   @@map("notification")
   @@schema("splittr")
 }
+
+/// Invite emails sent, for the daily caps (they carry text the sender typed, to any address). Kept a day or so.
+model EmailLog {
+  id   String   @id @default(uuid())
+  byId String
+  to   String
+  at   DateTime @default(now())
+
+  @@index([byId, at])
+  @@index([to, at])
+  @@map("email_log")
+  @@schema("splittr")
+}

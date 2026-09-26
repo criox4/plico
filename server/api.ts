@@ -386,11 +386,28 @@ api.put('/groups/:gid/members/:mid', async c => {
     })
   }
   // A new email: link now if that person already has a verified account, otherwise email an invite.
-  if (email && email !== m?.email && !m?.userId) await inviteByEmail(gid, mid, email, c.get('userName'))
+  if (email && email !== m?.email && !m?.userId && !(await inviteByEmail(gid, mid, email, { id: uid, name: c.get('userName') }))) return c.json({ ok: true, emailed: false })
   return c.json({ ok: true })
 })
 
-async function inviteByEmail(gid: string, mid: string, email: string, inviter: string) {
+/** Invite emails carry names the sender typed, to any address: capped so Plico can't be used to spam or phish.
+ *  Past a cap the person is still added; the inviter shares the link themselves. */
+const INVITES_A_DAY = 20, TO_ONE_ADDRESS_A_DAY = 3
+async function mayEmail(byId: string, to: string) {
+  const since = new Date(Date.now() - 864e5)
+  const [sent, received] = await Promise.all([
+    db.emailLog.count({ where: { byId, at: { gt: since } } }),
+    db.emailLog.count({ where: { to, at: { gt: since } } }),
+  ])
+  if (sent >= INVITES_A_DAY || received >= TO_ONE_ADDRESS_A_DAY) return false
+  await db.emailLog.create({ data: { byId, to } })
+  if (Math.random() < 0.01) void db.emailLog.deleteMany({ where: { at: { lt: new Date(Date.now() - 2 * 864e5) } } }).catch(() => {})
+  return true
+}
+
+/** Links the spot if that email already has an account, otherwise emails an invite. False when a cap stopped the email. */
+async function inviteByEmail(gid: string, mid: string, email: string, by: { id: string; name: string }) {
+  const inviter = by.name
   const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { name: true } })
   const user = await db.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, emailVerified: true } })
   if (user) {
@@ -399,13 +416,16 @@ async function inviteByEmail(gid: string, mid: string, email: string, inviter: s
       if (count) await audit(tx, gid, { kind: 'member.joined', memberId: mid, byId: user.id, byName: user.name, after: { email, how: 'email', addedBy: inviter } })
       return count
     })
-    if (count) void mail.added(user.email, inviter, g.name).catch(console.error)
-    return
+    if (count && await mayEmail(by.id, user.email.toLowerCase())) void mail.added(user.email, inviter, g.name).catch(console.error)
+    return true
   }
   const token = await ensureToken(mid)
+  if (!(await mayEmail(by.id, email))) return false
   await db.member.update({ where: { id: mid }, data: { invitedAt: new Date() } })
   void mail.invite(email, inviter, g.name, claimUrl(token)).catch(console.error)
+  return true
 }
+const capped = 'You’ve sent a lot of invite emails today. Share their invite link on WhatsApp instead.'
 
 async function ensureToken(mid: string) {
   const m = await db.member.findUniqueOrThrow({ where: { id: mid }, select: { inviteToken: true } })
@@ -425,7 +445,7 @@ api.post('/groups/:gid/members/:mid/invite', async c => {
   const { email } = InviteResendIn.parse(await c.req.json().catch(() => ({})))
   if (email && m.email) {
     if (m.invitedAt && Date.now() - m.invitedAt.getTime() < 60_000) return c.json({ error: 'Invite just sent. Try again in a minute.' }, 429)
-    await inviteByEmail(gid, mid, m.email, c.get('userName'))
+    if (!(await inviteByEmail(gid, mid, m.email, { id: c.get('userId'), name: c.get('userName') }))) return c.json({ error: capped, link: claimUrl(await ensureToken(mid)) }, 429)
   }
   return c.json({ link: claimUrl(await ensureToken(mid)) })
 })
@@ -696,7 +716,7 @@ api.post('/friends', async c => {
     throw e
   })
   const g = await db.group.findUniqueOrThrow({ where: { directKey: key }, select: { id: true } })
-  if (g.id === id) await inviteByEmail(id, friendId, email, me.name)
+  if (g.id === id) await inviteByEmail(id, friendId, email, { id: uid, name: me.name })
   return c.json({ id: g.id })
 })
 
