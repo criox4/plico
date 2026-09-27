@@ -45,7 +45,7 @@ function ThemeSection({ t }: { t: ThemeDef }) {
         <Phone label="Settle"><Settle s={DEMO} g={goa} {...karanOwes} t={t.id} /></Phone>
         <figure className="phone">
           <div className="g-seal" data-theme={t.id} style={themeVars(t.id)}>
-            <Seal t={t.id} replay={replay} />
+            <Seal t={t.id} replay={replay} burst={replay > 0} />
             <button className="btn secondary" onClick={() => setReplay(r => r + 1)}>Replay</button>
           </div>
           <figcaption>Settled moment</figcaption>

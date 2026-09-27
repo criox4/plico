@@ -2,7 +2,11 @@
    plus each theme's structural personality. Money semantics (--pos, --neg, --settled) never change meaning. */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; }
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  /* A damped spring (about 13% overshoot, settles by 900ms) sampled into CSS, for the settled seal pressing in. */
+  --spring-thud: linear(0, .053, .184, .355, .536, .706, .851, .965, 1.046, 1.096, 1.121, 1.126, 1.117, 1.098, 1.076, 1.054, 1.033, 1.015, 1.002, .992, .987, .984, .984, .986, .988, .991, .994, .996, .999, 1, 1.001, 1.002, 1.002, 1.002, 1.002, 1.001, 1.001);
+}
 body { background: #F7F7FB; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 a { color: inherit; }
@@ -115,16 +119,28 @@ small { font-size: .8125rem; color: var(--muted); }
 .group-cover { margin: 12px 0 -4px; aspect-ratio: 5 / 2; border-radius: var(--radius); overflow: hidden; background: var(--surface2); }
 .group-cover img { width: 100%; height: 100%; object-fit: cover; }
 .seal { position: relative; }
-.confetti { position: absolute; left: 50%; top: 68px; pointer-events: none; }
-.confetti i { position: absolute; width: 8px; height: 12px; border-radius: 2px; background: var(--c); opacity: 0; }
+/* Confetti: i drifts sideways and slows (x), b rises then falls under gravity (y), em tumbles like paper (3D spin). */
+.confetti { position: absolute; left: 50%; top: 68px; z-index: 0; pointer-events: none; }
+.confetti i, .confetti b, .confetti em { position: absolute; display: block; }
+.confetti em { width: calc(7px * var(--s)); height: calc(12px * var(--s)); margin: -6px 0 0 -3px; background: var(--c); border-radius: 1.5px; opacity: 0; }
+.confetti em.strip { width: calc(4px * var(--s)); height: calc(16px * var(--s)); }
+.confetti em.square { height: calc(8px * var(--s)); }
+.confetti em.dot { width: calc(7px * var(--s)); height: calc(7px * var(--s)); border-radius: 50%; }
+[data-theme=pixel] .confetti em { border-radius: 0; } /* 8-bit: no round pieces */
+.seal-svg { position: relative; z-index: 1; }
 @media (prefers-reduced-motion: no-preference) {
-  .confetti i { animation: confetti 1.5s cubic-bezier(.16, 1, .3, 1) var(--d) both; }
+  .confetti i { animation: cf-x var(--t) cubic-bezier(.18, .9, .3, 1) calc(350ms + var(--d)) both; }
+  .confetti b { animation: cf-y var(--t) linear calc(350ms + var(--d)) both; }
+  .confetti em { animation: cf-spin var(--spin) linear calc(350ms + var(--d)) infinite, cf-life var(--t) linear calc(350ms + var(--d)) forwards; /* hidden until its launch */ }
 }
-@keyframes confetti {
-  0% { opacity: 1; transform: translate(0, 0) rotate(0); }
-  55% { opacity: 1; transform: translate(var(--x), var(--y)) rotate(var(--r)); }
-  100% { opacity: 0; transform: translate(calc(var(--x) * 1.1), calc(var(--y) + 170px)) rotate(calc(var(--r) * 2)); }
+@keyframes cf-x { to { transform: translateX(var(--x)); } }
+@keyframes cf-y {
+  0% { transform: translateY(0); animation-timing-function: cubic-bezier(.15, .75, .35, 1); }
+  28% { transform: translateY(var(--up)); animation-timing-function: cubic-bezier(.5, 0, .85, .55); }
+  100% { transform: translateY(calc(var(--up) + var(--fall))); }
 }
+@keyframes cf-spin { from { transform: rotate(var(--r)) rotate3d(1, var(--ax), 0, 0deg); } to { transform: rotate(var(--r)) rotate3d(1, var(--ax), 0, 360deg); } }
+@keyframes cf-life { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
 .converge { position: fixed; inset: 0; z-index: 40; display: grid; place-content: center; justify-items: center; gap: 28px; background: var(--bg); color: var(--ink); }
 .cv-ring { position: relative; width: 280px; height: 280px; display: grid; place-items: center; }
 .cv-av { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) translate(var(--tx), var(--ty)); }
@@ -279,10 +295,22 @@ fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--mute
 .seal-ripples circle { stroke-width: 1; opacity: 0; transform-box: fill-box; transform-origin: center; }
 .seal-steam path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; opacity: .6; }
 .seal-caption { color: var(--ink); max-width: 28ch; }
-.seal-word { font-family: var(--num); font-weight: 700; color: var(--settled); }
+.seal-word { display: inline-flex; overflow: hidden; vertical-align: bottom; font-family: var(--num); font-weight: 700; color: var(--settled); }
+.seal-word > span { display: inline-block; }
+.seal-pulse { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0; }
 
 @media (prefers-reduced-motion: no-preference) {
-  .seal-svg { animation: seal-in calc(var(--dur) * 2.2) var(--ease) both; }
+  /* The settled seal lands like a stamp: press in on a spring, rings draw, the words turn into place, one pulse,
+     then the word. Themes with their own entrance (below) replace the press; the rest of the sequence still plays. */
+  .seal-svg { animation: seal-in 900ms var(--spring-thud) both; }
+  .seal-outer { stroke-dasharray: 1; animation: seal-draw 620ms cubic-bezier(.65, 0, .35, 1) both; }
+  .seal-inner { stroke-dasharray: 1; animation: seal-draw 520ms cubic-bezier(.65, 0, .35, 1) 120ms both; }
+  .seal-text { transform-box: view-box; transform-origin: center; animation: seal-turn 760ms cubic-bezier(.16, 1, .3, 1) 200ms both; }
+  .seal-pulse { transform-box: fill-box; transform-origin: center; animation: seal-pulse 900ms cubic-bezier(.16, 1, .3, 1) 380ms forwards; }
+  .seal-word > span { animation: word-up 520ms cubic-bezier(.16, 1, .3, 1) 450ms both; }
+  .seal-rest { animation: fade 400ms ease-out 620ms both; }
+  [data-theme=pixel] .seal-outer, [data-theme=pixel] .seal-inner, [data-theme=mono] .seal-outer, [data-theme=mono] .seal-inner { animation: none; stroke-dasharray: none; }
+  [data-theme=pixel] .seal-text, [data-theme=mono] .seal-text { animation: none; }
   .seal-plico .pl-bowl { animation: snap 640ms cubic-bezier(.34, 1.56, .64, 1) calc(var(--dur) * 1.2) both; }
   .seal-ripples circle { animation: ripple 1.8s cubic-bezier(.16, 1, .3, 1) .2s 2 both; }
   .seal-steam path { stroke-dasharray: 40; animation: steam 2.4s ease-out .5s 3 both; }
@@ -299,7 +327,12 @@ fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--mute
 @keyframes engrave { from { stroke-dashoffset: 1; } }
 @keyframes drift-a { from { transform: translate(-30px, -8px); opacity: 0; } }
 @keyframes drift-b { from { transform: translate(34px, 10px); opacity: 0; } }
-@keyframes seal-in { from { transform: scale(.6) rotate(-24deg); opacity: 0; filter: blur(3px); } }
+@keyframes seal-in { 0% { transform: scale(.85); opacity: 0; } 12% { opacity: 1; } }
+@keyframes seal-draw { from { stroke-dashoffset: 1; } }
+@keyframes seal-turn { from { transform: rotate(-32deg); opacity: 0; } }
+@keyframes seal-pulse { from { transform: scale(1); opacity: .4; } to { transform: scale(1.6); opacity: 0; } }
+@keyframes word-up { from { transform: translateY(105%); } }
+@keyframes fade { from { opacity: 0; } }
 @keyframes ripple { from { transform: scale(1); opacity: .9; } to { transform: scale(3); opacity: 0; } }
 @keyframes steam { from { stroke-dashoffset: 40; opacity: 0; transform: translateY(8px); } 40% { opacity: .7; } to { stroke-dashoffset: -40; opacity: 0; transform: translateY(-8px); } }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }

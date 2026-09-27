@@ -339,12 +339,24 @@ export const SectionHead = ({ title, action, id }: { title: string; action?: Rea
 )
 
 const CONFETTI = ['#6C5CE7', '#22B983', '#EA6673', '#F4A340', '#B7AEF5']
-/** Pieces burst out and fall: the group just became even. Decorative; skipped with reduced motion by CSS. */
+const SHAPES = ['strip', 'square', 'dot']
+/** Paper confetti bursting from behind the seal the moment a group becomes even. Each piece is three nested elements so
+ *  drift, rise-and-fall and tumble can each have their own easing (that's what reads as gravity). Pieces vary in size,
+ *  shape, speed and spin from a fixed hash, so it looks random but never flickers between renders. CSS skips it with
+ *  reduced motion. */
+const hash = (i: number, k: number) => { const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x) }
 const Confetti = () => (
   <div className="confetti" aria-hidden>
-    {Array.from({ length: 22 }, (_, i) => (
-      <i key={i} style={{ '--c': CONFETTI[i % 5], '--x': `${Math.round(Math.cos(i * 2.4) * (90 + (i % 4) * 30))}px`, '--y': `${Math.round(Math.sin(i * 2.4) * 60 - 90 - (i % 3) * 20)}px`, '--r': `${(i * 67) % 360}deg`, '--d': `${(i % 5) * 40}ms` } as CSSProperties} />
-    ))}
+    {Array.from({ length: 28 }, (_, i) => {
+      const a = (i / 28) * Math.PI * 2 + hash(i, 1) * 0.5, power = 70 + hash(i, 2) * 90
+      return (
+        <i key={i} style={{ '--x': `${Math.round(Math.cos(a) * power * 1.3)}px`, '--t': `${1600 + Math.round(hash(i, 3) * 800)}ms`, '--d': `${Math.round(hash(i, 4) * 90)}ms` } as CSSProperties}>
+          <b style={{ '--up': `${Math.round(-60 - Math.max(0, -Math.sin(a)) * power - hash(i, 5) * 50)}px`, '--fall': `${Math.round(160 + hash(i, 6) * 120)}px` } as CSSProperties}>
+            <em className={SHAPES[i % 3]} style={{ '--c': CONFETTI[i % 5], '--s': `${0.7 + hash(i, 7) * 0.6}`, '--spin': `${500 + Math.round(hash(i, 8) * 700)}ms`, '--r': `${Math.round(hash(i, 9) * 360)}deg`, '--ax': `${(hash(i, 10) * 2 - 1).toFixed(2)}` } as CSSProperties} />
+          </b>
+        </i>
+      )
+    })}
   </div>
 )
 
@@ -369,13 +381,14 @@ export function Seal({ t, replay = 0, caption = 'Everyone’s even ✨', burst }
       <svg className="seal-svg" viewBox="-60 -60 120 120" aria-hidden>
         <defs><path id={id} d="M-44 0a44 44 0 1 1 88 0a44 44 0 1 1-88 0" /></defs>
         {(th.ornament === 'ripple' || t === 'midnight') && <g className="seal-ripples">{[20, 20, 20].map((r, i) => <circle key={i} r={r} style={{ animationDelay: `${i * 180}ms` }} />)}</g>}
-        {th.radius === 0 ? <><rect className="seal-outer" x="-54" y="-54" width="108" height="108" /><rect className="seal-inner" x="-34" y="-34" width="68" height="68" /></>
-          : <><circle className="seal-outer" r="56" /><circle className="seal-inner" r="36" /></>}
+        {/* pathLength 1: the rings draw themselves in with a single dash, whatever their shape */}
+        {th.radius === 0 ? <><rect className="seal-pulse" x="-54" y="-54" width="108" height="108" /><rect className="seal-outer" pathLength={1} x="-54" y="-54" width="108" height="108" /><rect className="seal-inner" pathLength={1} x="-34" y="-34" width="68" height="68" /></>
+          : <><circle className="seal-pulse" r="56" /><circle className="seal-outer" pathLength={1} r="56" /><circle className="seal-inner" pathLength={1} r="36" /></>}
         <text className="seal-text"><textPath href={`#${id}`} textLength="272">{ring}</textPath></text>
         <g className="seal-plico" transform="translate(-17 -17) scale(1.05)"><g className="pl-bowl">{BOWL}<circle className="pl-eye" cx="17.6" cy="12.4" r="1.7" /><circle className="pl-eye" cx="23.2" cy="12.4" r="1.7" /><path className="pl-smile" d="M18.4 16.4q2 1.8 4 0" /></g>{STEM}</g>
         {t === 'chai' && <g className="seal-steam">{[-10, 0, 10].map(x => <path key={x} d={`M${x} -62c-5 -6 5 -10 0 -16s5 -10 0 -16`} />)}</g>}
       </svg>
-      <p className="seal-caption"><span className="seal-word">{/[.!?]$/.test(th.celebrate) ? th.celebrate : th.celebrate + "."}</span> {caption}</p>
+      <p className="seal-caption"><span className="seal-word"><span>{/[.!?]$/.test(th.celebrate) ? th.celebrate : th.celebrate + "."}</span></span> <span className="seal-rest">{caption}</span></p>
     </div>
   )
 }
