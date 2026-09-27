@@ -27,7 +27,8 @@ export function useRoute() {
       const next = location.hash, show = () => { flushSync(() => setH(next)); scrollTo(0, 0) }
       // Going deeper slides in from the right, coming back from the left (styles.css, view transitions). Browsers
       // without view transitions, and reduce motion, just switch.
-      document.documentElement.dataset.nav = depth(next) < depth(last) ? 'back' : 'fwd'
+      const [a, b] = [TABS.indexOf(tab(last)), TABS.indexOf(tab(next))]
+      document.documentElement.dataset.nav = (a >= 0 && b >= 0 ? b < a : depth(next) < depth(last)) ? 'back' : 'fwd'
       last = next
       if (document.startViewTransition && !calm()) document.startViewTransition(show)
       else show()
@@ -37,6 +38,9 @@ export function useRoute() {
   }, [])
   return h.replace(/^#\/?/, '').split('/').filter(Boolean)
 }
+/** The dock's tabs in order, so moving between them slides the way the dock reads. */
+const TABS = ['', 'friends', 'activity', 'me']
+const tab = (h: string) => { const p = h.replace(/^#\/?/, '').split('/').filter(Boolean); return p.length > 1 ? '-' : p[0] ?? '' } // '-': not a tab
 const depth = (h: string) => h.replace(/^#\/?/, '').split('/').filter(Boolean).length
 export const go = (p: string) => (location.hash = p)
 const goBack = () => (history.length > 1 ? history.back() : go('/'))
@@ -225,14 +229,14 @@ export function Screen({ t, title, back, action, fab, children }: {
 
 const Badge = ({ n }: { n: number }) => (n ? <span className="badge" aria-label={`${n} new`}>{n > 99 ? '99+' : n}</span> : null)
 function Tab({ to, icon, label, on, badge = 0 }: { to: string; icon: IconName; label: string; on: boolean; badge?: number }) {
-  return <a className={`dock-item${on ? ' on' : ''}`} href={'#' + to} aria-current={on ? 'page' : undefined}><span className="dock-icon"><Icon n={icon} /><Badge n={badge} /></span>{label}</a>
+  return <a className={`dock-item${on ? ' on' : ''}`} href={'#' + to} aria-current={on ? 'page' : undefined}><span className="dock-icon"><Icon n={icon} /><Badge n={badge} />{on && <m.span layoutId="dock-dot" className="dock-dot" transition={SPRING} />}</span>{label}</a>
 }
 
 /** Wide screens: the app's own theme (not the group's), so navigation stays put as you move between groups. */
 function Sidebar({ s, add, unread, here }: { s: State; add: string; unread: number; here: string[] }) {
   const groups = s.groups.filter(g => g.kind !== 'direct')
   const item = (to: string, icon: IconName, label: string, on: boolean, badge = 0) => (
-    <a href={'#' + to} className={`side-item${on ? ' on' : ''}`} aria-current={on ? 'page' : undefined}><Icon n={icon} /><span>{label}</span><Badge n={badge} /></a>
+    <a href={'#' + to} className={`side-item${on ? ' on' : ''}`} aria-current={on ? 'page' : undefined}><Icon n={icon} /><span>{label}</span><Badge n={badge} />{on && <m.span layoutId="side-pill" className="side-pill" transition={SPRING} />}</a>
   )
   return (
     <nav className="side" aria-label="Main" data-theme={s.theme} style={themeVars(s.theme)}>

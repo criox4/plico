@@ -249,8 +249,10 @@ fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--mute
 }
 .dock-item { display: grid; justify-items: center; gap: 2px; min-width: 56px; min-height: 48px; padding-top: 4px; font-size: .75rem; font-weight: 600; color: var(--muted); text-decoration: none; }
 .dock-item:hover, .dock-item.on { color: var(--ink); }
-.dock-item.on .dock-icon::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }
-.dock-icon { position: relative; display: grid; place-items: center; }
+.dock-dot { position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }
+.dock-icon { position: relative; display: grid; place-items: center; transition: scale 120ms var(--ease), translate var(--dur) var(--ease); }
+.dock-item:active .dock-icon { scale: .88; }
+.dock-item.on .dock-icon { translate: 0 -1px; }
 .badge { min-width: 18px; height: 18px; padding: 0 5px; display: inline-grid; place-items: center; border-radius: 999px; background: var(--neg); color: #fff; font: 700 .6875rem/1 var(--ui); font-variant-numeric: tabular-nums; }
 .dock-icon .badge { position: absolute; top: -6px; left: 14px; box-shadow: 0 0 0 2px var(--bg); }
 .fab {
@@ -813,7 +815,10 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
   }
   .side-item span:first-of-type { flex: 1; }
   .side-item:hover, .side-group:hover, .side-me:hover { background: var(--surface2); color: var(--ink); }
-  .side-item.on, .side-group.on, .side-me.on { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--ink); }
+  .side-group.on, .side-me.on { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--ink); }
+  .side-item { position: relative; isolation: isolate; }
+  .side-item.on { color: var(--ink); }
+  .side-pill { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
   .side-head { display: flex; align-items: baseline; justify-content: space-between; margin: 22px 12px 6px; font: 650 .75rem/1 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
   .side-head .link { min-height: 0; font-size: .8125rem; letter-spacing: 0; text-transform: none; }
   .side-groups { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
@@ -1182,6 +1187,9 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .dock { view-transition-name: dock; }
 .side { view-transition-name: side; }
 .chat-fab { view-transition-name: chat-fab; }
+/* The nav is live through the transition, so its moving dot and pill (Motion) show instead of a crossfade. */
+::view-transition-old(dock), ::view-transition-old(side) { display: none; }
+::view-transition-new(dock), ::view-transition-new(side) { animation: none; }
 ::view-transition-old(root) { animation: 140ms cubic-bezier(.4, 0, 1, 1) both vt-out; }
 ::view-transition-new(root) { animation: 240ms cubic-bezier(.16, 1, .3, 1) both vt-in; }
 :root[data-nav=back]::view-transition-old(root) { animation-name: vt-out-back; }
