@@ -12,6 +12,8 @@ import { enablePush, mayAsk, notNow, pushState, type PushState } from './push'
 import { ChatButton } from './chat'
 import { AnimatePresence } from 'motion/react'
 import { flushSync } from 'react-dom'
+import { Capacitor } from '@capacitor/core'
+import { Haptics, NotificationType } from '@capacitor/haptics'
 import * as m from 'motion/react-m'
 import { FADE, ROW, SPRING } from './anim'
 
@@ -373,6 +375,12 @@ function useJustSettled(gid: Id, open: number) {
 
 export function Seal({ t, replay = 0, caption = 'Everyone’s even ✨', burst }: { t: ThemeId; replay?: number; caption?: string; burst?: boolean }) {
   const id = useId()
+  // On phones, a success tap as the seal lands and the confetti bursts (web has no reliable equivalent).
+  useEffect(() => {
+    if (!burst || !Capacitor.isNativePlatform()) return
+    const t = setTimeout(() => void Haptics.notification({ type: NotificationType.Success }).catch(() => {}), 350)
+    return () => clearTimeout(t)
+  }, [burst, replay])
   const th = theme(t)
   const ring = `${th.celebrate} · plico · ${th.celebrate} · plico · `.toUpperCase()
   return (
