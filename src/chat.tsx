@@ -3,6 +3,9 @@
 // A receipt can ride along with a message; itemized cards let you fix who had what before adding.
 // History stays on this device (per account) and is cleared on sign-out; photos are never kept in it.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { AnimatePresence, useDragControls, type PanInfo } from 'motion/react'
+import { SPRING } from './anim'
+import * as M from 'motion/react-m'
 import { ME, inr, itemSplit, needsConfirm, today, uid } from './logic'
 import { update, useStore } from './store'
 import { ChatCard, ChatEvent } from './schema'
@@ -30,28 +33,42 @@ const ASK = ['Who owes me the most?', 'How much did I spend on food this month?'
 export const ASK_ADD = ['Auto ₹250 with Bala', 'Dinner ₹3,200 in Goa, Karan paid', 'Attach a bill, then say who had what']
 const key = (s: ReturnType<typeof useStore>) => (s.user ? `${CHAT_KEY}${s.user.id}` : '')
 
+/** Phones get a bottom sheet you can drag down to close; wide screens a side panel. */
+const phone = () => !matchMedia('(min-width: 900px)').matches
+
 export function ChatButton() {
   const [open, setOpen] = useState(false)
   const btn = useRef<HTMLButtonElement>(null)
+  const drag = useDragControls()
+  const sheet = phone()
+  const close = () => { setOpen(false); btn.current?.focus() }
+  // Released after a real pull or a quick flick: close; otherwise the sheet springs back.
+  const release = (_: PointerEvent, i: PanInfo) => { if (i.offset.y > 120 || i.velocity.y > 600) close() }
   return <>
     <button ref={btn} className="chat-fab" aria-label="Ask Plico" aria-expanded={open} onClick={() => setOpen(true)}><Plico mood="idle" size={34} /></button>
-    {open && (
-      <div className="chat-scrim" onClick={e => { if (e.target === e.currentTarget) setOpen(false) }}>
-        <section className="chat" role="dialog" aria-modal="true" aria-labelledby="chat-title">
-          <Chat onClose={() => { setOpen(false); btn.current?.focus() }} />
-        </section>
-      </div>
-    )}
+    <AnimatePresence>
+      {open && (
+        <M.div key="chat" className="chat-scrim" onClick={e => { if (e.target === e.currentTarget) close() }}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+          <M.section className="chat" role="dialog" aria-modal="true" aria-labelledby="chat-title"
+            initial={sheet ? { y: '100%' } : { x: 32, opacity: 0 }} animate={sheet ? { y: 0 } : { x: 0, opacity: 1 }} exit={sheet ? { y: '100%' } : { x: 32, opacity: 0 }} transition={SPRING}
+            drag={sheet ? 'y' : false} dragControls={drag} dragListener={false} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }} onDragEnd={release}>
+            <Chat onClose={close} onGrab={sheet ? e => { if (!(e.target as HTMLElement).closest('button')) drag.start(e) } : undefined} />
+          </M.section>
+        </M.div>
+      )}
+    </AnimatePresence>
   </>
 }
 
 /** The conversation. `onClose` shows the header (the floating chat); `onSaved` is where the Add screen goes after an expense lands. */
-export function Chat({ onClose, onSaved, suggestions = ASK, hint = 'Ask about your balances, spending…' }: {
-  onClose?: () => void; onSaved?: (s: Saved[]) => void; suggestions?: string[]; hint?: string
+export function Chat({ onClose, onSaved, onGrab, suggestions = ASK, hint = 'Ask about your balances, spending…' }: {
+  onClose?: () => void; onSaved?: (s: Saved[]) => void; onGrab?: (e: React.PointerEvent) => void; suggestions?: string[]; hint?: string
 }) {
   const s = useStore()
   const k = key(s) + (onSaved ? ':add' : '')
   const [msgs, setMsgs] = useState<Msg[]>(() => load(k))
+  const seen = useRef(msgs.length) // saved history appears at once; only new messages animate in
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState('') // what the assistant is doing right now
   const [photo, setPhoto] = useState<{ url: string; data: string } | null>(null) // attached to the next message
@@ -115,7 +132,8 @@ export function Chat({ onClose, onSaved, suggestions = ASK, hint = 'Ask about yo
 
   return <>
     {onClose && (
-      <header className="chat-head">
+      <header className="chat-head" onPointerDown={onGrab} style={onGrab && { touchAction: 'none' }}>
+        {onGrab && <span className="chat-grip" aria-hidden />}
         <Plico mood={busy ? 'thinking' : 'idle'} size={32} />
         <h2 id="chat-title">Ask Plico</h2>
         {msgs.length > 0 && <button className="iconbtn" aria-label="Clear this chat" onClick={() => setMsgs([])}><Icon n="trash" size={20} /></button>}
@@ -132,11 +150,11 @@ export function Chat({ onClose, onSaved, suggestions = ASK, hint = 'Ask about yo
         </div>
       )}
       {msgs.map((m, i) => (
-        <div key={i} className={`bubble ${m.role}${m.error ? ' err' : ''}`}>
+        <M.div key={i} className={`bubble ${m.role}${m.error ? ' err' : ''}`} initial={seen.current > i ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={SPRING}>
           {m.photo && <span className="bubble-photo"><Icon n="qr" size={14} />Bill attached</span>}
           {m.content ? <Rich text={m.content} /> : i === msgs.length - 1 && busy ? null : <p className="muted-ink">…</p>}
           {m.cards?.map((c, j) => <ActionCard key={j} c={c} set={p => setCard(i, j, p)} close={onClose} onSaved={onSaved} />)}
-        </div>
+        </M.div>
       ))}
       {busy && <p className="chat-busy" role="status"><span className="dots" aria-hidden><i /><i /><i /></span>{busy}</p>}
       <div ref={end} />

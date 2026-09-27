@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { LazyMotion, MotionConfig } from 'motion/react'
 import { Capacitor } from '@capacitor/core'
 import App from './App'
 import { startSync } from './sync'
@@ -11,7 +12,13 @@ void hydrate().then(() => {
   startSync()
   startShareIntake()
   startWidget()
-  createRoot(document.getElementById('root')!).render(<App />)
+  // Motion: the m components render at once and animate once their features arrive; the OS's reduce-motion setting
+  // turns movement into fades everywhere. strict: a full motion component here would undo the small bundle.
+  createRoot(document.getElementById('root')!).render(
+    <LazyMotion features={() => import('./motion-features').then(r => r.default)} strict>
+      <MotionConfig reducedMotion="user"><App /></MotionConfig>
+    </LazyMotion>,
+  )
 })
 
 // Native apps ship their assets locally; only the web build needs the offline worker.

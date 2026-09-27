@@ -8,7 +8,7 @@ import { ActivityOut, AuditEvent, AuditOut, SnapFull, type ActivityEvent } from 
 import { groupTitle } from './people'
 import type { State } from './store'
 import { api, bodySnap, resolveIssue, restoreExpense, revertExpense, seenActivity, useSync, type Issue, type ServerExpense } from './sync'
-import { Avatar, Denomination, Plico, Screen, count, go } from './ui'
+import { Avatar, Denomination, Plico, Screen, count, go, SegPill } from './ui'
 import { Icon } from './icons'
 
 const when = (at: string) => {
@@ -259,9 +259,9 @@ export function Activity({ s }: { s: State }) {
     <Screen t={s.theme} fab="/add" title="Activity">
       {scope === 'money' && <Denomination t={s.theme} amount={total} line={total > 0 ? 'You’re owed overall' : total < 0 ? 'You owe overall' : 'All even'} caption="Every change to your balance, newest first" />}
       <div className="seg activity-seg" role="tablist" aria-label="Show">
-        <button role="tab" aria-selected={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>Everything</button>
-        <button role="tab" aria-selected={scope === 'money'} className={scope === 'money' ? 'on' : ''} onClick={() => setScope('money')}>My money</button>
-        <button role="tab" aria-selected={scope === 'ai'} className={scope === 'ai' ? 'on' : ''} onClick={() => setScope('ai')}>Ask Plico</button>
+        <button role="tab" aria-selected={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>{scope === 'all' && <SegPill id="activity" />}Everything</button>
+        <button role="tab" aria-selected={scope === 'money'} className={scope === 'money' ? 'on' : ''} onClick={() => setScope('money')}>{scope === 'money' && <SegPill id="activity" />}My money</button>
+        <button role="tab" aria-selected={scope === 'ai'} className={scope === 'ai' ? 'on' : ''} onClick={() => setScope('ai')}>{scope === 'ai' && <SegPill id="activity" />}Ask Plico</button>
       </div>
       {err && <p className="error" role="alert">{err}</p>}
       {!loaded && !err && <ol className="feed" aria-busy="true">{[0, 1, 2].map(i => <li key={i} className="skeleton" aria-hidden />)}</ol>}

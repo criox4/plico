@@ -10,17 +10,34 @@ import { API } from './auth-client'
 import { api, fileUrl, useSync } from './sync'
 import { enablePush, mayAsk, notNow, pushState, type PushState } from './push'
 import { ChatButton } from './chat'
+import { AnimatePresence } from 'motion/react'
+import { flushSync } from 'react-dom'
+import * as m from 'motion/react-m'
+import { FADE, ROW, SPRING } from './anim'
+
+/** The selected option's background in a .seg control. One per control id, so Motion slides it between options. */
+export const SegPill = ({ id }: { id: string }) => <m.span layoutId={`seg-${id}`} className="seg-pill" transition={SPRING} aria-hidden />
 
 // ---------- routing ----------
 export function useRoute() {
   const [h, setH] = useState(location.hash)
   useEffect(() => {
-    const f = () => { setH(location.hash); scrollTo(0, 0) }
+    let last = location.hash
+    const f = () => {
+      const next = location.hash, show = () => { flushSync(() => setH(next)); scrollTo(0, 0) }
+      // Going deeper slides in from the right, coming back from the left (styles.css, view transitions). Browsers
+      // without view transitions, and reduce motion, just switch.
+      document.documentElement.dataset.nav = depth(next) < depth(last) ? 'back' : 'fwd'
+      last = next
+      if (document.startViewTransition && !calm()) document.startViewTransition(show)
+      else show()
+    }
     addEventListener('hashchange', f)
     return () => removeEventListener('hashchange', f)
   }, [])
   return h.replace(/^#\/?/, '').split('/').filter(Boolean)
 }
+const depth = (h: string) => h.replace(/^#\/?/, '').split('/').filter(Boolean).length
 export const go = (p: string) => (location.hash = p)
 const goBack = () => (history.length > 1 ? history.back() : go('/'))
 
@@ -392,7 +409,7 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
   const by = payers.length > 1 ? `${payers.length} people` : who(g, payers[0])
   const no = `No. ${String(serial).padStart(4, '0')}`
   return (
-    <li className="ledger-row">
+    <m.li className="ledger-row" {...ROW}>
       <button onClick={() => go(`/g/${g.id}/e/${e.id}`)}>
         <span className={`cat ${e.settle && !e.pending && !e.rejected ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
         <span className="lr-body">
@@ -402,7 +419,7 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
         {e.settle ? <span className="lr-amt"><span className={`money ${e.pending || e.rejected ? 'muted-ink' : 'settled-ink'}`}>{inr(e.amount)}</span></span>
           : <span className="lr-amt"><Money p={mine} sign /><small>{mine > 0 ? 'you lent' : mine < 0 ? 'your share' : 'not in it'}</small></span>}
       </button>
-    </li>
+    </m.li>
   )
 }
 
@@ -425,14 +442,14 @@ const drop = (gid: Id, eid: Id) => update(d => {
 export function NotReceivedCard({ g, e, showGroup }: { g: Group; e: Expense; showGroup?: boolean }) {
   const { to } = ends(e)
   return (
-    <li className="confirm-card warn">
+    <m.li className="confirm-card warn" {...ROW}>
       <p><strong>{who(g, to)} hasn’t got your <span className="money">{inr(e.amount)}</span> yet</strong>
         <small>{showGroup ? `${groupTitle(g)} · ` : ''}Check your UPI app. If it went through, send them the transaction ID.</small></p>
       <span className="debt-actions">
         <button className="btn-sm" onClick={() => { drop(g.id, e.id); go(`/g/${g.id}/pay/${ME}/${to}/${e.amount}`) }}>Pay again</button>
         <button className="btn-sm ghost" onClick={() => drop(g.id, e.id)}>Dismiss</button>
       </span>
-    </li>
+    </m.li>
   )
 }
 
@@ -440,14 +457,14 @@ export function NotReceivedCard({ g, e, showGroup }: { g: Group; e: Expense; sho
 export function ConfirmCard({ g, e, showGroup }: { g: Group; e: Expense; showGroup?: boolean }) {
   const { from } = ends(e)
   return (
-    <li className="confirm-card">
+    <m.li className="confirm-card" {...ROW}>
       <p><strong>{who(g, from)} marked <span className="money">{inr(e.amount)}</span> as paid to you</strong>
         <small>{showGroup ? `${groupTitle(g)} · ` : ''}Check your UPI app first.</small></p>
       <span className="debt-actions">
         <button className="btn-sm" onClick={() => setPending(g.id, e.id, true)}><Icon n="check" size={16} />Got it</button>
         <button className="btn-sm ghost" onClick={() => setPending(g.id, e.id, false)}>Not yet</button>
       </span>
-    </li>
+    </m.li>
   )
 }
 const waitingFor = (g: Group) => g.expenses.filter(e => e.pending && ends(e).to === ME)
@@ -456,7 +473,11 @@ const bounced = (g: Group) => g.expenses.filter(e => e.rejected && ends(e).from 
 function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean }) {
   const items = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup={showGroup} />),
     ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup={showGroup} />)])
-  return items.length ? <><SectionHead title="Needs you" /><ol className="debts">{items}</ol></> : null
+  return (
+    <AnimatePresence initial={false}>
+      {items.length > 0 && <m.div key="needs" {...FADE}><SectionHead title="Needs you" /><ol className="debts"><AnimatePresence initial={false}>{items}</AnimatePresence></ol></m.div>}
+    </AnimatePresence>
+  )
 }
 
 /** The dashboard: where your money stands, what needs you, and every group and person at a glance.
@@ -552,7 +573,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
           </section>}
           {!fresh && <section className="d-recent" aria-labelledby="d-recent">
             <SectionHead title="Latest" id="d-recent" action={recent.length > 0 && <button className="link" onClick={() => go('/activity')}>All activity</button>} />
-            {recent.length ? <ol className="ledger">{recent.map(({ g, e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} showGroup />)}</ol> : <Peaceful />}
+            {recent.length ? <ol className="ledger"><AnimatePresence initial={false}>{recent.map(({ g, e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} showGroup />)}</AnimatePresence></ol> : <Peaceful />}
           </section>}
         </aside>
       </div>
@@ -618,16 +639,18 @@ function DashNeeds({ s }: { s: State }) {
   return (
     <section className="d-needs" aria-labelledby="d-needs">
       <SectionHead title="Needs you" id="d-needs" />
-      {cards.length || owe.length ? <ol className="debts">
+      <AnimatePresence initial={false} mode="wait">
+      {cards.length || owe.length ? <m.ol key="list" className="debts" {...FADE}><AnimatePresence initial={false}>
         {cards}
         {owe.map(({ f, n, where }) => (
-          <li className="debt" key={f.email}>
+          <m.li className="debt" key={f.email} {...ROW}>
             <span className="grow"><strong>You owe {f.name}</strong><small>{where.length > 1 ? `Net across ${count(where.length, 'group', 'groups')}` : where[0]?.g.kind === 'direct' ? 'Outside groups' : where[0] ? groupTitle(where[0].g) : ''}</small></span>
             <span className="money neg">{inr(-n)}</span>
             <span className="debt-actions"><button className="btn-sm" onClick={() => go(`/f/${encodeURIComponent(f.email)}/settle`)}>Settle</button></span>
-          </li>
+          </m.li>
         ))}
-      </ol> : <p className="d-clear"><Icon n="check" size={18} />Nothing needs you right now.</p>}
+      </AnimatePresence></m.ol> : <m.p key="clear" className="d-clear" {...FADE}><Icon n="check" size={18} />Nothing needs you right now.</m.p>}
+      </AnimatePresence>
     </section>
   )
 }
@@ -674,12 +697,13 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
       <PushAsk g={g} />
       <NeedsYou groups={[g]} />
       <SpendBar cats={byCat(spent, e => e.amount)} />
-      {debts.length > 0 && <>
+      <AnimatePresence initial={false}>
+      {debts.length > 0 && <m.div key="debts" {...FADE}>
         <SectionHead title={g.track ? 'Balances' : 'Still to settle'}
           action={!g.track && toMe.length > 1 && <a className="link" href={wa(remindAll)} target="_blank" rel="noopener">Remind all</a>} />
-        <ol className="debts">
+        <ol className="debts"><AnimatePresence initial={false}>
           {debts.map(d => (
-            <li className="debt" key={d.from + d.to}>
+            <m.li className="debt" key={d.from + d.to} {...ROW}>
               <span className="debt-flow">
                 <span className="who">{who(g, d.from)}</span>
                 <span className="flow-arrow" role="img" aria-label="pays"><Icon n="arrow" size={18} /></span>
@@ -698,12 +722,13 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
                 const n = f ? friendBalance(f) : 0
                 return f && n >= 0 && <small className="debt-wait">{f.name} {n > 0 ? `owes you ${inr(n)} overall` : 'and you are square overall'}, counting your other groups. <button className="link" onClick={() => go(`/f/${encodeURIComponent(f.email)}${n > 0 ? '/settle' : ''}`)}>{n > 0 ? 'Settle the net' : 'See why'}</button></small>
               })()}
-            </li>
+            </m.li>
           ))}
-        </ol>
-      </>}
+        </AnimatePresence></ol>
+      </m.div>}
+      </AnimatePresence>
       <SectionHead title="Expenses" action={<button className="link" onClick={() => go(`/g/${g.id}/audit`)}>Audit log</button>} />
-      {list.length ? <ol className="ledger">{list.map(({ e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} />)}</ol>
+      {list.length ? <ol className="ledger"><AnimatePresence initial={false}>{list.map(({ e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} />)}</AnimatePresence></ol>
         : <Peaceful />}
     </Screen>
   )

@@ -7,7 +7,7 @@ import type { Target } from './draft'
 import { friendsOf } from './people'
 import { useSync } from './sync'
 import { Chat, ASK_ADD } from './chat'
-import { Avatar, Screen, count, go, groupTitle } from './ui'
+import { Avatar, Screen, count, go, groupTitle, SegPill } from './ui'
 import { theme } from './themes'
 import { Icon } from './icons'
 
@@ -26,8 +26,8 @@ export function AddScreen({ s, form, back }: { s: State; form: ReactNode; back?:
     <Screen t={s.theme} back={back ?? true} title="Add expense">
       {ai && (
         <div className="seg add-tabs" role="tablist" aria-label="How to add it">
-          <button role="tab" aria-selected={tab === 'ask'} className={tab === 'ask' ? 'on' : ''} onClick={() => pick('ask')}>Ask Plico</button>
-          <button role="tab" aria-selected={tab === 'form'} className={tab === 'form' ? 'on' : ''} onClick={() => pick('form')}>Enter it</button>
+          <button role="tab" aria-selected={tab === 'ask'} className={tab === 'ask' ? 'on' : ''} onClick={() => pick('ask')}>{tab === 'ask' && <SegPill id="add" />}Ask Plico</button>
+          <button role="tab" aria-selected={tab === 'form'} className={tab === 'form' ? 'on' : ''} onClick={() => pick('form')}>{tab === 'form' && <SegPill id="add" />}Enter it</button>
         </div>
       )}
       {ai && tab === 'ask'

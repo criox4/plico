@@ -7,7 +7,7 @@ import { api, isPhone, pull, refreshUser, signOut, signedIn, syncNow, uploadImag
 import { API, authClient, token } from './auth-client'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
-import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker } from './ui'
+import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, SegPill } from './ui'
 import { disablePush, enablePush, pushState, type PushState } from './push'
 import { ClaimPreviewOut, InvitePreviewOut, NotifyOut, type NotifyPrefs, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
 
@@ -136,7 +136,7 @@ function AgeFields({ age, setAge, guardian, setGuardian }: { age: Age; setAge: (
       <legend>How old are you?</legend>
       <div className="seg" role="radiogroup" aria-label="How old are you">
         {([['adult', '18 or older'], ['teen', '13 to 17'], ['child', 'Under 13']] as const).map(([v, label]) =>
-          <button type="button" key={v} role="radio" aria-checked={age === v} className={age === v ? 'on' : ''} onClick={() => setAge(v)}>{label}</button>)}
+          <button type="button" key={v} role="radio" aria-checked={age === v} className={age === v ? 'on' : ''} onClick={() => setAge(v)}>{age === v && <SegPill id="age" />}{label}</button>)}
       </div>
       {age === 'child' && <small className="error">Plico is for people 13 and older. Ask a parent to add you to their group as a guest instead.</small>}
     </fieldset>
@@ -797,6 +797,7 @@ export function NotificationsPage({ s }: { s: State }) {
         <div className="seg" role="radiogroup" aria-label="Reminder tone">
           {(['normal', 'gentle', 'shameless'] as Tone[]).map(t => (
             <button type="button" key={t} role="radio" aria-checked={s.tone === t} className={s.tone === t ? 'on' : ''} onClick={() => update(d => { d.tone = t })}>
+              {s.tone === t && <SegPill id="tone" />}
               {{ normal: 'Normal', gentle: 'Friendly', shameless: 'Playful' }[t]}
             </button>
           ))}

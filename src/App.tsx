@@ -9,7 +9,7 @@ import { api, pull, readExpense, refreshUser, uploadImage, useSync, type Read } 
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who } from './ui'
+import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
@@ -414,7 +414,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
         {open === 'split' && (
           <div className="add-panel">
             <div className="seg" role="radiogroup" aria-label="Split method">
-              {MODES.map(m => <button type="button" key={m.id} role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} onClick={() => switchMode(m.id)}>{m.label}</button>)}
+              {MODES.map(m => <button type="button" key={m.id} role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} onClick={() => switchMode(m.id)}>{mode === m.id && <SegPill id="split" />}{m.label}</button>)}
             </div>
             <ul className="rows">
               {g.members.map(m => (

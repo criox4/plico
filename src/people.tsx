@@ -1,10 +1,11 @@
 // People: everyone is an account or an invited email. Friends are everyone you share a group with (keyed by
 // email), with the balance between the two of you across every group; direct expenses live in a two-person group.
 import { useState } from 'react'
+import { AnimatePresence } from 'motion/react'
 import { ME, inr, needsConfirm, pairwise, today, uid, type Group, type Id } from './logic'
 import { update, type State } from './store'
 import { api, pull, syncNow } from './sync'
-import { Avatar, Denomination, LedgerRow, Plico, Screen, SectionHead, Settle, TONES, count, go, groupTitle, wa } from './ui'
+import { Avatar, Denomination, LedgerRow, Plico, Screen, SectionHead, Settle, TONES, count, go, groupTitle, wa, SegPill } from './ui'
 export { groupTitle }
 import { Icon } from './icons'
 
@@ -116,7 +117,7 @@ export function Friends({ s }: { s: State }) {
       {rows.length > 3 && (
         <div className="seg friend-filter" role="tablist" aria-label="Show">
           {([['all', 'All'], ['owed', 'Owe you'], ['owe', 'You owe'], ['even', 'Settled']] as [Filter, string][]).map(([id, label]) => (
-            <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>{label}<small>{counts[id]}</small></button>
+            <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>{filter === id && <SegPill id="friends" />}{label}<small>{counts[id]}</small></button>
           ))}
         </div>
       )}
@@ -201,7 +202,7 @@ export function FriendPage({ s, email }: { s: State; email: string }) {
       </>}
       {list.length > 0 && f.direct && <>
         <SectionHead title="Just the two of you" />
-        <ol className="ledger">{list.map(({ e, i }) => <LedgerRow key={e.id} g={f.direct!} e={e} serial={i + 1} />)}</ol>
+        <ol className="ledger"><AnimatePresence initial={false}>{list.map(({ e, i }) => <LedgerRow key={e.id} g={f.direct!} e={e} serial={i + 1} />)}</AnimatePresence></ol>
       </>}
     </Screen>
   )
