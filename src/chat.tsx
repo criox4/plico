@@ -9,7 +9,7 @@ import * as M from 'motion/react-m'
 import { ME, inr, itemSplit, needsConfirm, today, uid } from './logic'
 import { update, useStore } from './store'
 import { ChatCard, ChatEvent } from './schema'
-import { api, markAi, photoData, request, restoreExpense } from './sync'
+import { NET, api, markAi, photoData, request, restoreExpense } from './sync'
 import { commitDraft, fromCard, type Saved } from './draft'
 import { Icon } from './icons'
 import { Plico, go } from './ui'
@@ -123,7 +123,9 @@ export function Chat({ onClose, onSaved, onGrab, suggestions = ASK, hint = 'Ask 
         }
       }
     } catch (x) {
-      patch(m => ({ ...m, content: m.content || (x as Error).message, error: !m.content }))
+      // A stream that drops partway fails while reading, with the browser's raw wording: say it plainly.
+      const why = x instanceof TypeError ? NET : (x as Error).message
+      patch(m => ({ ...m, content: m.content ? `${m.content}\n\n${why}` : why, error: !m.content }))
     } finally { setBusy('') }
   }
 

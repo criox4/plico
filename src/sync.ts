@@ -151,7 +151,10 @@ function queueNow() {
 // ---------- network ----------
 // Web: same-origin session cookie; native: bearer token. Send whichever exists.
 const headers = (): Record<string, string> => ({ 'Content-Type': 'application/json', ...(token.get() && { Authorization: `Bearer ${token.get()}` }) })
+/** What people see when the network drops, instead of the browser's own words ("Load failed", "Failed to fetch"). */
+export const NET = 'Couldn’t reach Plico. Check your connection and try again.'
 const req = (path: string, init: RequestInit = {}) => fetch(API + path, { ...init, headers: headers(), credentials: 'include' })
+  .catch((e: unknown) => { throw (e as Error)?.name === 'AbortError' ? e : new Error(NET) })
 /** A signed-in request whose response you read yourself (e.g. a stream). */
 export const request = req
 
