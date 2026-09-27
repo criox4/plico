@@ -72,7 +72,7 @@ See *Sync* below.
 
 **Privacy and compliance by default.**
 - India's DPDP Act 2023: age gate; 13–17 need a parent's consent by email; under-13 blocked.
-- Explicit opt-in before any photo goes to AI.
+- AI features (reading receipts, Ask Plico) are on by default with one switch to turn them off.
 - Data export; account deletion by email confirmation (shared groups keep you as a guest).
 - iOS privacy manifests; no analytics or tracking SDKs.
 - Legal pages under `public/`; details in `docs/compliance/`.
@@ -80,6 +80,11 @@ See *Sync* below.
 **Security basics.**
 - Zod on every input and membership checks on every group route.
 - Body-size limits; `secureHeaders`; rate limits on auth and AI.
+- Rate limits key on an IP clients can't forge (`server/ip.ts`): the TCP address, or the one header our proxy sets, named in `CLIENT_IP_HEADER` (e.g. `fly-client-ip`, `cf-connecting-ip`, `x-real-ip`). Set it when deploying behind a proxy, or every request looks like the proxy's IP. Never `x-forwarded-for` as sent.
+- Ten wrong passwords lock that account's password sign-in for 15 minutes; a reset link still works.
+- Invite emails: 20 a day per sender, 3 a day per address (`email_log`). Past that the person is still added and the link is shared by hand.
+- A not-yet-joined person's UPI IDs and email can only be changed by whoever added them (`member.addedById`).
+- Any member can reset a group's invite link.
 - Images sniffed by magic bytes.
 - Web session in an httpOnly cookie only.
 - Android backups off.
