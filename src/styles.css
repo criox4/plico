@@ -956,8 +956,8 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .chat-busy { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .875rem; font-weight: 600; }
 .dots { display: inline-flex; gap: 3px; }
 .dots i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .4; }
-@media (prefers-reduced-motion: no-preference) { .dots i { animation: blink 1s infinite both; } .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; } }
-@keyframes blink { 50% { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) { .dots i { animation: dot-pulse 1s infinite both; } .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; } }
+@keyframes dot-pulse { 50% { opacity: 1; } }
 .action-card { display: grid; gap: 10px; padding: 12px; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--line); }
 .action-card > p:first-child { display: flex; gap: 10px; align-items: flex-start; font-weight: 600; line-height: 1.4; }
 .action-card > p:first-child .icon-svg { flex: none; margin-top: 2px; color: var(--link); }
