@@ -7,7 +7,7 @@ import { db } from './db.ts'
 import { queuePush } from './push.ts'
 
 type Tx = Prisma.TransactionClient
-export type Entry = Pick<AuditEntry, 'kind' | 'expenseId' | 'memberId' | 'version' | 'revertOf' | 'byId' | 'byName' | 'before' | 'after'>
+export type Entry = Pick<AuditEntry, 'kind' | 'expenseId' | 'memberId' | 'version' | 'revertOf' | 'byId' | 'byName' | 'before' | 'after' | 'via'>
 const json = (v: unknown) => (v === undefined || v === null ? Prisma.DbNull : (v as Prisma.InputJsonValue))
 
 /** Append one entry. Locks the group row (NO KEY UPDATE: compatible with the key-share locks that inserting
@@ -21,7 +21,7 @@ export async function audit(tx: Tx, groupId: string, e: Entry) {
   const hash = createHash('sha256').update(entry.prevHash + auditPayload(entry)).digest('hex')
   await tx.auditEvent.create({ data: {
     groupId, seq: entry.seq, kind: e.kind, expenseId: e.expenseId ?? null, memberId: e.memberId ?? null, version: e.version ?? null, revertOf: e.revertOf ?? null,
-    byId: e.byId ?? null, byName: e.byName, at: new Date(entry.at), before: json(e.before), after: json(e.after), effect, prevHash: entry.prevHash, hash,
+    byId: e.byId ?? null, byName: e.byName, via: e.via ?? null, at: new Date(entry.at), before: json(e.before), after: json(e.after), effect, prevHash: entry.prevHash, hash,
   } })
   await tx.group.update({ where: { id: groupId }, data: { auditSeq: entry.seq, auditHash: hash } })
   await queuePush(tx, groupId, { ...e, effect }) // same transaction: a push exists exactly when its change does

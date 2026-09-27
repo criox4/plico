@@ -3,10 +3,10 @@
 // A receipt can ride along with a message; itemized cards let you fix who had what before adding.
 // History stays on this device (per account) and is cleared on sign-out; photos are never kept in it.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ME, inr, itemSplit } from './logic'
-import { useStore } from './store'
+import { ME, inr, itemSplit, needsConfirm, today, uid } from './logic'
+import { update, useStore } from './store'
 import { ChatCard, ChatEvent } from './schema'
-import { api, photoData, request } from './sync'
+import { api, markAi, photoData, request, restoreExpense } from './sync'
 import { commitDraft, fromCard, type Saved } from './draft'
 import { Icon } from './icons'
 import { Plico, go } from './ui'
@@ -23,6 +23,8 @@ const save = (k: string, m: Msg[]) => { try { localStorage.setItem(k, JSON.strin
 const DOING: Record<string, string> = {
   read_receipt: 'Reading the bill…', list_groups: 'Looking at your groups…', balances: 'Checking balances…', find_expenses: 'Searching expenses…', spending: 'Adding up spending…',
   activity: 'Reading recent activity…', draft_expense: 'Working out the split…', draft_settlement: 'Working out the settle-up…', draft_reminder: 'Preparing a reminder…',
+  explain_balance: 'Tracing the balance…', pending: 'Checking payments…', confirm_payment: 'Finding the payment…', mark_paid: 'Preparing the payment…',
+  edit_expense: 'Preparing the change…', delete_expense: 'Preparing to delete…', restore_expense: 'Finding what was deleted…',
 }
 const ASK = ['Who owes me the most?', 'How much did I spend on food this month?', 'What changed in my groups this week?', 'Settle up with someone']
 export const ASK_ADD = ['Auto ₹250 with Bala', 'Dinner ₹3,200 in Goa, Karan paid', 'Attach a bill, then say who had what']
@@ -193,7 +195,7 @@ function ExpenseCard({ c, set, close, onSaved }: { c: Extract<Card, { type: 'exp
     const d = fromCard({ ...c, amount, owed, paid: { [payer]: amount } })
     if ('error' in d) return set({ err: d.error })
     setBusy(true)
-    try { const saved = await commitDraft(d); set({ done: 'Added', err: undefined }); onSaved?.(saved) }
+    try { const saved = await commitDraft(d, 'ai'); set({ done: 'Added', err: undefined }); onSaved?.(saved) }
     catch (e) { set({ err: (e as Error).message }) } finally { setBusy(false) }
   }
   const open = () => { close?.(); go(c.target.kind === 'group' ? `/g/${c.target.groupId}` : c.target.people.length === 1 ? `/f/${encodeURIComponent(c.target.people[0].email)}` : '/friends') }
@@ -226,25 +228,70 @@ function ExpenseCard({ c, set, close, onSaved }: { c: Extract<Card, { type: 'exp
   )
 }
 
+/** Every other card: one sentence, one button. Writes go through the app's normal paths (the outbox, restore, Remind),
+ *  so the server checks them like any tap in the app; the ones that change the ledger are marked as made via Ask Plico. */
 function SimpleCard({ c, set, close }: { c: Exclude<Card, { type: 'expense' }>; set: (p: Partial<Card>) => void; close?: () => void }) {
   const s = useStore()
+  const [busy, setBusy] = useState(false)
   const g = s.groups.find(x => x.id === c.groupId)
   const local = (id: string) => (id === g?.selfId ? ME : id)
-  const act = async () => {
+  const mine = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [local(k), v]))
+  const find = (eid: string) => g?.expenses.find(x => x.id === eid)
+  const changed = 'That changed since I drafted this. Ask me again.'
+  const act = async (yes = true) => {
     if (!g) return set({ err: 'That group isn’t on this phone yet. Give it a moment to sync, then ask again.' })
-    if (c.type === 'settle') {
-      if (![c.from, c.to].every(id => g.members.some(m => m.id === local(id)))) return set({ err: 'People in that group changed. Ask again.' })
-      close?.(); go(`/g/${g.id}/pay/${local(c.from)}/${local(c.to)}/${c.amount}`)
-    } else {
-      try { await api(`/api/groups/${g.id}/remind`, { method: 'POST', body: JSON.stringify({ memberId: c.memberId, amount: c.amount }) }); set({ done: 'Reminder sent' }) }
-      catch (e) { set({ err: (e as Error).message }) }
-    }
+    setBusy(true)
+    try {
+      if (c.type === 'settle') {
+        if (![c.from, c.to].every(id => g.members.some(m => m.id === local(id)))) return set({ err: 'People in that group changed. Ask again.' })
+        close?.(); go(`/g/${g.id}/pay/${local(c.from)}/${local(c.to)}/${c.amount}`)
+      } else if (c.type === 'remind') {
+        await api(`/api/groups/${g.id}/remind`, { method: 'POST', body: JSON.stringify({ memberId: c.memberId, amount: c.amount }) }); set({ done: 'Reminder sent' })
+      } else if (c.type === 'pay') {
+        const [from, to] = [local(c.from), local(c.to)]
+        if (![from, to].every(id => g.members.some(m => m.id === id))) return set({ err: 'People in that group changed. Ask again.' })
+        const id = uid(); markAi(id)
+        update(d => { d.groups.find(x => x.id === g.id)?.expenses.push({ id, title: 'Settlement', cat: 'check', date: today(), amount: c.amount, paid: { [from]: c.amount }, owed: { [to]: c.amount }, settle: true, ...(needsConfirm(g, to) && { pending: true }) }) })
+        set({ done: c.confirm ? 'Recorded. It counts once they confirm.' : 'Recorded' })
+      } else if (c.type === 'confirm') {
+        if (!find(c.expenseId)?.pending) return set({ err: 'That payment isn’t waiting any more.' })
+        markAi(c.expenseId)
+        update(d => { const e = d.groups.find(x => x.id === g.id)?.expenses.find(x => x.id === c.expenseId); if (e) { delete e.pending; if (!yes) e.rejected = true } })
+        set({ done: yes ? 'Confirmed' : 'Marked as not arrived' })
+      } else if (c.type === 'edit') {
+        const e = find(c.expenseId)
+        if (!e || e.v !== c.version) return set({ err: changed })
+        const shares = JSON.stringify([c.before.paid, c.before.owed]) !== JSON.stringify([c.after.paid, c.after.owed])
+        markAi(c.expenseId)
+        update(d => {
+          const x = d.groups.find(y => y.id === g.id)?.expenses.find(y => y.id === c.expenseId)
+          if (!x) return
+          Object.assign(x, { title: c.after.title, cat: c.after.cat, date: c.after.date, amount: c.after.amount })
+          if (shares) Object.assign(x, { paid: mine(c.after.paid), owed: mine(c.after.owed), mode: 'exact', input: Object.fromEntries(Object.entries(mine(c.after.owed)).map(([k, v]) => [k, v / 100])) })
+        })
+        set({ done: 'Saved' })
+      } else if (c.type === 'delete') {
+        const e = find(c.expenseId)
+        if (!e || e.v !== c.version) return set({ err: changed })
+        markAi(c.expenseId)
+        update(d => { const x = d.groups.find(y => y.id === g.id); if (x) x.expenses = x.expenses.filter(y => y.id !== c.expenseId) })
+        set({ done: 'Deleted. Ask me to bring it back any time.' })
+      } else {
+        await restoreExpense(g.id, c.expenseId, 'ai'); set({ done: 'Restored' })
+      }
+    } catch (e) { set({ err: (e as Error).message }) } finally { setBusy(false) }
   }
+  const icon = c.type === 'remind' ? 'bell' : c.type === 'delete' ? 'trash' : c.type === 'edit' || c.type === 'restore' ? 'log' : 'cash'
+  const label = { settle: 'Open settle up', remind: 'Send reminder', pay: 'Record payment', confirm: 'Got it', edit: 'Save changes', delete: 'Delete', restore: 'Restore' }[c.type]
   return (
-    <div className="action-card">
-      <p><Icon n={c.type === 'settle' ? 'cash' : 'bell'} size={18} /><span>{c.summary}</span></p>
+    <div className={`action-card${c.type === 'delete' ? ' danger' : ''}`}>
+      <p><Icon n={icon} size={18} /><span>{c.type === 'edit' ? <>Change “{c.before.title}” in {c.group}</> : c.summary}</span></p>
+      {c.type === 'edit' && <ul className="xchanges">{c.changes.map(x => <li key={x}>{x}</li>)}</ul>}
       {c.done ? <p className="action-done"><Icon n="check" size={16} />{c.done}</p>
-        : <button className="btn-sm" onClick={() => void act()}>{c.type === 'settle' ? 'Open settle up' : 'Send reminder'}</button>}
+        : <span className="action-row">
+            <button className="btn-sm" disabled={busy} onClick={() => void act()}>{label}</button>
+            {c.type === 'confirm' && <button className="btn-sm ghost" disabled={busy} onClick={() => void act(false)}>Not yet</button>}
+          </span>}
       {c.err && <p className="error" role="alert">{c.err}</p>}
     </div>
   )

@@ -239,7 +239,7 @@ api.get('/groups/:gid/expenses/:eid/history', async c => {
 // newest first, 50 a page, with how many entries by other people I haven't seen yet.
 api.get('/me/activity', async c => {
   const uid = c.get('userId')
-  const money = c.req.query('scope') === 'money'
+  const money = c.req.query('scope') === 'money', ai = c.req.query('scope') === 'ai'
   const [mine, me] = await Promise.all([
     db.member.findMany({ where: { userId: uid }, select: { id: true, groupId: true, group: { select: { name: true, kind: true } } } }),
     db.user.findUniqueOrThrow({ where: { id: uid }, select: { activitySeenAt: true } }),
@@ -248,7 +248,7 @@ api.get('/me/activity', async c => {
   const unread = () => db.auditEvent.count({ where: { groupId: { in: [...byGroup.keys()] }, byId: { not: uid }, ...(me.activitySeenAt && { at: { gt: me.activitySeenAt } }) } })
   if (c.req.query('peek')) return c.json({ unread: await unread() }) // just the badge, on every sync
   const before = c.req.query('before')
-  const where = { groupId: { in: [...byGroup.keys()] }, ...(money && { kind: { startsWith: 'expense.' } }), ...(before && !isNaN(Date.parse(before)) && { at: { lt: new Date(before) } }) }
+  const where = { groupId: { in: [...byGroup.keys()] }, ...(money && { kind: { startsWith: 'expense.' } }), ...(ai && { via: 'ai' }), ...(before && !isNaN(Date.parse(before)) && { at: { lt: new Date(before) } }) }
   // ponytail: "money" filters after the query (the member id differs per group); fine at hundreds of entries a page.
   const rows = await db.auditEvent.findMany({ where, orderBy: { at: 'desc' }, take: money ? 200 : 50 })
   const events = rows
@@ -516,7 +516,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
     await db.$transaction(async tx => {
       if (!existing) {
         await tx.expense.create({ data: { id: eid, groupId: gid, createdById: uid, updatedById: uid, ...data } })
-        await audit(tx, gid, { kind: 'expense.created', expenseId: eid, version, ...by, after })
+        await audit(tx, gid, { kind: 'expense.created', expenseId: eid, version, ...by, via: b.via, after })
       } else {
         // Compare-and-set on the version: of two edits racing from the same base, only one gets through.
         const { count } = await tx.expense.updateMany({ where: { id: eid, version: existing.version }, data: { ...data, deletedAt: null, updatedById: uid, version: { increment: 1 } } })
@@ -525,7 +525,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
         version = existing.version + 1
         const action = existing.deletedAt ? 'restored' : b.revertOf ? 'reverted' : 'edited'
         // A deleted expense counts for nothing, so bringing it back starts from nothing.
-        await audit(tx, gid, { kind: `expense.${action}`, expenseId: eid, version, revertOf: b.revertOf, ...by, before: existing.deletedAt ? null : snapOf(existing), after })
+        await audit(tx, gid, { kind: `expense.${action}`, expenseId: eid, version, revertOf: b.revertOf, ...by, via: b.via, before: existing.deletedAt ? null : snapOf(existing), after })
       }
       await tx.expenseShare.createMany({ data: shares.map(s => ({ expenseId: eid, ...s })) })
     })
@@ -565,7 +565,7 @@ api.delete('/groups/:gid/expenses/:eid', async c => {
     await db.$transaction(async tx => {
       const { count } = await tx.expense.updateMany({ where: { id: eid, version: e.version }, data: { deletedAt: new Date(), updatedById: uid, version: { increment: 1 } } })
       if (!count) throw new Stale()
-      await audit(tx, gid, { kind: 'expense.deleted', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), before: snapOf(e) })
+      await audit(tx, gid, { kind: 'expense.deleted', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), ...(c.req.query('via') === 'ai' && { via: 'ai' as const }), before: snapOf(e) })
     })
   } catch (err) { if (err instanceof Stale) return conflict(c, eid); throw err }
   return c.json({ ok: true, version: e.version + 1 })
@@ -581,7 +581,7 @@ api.post('/groups/:gid/expenses/:eid/restore', async c => {
   if (!e.deletedAt) return c.json({ ok: true, version: e.version })
   const ok = await db.$transaction(async tx => {
     const { count } = await tx.expense.updateMany({ where: { id: eid, version: e.version }, data: { deletedAt: null, updatedById: uid, version: { increment: 1 } } })
-    if (count) await audit(tx, gid, { kind: 'expense.restored', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), after: snapOf(e) })
+    if (count) await audit(tx, gid, { kind: 'expense.restored', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), ...(c.req.query('via') === 'ai' && { via: 'ai' as const }), after: snapOf(e) })
     return count
   })
   if (!ok) return conflict(c, eid)

@@ -192,6 +192,7 @@ model AuditEvent {
   revertOf  Int?
   byId      String?
   byName    String /// who, as they were named then
+  via       String? /// "ai": made by confirming an Ask Plico card (a label from the app, not proof)
   at        DateTime @default(now())
   before    Json?
   after     Json?

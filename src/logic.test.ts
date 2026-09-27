@@ -185,3 +185,14 @@ console.log('friends outside groups ok')
   }
 }
 console.log('simplify ok')
+
+// "via Ask Plico" is covered by the audit hash only when set: entries from before it existed hash the same.
+{
+  const base = { groupId: 'g', seq: 1, kind: 'expense.created', byName: 'Asha', at: '2026-09-27T00:00:00.000Z', effect: {}, prevHash: '0' }
+  assert.equal(auditPayload({ ...base, via: null }), auditPayload(base))
+  assert.notEqual(auditPayload({ ...base, via: 'ai' }), auditPayload(base))
+  // A change folded with an Ask Plico one keeps the mark.
+  const q = enqueue([{ m: 'PUT', path: '/api/groups/g/expenses/e', body: 1, base: 3, via: 'ai' }], { m: 'PUT', path: '/api/groups/g/expenses/e', body: 2, base: 4 }, false)
+  assert.deepEqual(q, [{ m: 'PUT', path: '/api/groups/g/expenses/e', body: 2, base: 3, via: 'ai' }])
+  console.log('via ok')
+}

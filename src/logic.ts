@@ -380,7 +380,7 @@ export function friendParts(amount: number, paid: Record<string, number>, owed: 
 
 // ---------- sync: the outbox and edit history ----------
 /** A queued server change. `base` = the expense version it started from (null = new, absent = not an expense). */
-export type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown; base?: number | null }
+export type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown; base?: number | null; via?: 'ai' }
 const expensePath = (p: string) => /\/expenses\/[^/?]+$/.test(p)
 
 /** Queue an op. A newer change to an expense replaces one still waiting (keeping its base, so the server can still
@@ -388,7 +388,8 @@ const expensePath = (p: string) => /\/expenses\/[^/?]+$/.test(p)
 export function enqueue(ops: Op[], op: Op, busy: boolean): Op[] {
   const i = expensePath(op.path) ? ops.findIndex((o, k) => o.path === op.path && !(busy && k === 0)) : -1
   if (i < 0) return [...ops, op]
-  return [...ops.slice(0, i), ...ops.slice(i + 1), { ...op, base: ops[i].base }]
+  const via = op.via ?? ops[i].via // a change folded with an Ask Plico one still says Ask Plico was involved
+  return [...ops.slice(0, i), ...ops.slice(i + 1), { ...op, base: ops[i].base, ...(via && { via }) }]
 }
 
 /** The server took a change to `path` at `version`: later queued changes to it build on that. */
@@ -454,10 +455,12 @@ export function effectOf(before: Snap | null, after: Snap | null): Record<Id, nu
 export type AuditEntry = {
   groupId: string; seq: number; kind: string; expenseId?: string | null; memberId?: string | null; version?: number | null; revertOf?: number | null
   byId?: string | null; byName: string; at: string; before?: unknown; after?: unknown; effect: Record<Id, number>; prevHash: string; hash?: string
+  via?: 'ai' | null // made by confirming an Ask Plico card
 }
-/** What the hash covers: every field of the entry except the hash itself. */
+/** What the hash covers: every field of the entry except the hash itself. `via` only when set, so older entries still verify. */
 export const auditPayload = (e: AuditEntry) => canon({
   groupId: e.groupId, seq: e.seq, kind: e.kind, expenseId: e.expenseId ?? null, memberId: e.memberId ?? null, version: e.version ?? null,
   revertOf: e.revertOf ?? null, byId: e.byId ?? null, byName: e.byName, at: e.at, before: e.before ?? null, after: e.after ?? null, effect: e.effect,
+  ...(e.via && { via: e.via }),
 })
 export const GENESIS = '0'.repeat(64)

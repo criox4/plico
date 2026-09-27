@@ -3,6 +3,7 @@
 import { ME, friendParts, runRecurring, uid, type Expense, type Group, type Id, type SplitMode } from './logic'
 import { getState, update } from './store'
 import { directWith } from './people'
+import { markAi } from './sync'
 import type { ChatCard } from './schema'
 
 export type Target = { kind: 'group'; groupId: Id } | { kind: 'friends'; people: { email: string; name: string }[] }
@@ -19,12 +20,14 @@ const memberOf = (g: Group, email: string) => g.members.find(m => m.id !== ME &&
 /** Where the saved expense lives, for going there after. */
 export type Saved = { groupId: Id; friend?: string }
 
-export async function commitDraft(d: Draft): Promise<Saved[]> {
+/** Save a draft. `via: 'ai'` when it came from an Ask Plico card: the history says so. */
+export async function commitDraft(d: Draft, via?: 'ai'): Promise<Saved[]> {
   const put = (gid: Id, e: Omit<Expense, 'id'>) => update(s => {
     const g = s.groups.find(x => x.id === gid)
     if (!g) return
-    const day = +e.date.slice(8)
-    g.expenses.push({ ...e, id: uid(), ...(d.repeat && { repeat: { next: nextMonth(e.date), day } }) })
+    const day = +e.date.slice(8), id = uid()
+    if (via) markAi(id)
+    g.expenses.push({ ...e, id, ...(d.repeat && { repeat: { next: nextMonth(e.date), day } }) })
     runRecurring(g)
   })
   const base = { title: d.title, cat: d.cat, date: d.date, ...(d.receipt && { receipt: d.receipt }) }

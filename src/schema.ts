@@ -38,6 +38,8 @@ export const ExpenseIn = z.object({
   base: z.nullish(z.int().check(z.minimum(0))),
   /** "Restore this version" from the history screen. */
   revertOf: z.optional(z.int().check(z.minimum(1))),
+  /** Made by confirming an Ask Plico card: shown on the history entry. */
+  via: z.optional(z.literal('ai')),
 })
 export const ReadIn = z.object({
   text: z.optional(text(500)),
@@ -112,6 +114,7 @@ export const AuditEvent = z.object({
   groupId: z.string(), seq: z.int(), kind: z.string(), expenseId: z.nullable(z.string()), memberId: z.nullable(z.string()),
   version: z.nullable(z.int()), revertOf: z.nullable(z.int()), byId: z.nullable(z.string()), byName: z.string(), at: When,
   before: Changed, after: Changed, effect: z.record(z.string(), z.int()), prevHash: z.string(), hash: z.string(),
+  via: z.nullish(z.literal('ai')), // covered by the hash when set: dropping it would fail verification
 })
 export const AuditOut = z.object({ head: z.object({ auditSeq: z.int(), auditHash: z.string() }), events: z.array(AuditEvent) })
 export const ActivityEvent = z.extend(AuditEvent, {
@@ -138,6 +141,8 @@ export const RemindOut = z.object({ ok: z.literal(true) })
 export const RemindLimitOut = z.object({ error: z.string(), code: z.enum(['limit', 'not-on-plico', 'no-device', 'square', 'tracking']), retryAt: z.nullish(When) })
 
 /** Ask Plico: what the app can be asked to do. Ids are server member ids. */
+/** An expense as an edit card shows it, before and after. Amount keys are server member ids. */
+const Shot = z.object({ title: z.string(), cat: z.string(), date: Day, amount: Paise, paid: z.record(z.string(), Paise), owed: z.record(z.string(), Paise) })
 export const ChatCard = z.union([
   z.object({
     type: z.literal('expense'),
@@ -147,6 +152,11 @@ export const ChatCard = z.union([
   }),
   z.object({ type: z.literal('settle'), groupId: Id, group: z.string(), from: Id, to: Id, amount: Paise, summary: z.string() }),
   z.object({ type: z.literal('remind'), groupId: Id, group: z.string(), memberId: Id, name: z.string(), amount: Paise, summary: z.string() }),
+  z.object({ type: z.literal('pay'), groupId: Id, group: z.string(), from: Id, to: Id, amount: Paise, confirm: z.boolean(), summary: z.string() }),
+  z.object({ type: z.literal('confirm'), groupId: Id, group: z.string(), expenseId: Id, amount: Paise, from: z.string(), summary: z.string() }),
+  z.object({ type: z.literal('edit'), groupId: Id, group: z.string(), expenseId: Id, version: z.int(), before: Shot, after: Shot, names: z.record(z.string(), z.string()), changes: z.array(z.string()), summary: z.string() }),
+  z.object({ type: z.literal('delete'), groupId: Id, group: z.string(), expenseId: Id, version: z.int(), title: z.string(), amount: Paise, summary: z.string() }),
+  z.object({ type: z.literal('restore'), groupId: Id, group: z.string(), expenseId: Id, title: z.string(), amount: Paise, summary: z.string() }),
 ])
 export const ChatEvent = z.union([
   z.object({ type: z.literal('text'), d: z.string() }),

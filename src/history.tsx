@@ -168,6 +168,7 @@ function saveCsv(file: string, rows: (string | number)[][]) {
 }
 const stamp = (at: string) => new Date(at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
 const rupees = (n: number) => (n / 100).toFixed(2)
+const by = (e: Event) => (e.via === 'ai' ? `${e.byName} (via Ask Plico)` : e.byName)
 
 function Entry({ s, g, e, onRestore, busy, mine, label }: { s: State; g?: Group; e: Event; onRestore?: () => void; busy?: boolean; mine?: string; label?: string }) {
   const d = describe(e, g, s.user?.id)
@@ -180,7 +181,7 @@ function Entry({ s, g, e, onRestore, busy, mine, label }: { s: State; g?: Group;
         <p><strong>{d.line}</strong></p>
         {d.details.length > 0 && <ul className="changes">{d.details.map(w => <li key={w}>{cap(w)}</li>)}</ul>}
         {!mine && d.moves.length > 0 && <p className="moves">{d.moves.join(' · ')}</p>}
-        <small>#{e.seq} · {cap(when(e.at))}</small>
+        <small>#{e.seq} · {cap(when(e.at))}{e.via === 'ai' && <span className="via-ai"> · via Ask Plico</span>}</small>
       </button>
       {mine && e.effect[mine] ? <span className={`money ${e.effect[mine] > 0 ? 'pos' : 'neg'}`}>{signed(e.effect[mine])}</span>
         : onRestore && <button className="btn-sm" disabled={busy} onClick={onRestore}>{busy ? '…' : 'Restore'}</button>}
@@ -210,7 +211,7 @@ export function AuditLog({ s, g }: { s: State; g: Group }) {
     ...log.events.map(e => {
       const d = describe(e, g, s.user?.id)
       const idOf = (m: Group['members'][number]) => (m.id === 'me' ? g.selfId! : m.id)
-      return [e.seq, stamp(e.at), e.byName, d.line, d.details.join('; '), ...g.members.map(m => (e.effect[idOf(m)] ? rupees(e.effect[idOf(m)]) : '')), e.hash]
+      return [e.seq, stamp(e.at), by(e), d.line, d.details.join('; '), ...g.members.map(m => (e.effect[idOf(m)] ? rupees(e.effect[idOf(m)]) : '')), e.hash]
     }),
   ])
   const events = [...(log?.events ?? [])].reverse()
@@ -236,7 +237,7 @@ export function AuditLog({ s, g }: { s: State; g: Group }) {
 // ---------- Activity: everything in my groups, or just what moved my balance ----------
 type Mine = ActivityEvent
 export function Activity({ s }: { s: State }) {
-  const [scope, setScope] = useState<'all' | 'money'>('all')
+  const [scope, setScope] = useState<'all' | 'money' | 'ai'>('all')
   const [rows, setRows] = useState<Mine[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [err, setErr] = useState('')
@@ -252,7 +253,7 @@ export function Activity({ s }: { s: State }) {
   const title = (e: Mine) => (gOf(e.groupId) ? groupTitle(gOf(e.groupId)!) : e.group.name)
   const csv = () => saveCsv(`plico-activity-${scope}.csv`, [
     ['When', 'Group', 'Who', 'What', 'Details', 'My balance change (₹)', 'Group entry #', 'Hash'],
-    ...rows.map(e => { const d = describe(e, gOf(e.groupId), s.user?.id); return [stamp(e.at), title(e), e.byName, d.line, d.details.join('; '), e.myEffect ? rupees(e.myEffect) : '', e.seq, e.hash] }),
+    ...rows.map(e => { const d = describe(e, gOf(e.groupId), s.user?.id); return [stamp(e.at), title(e), by(e), d.line, d.details.join('; '), e.myEffect ? rupees(e.myEffect) : '', e.seq, e.hash] }),
   ])
   return (
     <Screen t={s.theme} fab="/add" title="Activity">
@@ -260,11 +261,12 @@ export function Activity({ s }: { s: State }) {
       <div className="seg activity-seg" role="tablist" aria-label="Show">
         <button role="tab" aria-selected={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>Everything</button>
         <button role="tab" aria-selected={scope === 'money'} className={scope === 'money' ? 'on' : ''} onClick={() => setScope('money')}>My money</button>
+        <button role="tab" aria-selected={scope === 'ai'} className={scope === 'ai' ? 'on' : ''} onClick={() => setScope('ai')}>Ask Plico</button>
       </div>
       {err && <p className="error" role="alert">{err}</p>}
       {!loaded && !err && <ol className="feed" aria-busy="true">{[0, 1, 2].map(i => <li key={i} className="skeleton" aria-hidden />)}</ol>}
       {loaded && !rows.length && (
-        <div className="empty-state"><Plico mood="empty" size={72} /><p><strong>Quiet so far.</strong>{scope === 'all' ? ' Everything people add, change or settle in your groups shows up here, with who did it.' : ' Expenses and settlements that change your balance show up here.'}</p></div>
+        <div className="empty-state"><Plico mood="empty" size={72} /><p><strong>Quiet so far.</strong>{scope === 'all' ? ' Everything people add, change or settle in your groups shows up here, with who did it.' : scope === 'ai' ? ' Changes anyone in your groups made by confirming an Ask Plico card show up here.' : ' Expenses and settlements that change your balance show up here.'}</p></div>
       )}
       <ol className="feed">
         {rows.map(e => <Entry key={e.groupId + e.seq} s={s} g={gOf(e.groupId)} e={e} mine={scope === 'money' || e.myEffect ? e.memberOf : undefined} label={title(e)} />)}

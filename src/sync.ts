@@ -124,12 +124,19 @@ export function diff(prev: State, next: State): Op[] {
   return [...profile, ...groups, ...members, ...expenses, ...delExp, ...delMem, ...delGroups]
 }
 
+/** Expenses an Ask Plico card is about to change: their next queued change carries via: 'ai' into the history. */
+const byAi = new Set<string>()
+export const markAi = (...eids: string[]) => { for (const e of eids) byAi.add(e) }
+
 function queueNow() {
   clearTimeout(timer)
   timer = undefined
   const cur = getState()
   if (!status.authed) { snap = cur; return }
-  const ops = diff(snap, cur)
+  const ops = diff(snap, cur).map(op => {
+    const eid = opIds(op.path)[2]
+    return eid && byAi.delete(eid) ? { ...op, via: 'ai' as const } : op
+  })
   snap = cur
   if (!ops.length) {
     if (missedPull) void pull()
@@ -173,8 +180,9 @@ async function flush() {
   try {
     while (outbox.length) {
       const op = outbox[0]
-      const url = op.m === 'DELETE' && op.base != null ? `${op.path}?base=${op.base}` : op.path
-      const body = op.body ? JSON.stringify('base' in op && op.m === 'PUT' ? { ...(op.body as object), base: op.base } : op.body) : undefined
+      const q = new URLSearchParams({ ...(op.base != null && { base: String(op.base) }), ...(op.via && { via: op.via }) }).toString()
+      const url = op.m === 'DELETE' && q ? `${op.path}?${q}` : op.path
+      const body = op.body ? JSON.stringify(op.m === 'PUT' && ('base' in op || op.via) ? { ...(op.body as object), ...('base' in op && { base: op.base }), ...(op.via && { via: op.via }) } : op.body) : undefined
       let res: Response
       sending = true
       try {
@@ -339,8 +347,8 @@ export function resolveIssue(id: string, choice: 'mine' | 'theirs' | 'retry' | '
 }
 
 /** Online-only history actions: restore a deleted expense, or put back an older version. Then pull. */
-export async function restoreExpense(gid: string, eid: string) {
-  await api(`/api/groups/${gid}/expenses/${eid}/restore`, { method: 'POST' })
+export async function restoreExpense(gid: string, eid: string, via?: 'ai') {
+  await api(`/api/groups/${gid}/expenses/${eid}/restore${via ? `?via=${via}` : ''}`, { method: 'POST' })
   await flush(); await pull()
 }
 export async function revertExpense(gid: string, eid: string, to: SnapFull, version: number, current: number) {

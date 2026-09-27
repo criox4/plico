@@ -962,6 +962,12 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .action-card > p:first-child { display: flex; gap: 10px; align-items: flex-start; font-weight: 600; line-height: 1.4; }
 .action-card > p:first-child .icon-svg { flex: none; margin-top: 2px; color: var(--link); }
 .action-card .btn-sm { justify-self: start; }
+.action-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.action-card.danger { border-color: color-mix(in srgb, var(--neg) 45%, var(--line)); background: color-mix(in srgb, var(--neg) 6%, var(--bg)); }
+.action-card.danger > p:first-child .icon-svg { color: var(--neg); }
+.action-card.danger .btn-sm:not(.ghost) { background: var(--neg); color: #FFFFFF; }
+.via-ai { color: var(--link); font-weight: 600; }
+.xchanges { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: .92em; }
 .action-done { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--settled); font-weight: 650; }
 .action-done .link { min-height: 32px; }
 .xcard { display: grid; gap: 10px; padding: 14px; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--line); }

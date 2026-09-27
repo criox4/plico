@@ -6,12 +6,13 @@ import { ME, allocate, balances, friendParts, inr, itemSplit, pairwise, simplify
 
 export type WMember = { id: string; name: string; email: string | null; joined: boolean }
 export type WGroup = Group & { meId: string; people: WMember[]; kind: string }
-export type WEvent = { groupId: string; kind: string; byName: string; at: string; title: string | null; amount: number | null; effect: Record<string, number> }
+export type WEvent = { groupId: string; kind: string; byName: string; viaAi?: boolean; at: string; title: string | null; amount: number | null; effect: Record<string, number> }
 /** A receipt the person attached, as read (paise). */
 export type Receipt = { title: string; amount: number | null; items: { name: string; amount: number }[]; extras: number }
 /** Sorts receipt items into the person's rules ("non-veg food"). rule = index, or null when none fits; sure = confident. */
 export type Classify = (items: string[], rules: string[]) => Promise<{ rule: number | null; sure: boolean }[]>
-export type World = { me: { name: string; email: string }; today: string; groups: WGroup[]; events: WEvent[]; receipt?: Receipt; classify?: Classify }
+export type WDeleted = { id: string; groupId: string; title: string; amount: number; date: string; deletedAt: string; settle: boolean }
+export type World = { me: { name: string; email: string }; today: string; groups: WGroup[]; events: WEvent[]; deleted?: WDeleted[]; receipt?: Receipt; classify?: Classify }
 
 /** Text other people typed (titles, names) is data: strip control and direction characters, cap the length. */
 export const clean = (s: unknown, max = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
@@ -63,6 +64,16 @@ export type Card =
       names: Record<string, string>; items?: { name: string; amount: number; who: string[]; unsure?: boolean }[]; extras?: number; summary: string }
   | { type: 'settle'; groupId: string; group: string; from: string; to: string; amount: number; summary: string }
   | { type: 'remind'; groupId: string; group: string; memberId: string; name: string; amount: number; summary: string }
+  /** Record a payment. `confirm`: the payee has to confirm it arrived before it counts. */
+  | { type: 'pay'; groupId: string; group: string; from: string; to: string; amount: number; confirm: boolean; summary: string }
+  /** The person is the payee of a payment waiting for them: Got it / Not yet. */
+  | { type: 'confirm'; groupId: string; group: string; expenseId: string; amount: number; from: string; summary: string }
+  /** Before → after of one expense, at the version it was drafted from. */
+  | { type: 'edit'; groupId: string; group: string; expenseId: string; version: number; before: Shot; after: Shot; names: Record<string, string>; changes: string[]; summary: string }
+  | { type: 'delete'; groupId: string; group: string; expenseId: string; version: number; title: string; amount: number; summary: string }
+  | { type: 'restore'; groupId: string; group: string; expenseId: string; title: string; amount: number; summary: string }
+/** The parts of an expense an edit can change. Amount keys are the group's member ids. */
+export type Shot = { title: string; cat: string; date: string; amount: number; paid: Record<string, number>; owed: Record<string, number> }
 export type ToolOut = { result: unknown; card?: Card }
 type Out = ToolOut | Promise<ToolOut>
 
@@ -88,10 +99,12 @@ const TOOLS: Record<string, (w: World, a: Args) => Out> = {
   },
 
   find_expenses: (w, a) => {
-    const text = norm(str(a.text)), cat = str(a.category), from = day(a.from), to = day(a.to), min = num(a.min_amount), max = num(a.max_amount)
+    // Models fill every optional field: 0 means no limit, and a guessed category that finds nothing is dropped below.
+    const text = norm(str(a.text)), from = day(a.from), to = day(a.to), min = num(a.min_amount) || undefined, max = num(a.max_amount) || undefined
+    let cat = str(a.category)
     let gs = w.groups
     if (str(a.group)) { const f = findGroup(w, str(a.group)); if ('error' in f) return { result: f }; gs = [f.ok] }
-    const rows = gs.flatMap(g => {
+    const search = () => gs.flatMap(g => {
       let person: string | null = null
       if (str(a.person)) { const p = findPerson(g, str(a.person)); if ('error' in p) return []; person = p.ok.id }
       return g.expenses.filter(e => !e.settle
@@ -99,14 +112,17 @@ const TOOLS: Record<string, (w: World, a: Args) => Out> = {
         && (min === undefined || e.amount >= min * 100) && (max === undefined || e.amount <= max * 100)
         && (!person || e.paid[person] || e.owed[person])).map(e => ({ g, e }))
     }).sort((x, y) => y.e.date.localeCompare(x.e.date))
+    let rows = search(), anyCat = false
+    if (!rows.length && cat) { cat = ''; rows = search(); anyCat = rows.length > 0 }
     const limit = Math.min(Math.max(num(a.limit) ?? 15, 1), 25)
     return { result: {
       count: rows.length, total: rs(rows.reduce((s, r) => s + r.e.amount, 0)), your_share_total: rs(rows.reduce((s, r) => s + (r.e.owed[r.g.meId] ?? 0), 0)),
       expenses: rows.slice(0, limit).map(({ g, e }) => ({
-        date: e.date, title: clean(e.title), group: gname(g), category: e.cat, amount: rs(e.amount),
+        id: e.id, date: e.date, title: clean(e.title), group: gname(g), category: e.cat, amount: rs(e.amount),
         paid_by: Object.keys(e.paid).map(id => who(g, id)).join(', '), your_share: rs(e.owed[g.meId] ?? 0),
       })),
       ...(rows.length > limit && { note: `Showing the latest ${limit} of ${rows.length}.` }),
+      ...(anyCat && { category_note: 'Nothing matched that category, so these are from any category.' }),
     } }
   },
 
@@ -135,7 +151,7 @@ const TOOLS: Record<string, (w: World, a: Args) => Out> = {
     return { result: { days, entries: evs.slice(0, 30).map(e => {
       const g = names.get(e.groupId)!
       const mine = e.effect[g.meId] ?? 0
-      return { when: e.at.slice(0, 16).replace('T', ' '), group: gname(g), by: clean(e.byName, 40), what: e.kind.replace('.', ' '), title: e.title ? clean(e.title) : null, amount: e.amount ? rs(e.amount) : null, your_balance_change: mine ? signed(mine) : null }
+      return { when: e.at.slice(0, 16).replace('T', ' '), group: gname(g), by: clean(e.byName, 40) + (e.viaAi ? ' (via Ask Plico)' : ''), what: e.kind.replace('.', ' '), title: e.title ? clean(e.title) : null, amount: e.amount ? rs(e.amount) : null, your_balance_change: mine ? signed(mine) : null }
     }) } }
   },
 
@@ -266,6 +282,155 @@ async function draftExpense(w: World, a: Args): Promise<ToolOut> {
   }
 }
 
+// ---------- explaining, and changing what's already there ----------
+const CATEGORIES = ['food', 'groceries', 'stay', 'transport', 'drinks', 'fun', 'rent', 'bills', 'help', 'other']
+/** Where one person shows up: every group you share with them (matched by email, so the same friend across groups). */
+function spotsOf(w: World, name: string, group?: string): Found<{ name: string; spots: { g: WGroup; id: string }[] }> {
+  let gs = w.groups
+  if (group) { const f = findGroup(w, group); if ('error' in f) return f; gs = [f.ok] }
+  if (gs.length === 1) { const p = findPerson(gs[0], name); if ('error' in p) return p; if (p.ok.id === gs[0].meId) return { error: 'That’s you.' }; return { ok: { name: p.ok.name, spots: [{ g: gs[0], id: p.ok.id }] } } }
+  const f = findFriend(w, name); if ('error' in f) return f
+  const spots = gs.flatMap(g => g.people.filter(p => p.id !== g.meId && p.email === f.ok.email).map(p => ({ g, id: p.id })))
+  return { ok: { name: f.ok.name, spots } }
+}
+/** One expense's share of what b owes a (from the expense itself; positive: b owes a). */
+const pairOf = (e: Expense, a: string, b: string) => (e.pending || e.rejected || !e.amount ? 0 : Math.round(((e.owed[b] ?? 0) * (e.paid[a] ?? 0) - (e.owed[a] ?? 0) * (e.paid[b] ?? 0)) / e.amount))
+const findExpense = (w: World, id: string): Found<{ g: WGroup; e: Expense }> => {
+  for (const g of w.groups) { const e = g.expenses.find(x => x.id === id); if (e) return { ok: { g, e } } }
+  return { error: 'No expense with that id in your groups. Search with find_expenses and use the id it returns.' }
+}
+const shot = (e: Expense): Shot => ({ title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid: { ...e.paid }, owed: { ...e.owed } })
+const nice = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const describe = (g: WGroup, o: Record<string, number>) => Object.entries(o).filter(([, v]) => v).map(([k, v]) => `${who(g, k)} ${rs(v)}`).join(', ')
+
+const MORE: Record<string, (w: World, a: Args) => Out> = {
+  explain_balance: (w, a) => {
+    const f = spotsOf(w, str(a.person), str(a.group) || undefined); if ('error' in f) return { result: f }
+    const groups = f.ok.spots.filter(x => !x.g.track).map(({ g, id }) => {
+      const rows = g.expenses.map(e => ({ e, n: pairOf(e, g.meId, id) })).filter(r => r.n)
+      const total = rows.reduce((t, r) => t + r.n, 0)
+      const plan = simplify(balances(g)).find(t => (t.from === id && t.to === g.meId) || (t.from === g.meId && t.to === id))
+      const planN = plan ? (plan.to === g.meId ? plan.amount : -plan.amount) : 0
+      return {
+        group: gname(g), from_expenses: signed(total), meaning: total > 0 ? `${clean(f.ok.name, 40)} owes you` : total < 0 ? `you owe ${clean(f.ok.name, 40)}` : 'even',
+        ...(planN !== total && { settle_plan: signed(planN), why_different: 'The group’s settle-up plan combines everyone’s debts into the fewest payments, so it can ask this person for a different amount than their share of what you paid. Each person’s total in the group is the same either way.' }),
+        biggest: rows.sort((x, y) => Math.abs(y.n) - Math.abs(x.n)).slice(0, 12).map(r => ({
+          date: r.e.date, title: clean(r.e.title), kind: r.e.settle ? 'payment' : 'expense', amount: rs(r.e.amount), paid_by: Object.keys(r.e.paid).map(k => who(g, k)).join(', '),
+          effect: r.n > 0 ? `${clean(f.ok.name, 40)} owes you ${rs(r.n)} more` : `you owe ${clean(f.ok.name, 40)} ${rs(-r.n)} more (or they’re owed less)`,
+        })),
+        ...(rows.length > 12 && { note: `The ${rows.length - 12} smaller entries aren’t listed.` }),
+      }
+    })
+    const total = f.ok.spots.filter(x => !x.g.track).reduce((t, { g, id }) => t + g.expenses.reduce((u, e) => u + pairOf(e, g.meId, id), 0), 0)
+    return { result: { person: clean(f.ok.name, 40), overall: signed(total), overall_meaning: total > 0 ? 'they owe you' : total < 0 ? 'you owe them' : 'even', groups } }
+  },
+
+  pending: w => {
+    const rows = w.groups.flatMap(g => g.expenses.filter(e => e.settle && (e.pending || e.rejected)).map(e => {
+      const from = Object.keys(e.paid)[0], to = Object.keys(e.owed)[0]
+      const what = e.rejected ? (from === g.meId ? `${who(g, to)} says your ${rs(e.amount)} hasn’t arrived` : `you said ${who(g, from)}’s ${rs(e.amount)} hasn’t arrived`)
+        : to === g.meId ? `${who(g, from)} says they paid you ${rs(e.amount)}: waiting for you to confirm` : from === g.meId ? `waiting for ${who(g, to)} to confirm your ${rs(e.amount)}` : `${who(g, from)} → ${who(g, to)} ${rs(e.amount)}, waiting for ${who(g, to)}`
+      return { id: e.id, group: gname(g), date: e.date, what, you_can_confirm: !e.rejected && to === g.meId }
+    }))
+    return { result: rows.length ? { payments: rows } : { payments: [], note: 'No payments are waiting on anyone.' } }
+  },
+
+  confirm_payment: (w, a) => {
+    const all = w.groups.flatMap(g => g.expenses.filter(e => e.settle && e.pending && !e.rejected && Object.keys(e.owed)[0] === g.meId).map(e => ({ g, e })))
+    let hits = all
+    if (str(a.expense_id)) hits = hits.filter(x => x.e.id === str(a.expense_id))
+    if (str(a.group)) { const f = findGroup(w, str(a.group)); if ('error' in f) return { result: f }; hits = hits.filter(x => x.g.id === f.ok.id) }
+    if (str(a.person)) hits = hits.filter(x => norm(who(x.g, Object.keys(x.e.paid)[0])).includes(norm(str(a.person))))
+    if (num(a.amount)) hits = hits.filter(x => x.e.amount === Math.round(num(a.amount)! * 100))
+    if (!hits.length) return { result: { error: all.length ? 'No payment waiting for you matches that. Use pending to list them.' : 'No payments are waiting for you to confirm.' } }
+    if (hits.length > 1) return { result: { error: 'More than one payment matches. Ask which.', payments: hits.slice(0, 8).map(({ g, e }) => ({ id: e.id, group: gname(g), from: who(g, Object.keys(e.paid)[0]), amount: rs(e.amount), date: e.date })) } }
+    const { g, e } = hits[0], from = Object.keys(e.paid)[0]
+    const summary = `Did ${who(g, from)}’s ${rs(e.amount)} in ${gname(g)} arrive? Check your UPI app first.`
+    return { result: { drafted: summary, next: 'Shown as a card with Got it and Not yet.' }, card: { type: 'confirm', groupId: g.id, group: gname(g), expenseId: e.id, amount: e.amount, from: who(g, from), summary } }
+  },
+
+  mark_paid: (w, a) => {
+    const f = spotsOf(w, str(a.person), str(a.group) || undefined); if ('error' in f) return { result: f }
+    const dir = a.direction === 'i_paid_them' ? 'out' : a.direction === 'they_paid_me' ? 'in' : null
+    const want = num(a.amount) ? Math.round(num(a.amount)! * 100) : undefined // 0: not given
+    if (want !== undefined && (want < 100 || want > 1e9)) return { result: { error: 'Need an amount between ₹1 and ₹1,00,00,000.' } }
+    const live = f.ok.spots.filter(x => !x.g.track)
+    if (!live.length) return { result: { error: `You don’t share a group that tracks balances with ${clean(f.ok.name, 40)}.` } }
+    // What the settle-up plan says between you two in each group (positive: they pay you).
+    const owing = live.map(({ g, id }) => {
+      const t = simplify(balances(g)).find(x => (x.from === id && x.to === g.meId) || (x.from === g.meId && x.to === id))
+      return { g, id, n: t ? (t.to === g.meId ? t.amount : -t.amount) : 0 }
+    }).filter(x => x.n && (!dir || (dir === 'in') === (x.n > 0)))
+    let pickd = owing.length === 1 ? owing[0] : undefined
+    if (!pickd && live.length === 1 && dir && want) pickd = { ...live[0], n: 0 }
+    if (!pickd) return { result: owing.length
+      ? { error: 'Payments are open in more than one group. Ask which group (or record one per group).', open: owing.map(x => ({ group: gname(x.g), plan: x.n > 0 ? `${clean(f.ok.name, 40)} pays you ${rs(x.n)}` : `you pay ${clean(f.ok.name, 40)} ${rs(-x.n)}` })) }
+      : { error: `Nothing is owed between you and ${clean(f.ok.name, 40)}${dir ? ' that way' : ''}. To record a payment anyway, give the group, the direction and the amount.` } }
+    const { g, id, n } = pickd
+    const inward = dir ? dir === 'in' : n > 0
+    const amount = want ?? Math.abs(n)
+    const [from, to] = inward ? [id, g.meId] : [g.meId, id]
+    const confirm = !inward && !!g.people.find(p => p.id === id)?.joined
+    const summary = `${inward ? `${who(g, id)} paid you` : `You paid ${who(g, id)}`} ${rs(amount)} in ${gname(g)}.${confirm ? ` It counts once ${who(g, id)} confirms it arrived.` : ''}`
+    return { result: { drafted: summary, ...(n && amount !== Math.abs(n) && { note: `The settle-up plan says ${rs(Math.abs(n))}; this records ${rs(amount)}.` }), next: 'Shown as a card; recorded only when the person taps Record.' },
+      card: { type: 'pay', groupId: g.id, group: gname(g), from, to, amount, confirm, summary } }
+  },
+
+  edit_expense: (w, a) => {
+    const f = findExpense(w, str(a.expense_id)); if ('error' in f) return { result: f }
+    const { g, e } = f.ok
+    if (e.settle) return { result: { error: 'That’s a payment. To fix it, delete it and record the right one with mark_paid.' } }
+    const before = shot(e), after = shot(e)
+    if (str(a.title)) after.title = clean(a.title, 60)
+    if (CATEGORIES.includes(str(a.category))) after.cat = str(a.category)
+    if (day(a.date)) after.date = day(a.date)!
+    if (num(a.amount)) { // 0: not given
+      after.amount = Math.round(num(a.amount)! * 100)
+      if (after.amount < 100 || after.amount > 1e9) return { result: { error: 'Need an amount between ₹1 and ₹1,00,00,000.' } }
+    }
+    const among: string[] = []
+    for (const n of Array.isArray(a.split_between) ? a.split_between.map(String).slice(0, 50) : []) { const p = findPerson(g, n); if ('error' in p) return { result: p }; among.push(p.ok.id) }
+    // Shares: an equal split when named, otherwise the old shares scaled to the new amount.
+    after.owed = among.length ? allocate(after.amount, Object.fromEntries([...new Set(among)].map(k => [k, 1]))) : after.amount !== before.amount ? allocate(after.amount, before.owed) : before.owed
+    if (str(a.paid_by)) { const p = findPerson(g, str(a.paid_by)); if ('error' in p) return { result: p }; after.paid = { [p.ok.id]: after.amount } }
+    else if (after.amount !== before.amount) after.paid = allocate(after.amount, before.paid)
+    const changes = [
+      before.title !== after.title && `name “${clean(before.title)}” → “${after.title}”`,
+      before.amount !== after.amount && `amount ${rs(before.amount)} → ${rs(after.amount)}`,
+      before.date !== after.date && `date ${nice(before.date)} → ${nice(after.date)}`,
+      before.cat !== after.cat && `category ${before.cat} → ${after.cat}`,
+      JSON.stringify(before.paid) !== JSON.stringify(after.paid) && `paid by ${describe(g, before.paid)} → ${describe(g, after.paid)}`,
+      JSON.stringify(before.owed) !== JSON.stringify(after.owed) && `shares ${describe(g, before.owed)} → ${describe(g, after.owed)}`,
+    ].filter(Boolean) as string[]
+    if (!changes.length) return { result: { error: 'That wouldn’t change anything.' } }
+    const summary = `Change “${clean(before.title)}” in ${gname(g)}: ${changes.join('; ')}.`
+    const names = Object.fromEntries(g.people.map(p => [p.id, p.id === g.meId ? 'You' : clean(p.name, 40)]))
+    return { result: { drafted: summary, next: 'Shown as a before-and-after card; changed only when the person taps Save.' },
+      card: { type: 'edit', groupId: g.id, group: gname(g), expenseId: e.id, version: e.v ?? 0, before, after, names, changes, summary } }
+  },
+
+  delete_expense: (w, a) => {
+    const f = findExpense(w, str(a.expense_id)); if ('error' in f) return { result: f }
+    const { g, e } = f.ok
+    const summary = `Delete ${e.settle ? 'the payment' : `“${clean(e.title)}”`} (${rs(e.amount)}, ${nice(e.date)}) from ${gname(g)}? It can be restored later.`
+    return { result: { drafted: summary, next: 'Shown as a red card; deleted only when the person taps Delete.' },
+      card: { type: 'delete', groupId: g.id, group: gname(g), expenseId: e.id, version: e.v ?? 0, title: e.settle ? 'Payment' : clean(e.title), amount: e.amount, summary } }
+  },
+
+  restore_expense: (w, a) => {
+    const del = w.deleted ?? []
+    let hits = str(a.expense_id) ? del.filter(d => d.id === str(a.expense_id)) : del.filter(d => !str(a.title) || norm(d.title).includes(norm(str(a.title))))
+    if (str(a.group)) { const f = findGroup(w, str(a.group)); if ('error' in f) return { result: f }; hits = hits.filter(d => d.groupId === f.ok.id) }
+    if (!hits.length) return { result: { error: 'Nothing deleted in the last 60 days matches that.' } }
+    if (hits.length > 1) return { result: { error: 'More than one deleted expense matches. Ask which.', deleted: hits.slice(0, 8).map(d => ({ id: d.id, title: clean(d.title), amount: rs(d.amount), date: d.date, group: gname(w.groups.find(g => g.id === d.groupId)!) })) } }
+    const d = hits[0], g = w.groups.find(x => x.id === d.groupId)!
+    const summary = `Bring back “${clean(d.title)}” (${rs(d.amount)}, ${nice(d.date)}) in ${gname(g)}.`
+    return { result: { drafted: summary, next: 'Shown as a card; restored only when the person taps Restore.' },
+      card: { type: 'restore', groupId: g.id, group: gname(g), expenseId: d.id, title: clean(d.title), amount: d.amount, summary } }
+  },
+}
+Object.assign(TOOLS, MORE)
+
 export async function runTool(w: World, name: string, args: Args): Promise<ToolOut> {
   const t = TOOLS[name]
   if (!t) return { result: { error: `No tool called ${clean(name, 40)}.` } }
@@ -301,4 +466,17 @@ export const TOOL_DEFS = [
   }, ['title'])],
   ['draft_settlement', 'Prepare settling up between the person and someone. Opens the settle-up screen when tapped.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
   ['draft_reminder', 'Prepare a reminder to someone who owes the person money. Sent only when tapped.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
+  ['explain_balance', 'Why the person and someone owe what they do: the balance from the expenses themselves, group by group, the entries that moved it most, and the group’s settle-up plan when that differs.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
+  ['pending', 'Payments waiting for someone to confirm they arrived, and ones marked as not arrived, with ids.', S('No arguments.')],
+  ['confirm_payment', 'Prepare confirming a payment someone says they made to the person (only payments to the person). A card with Got it / Not yet.', S('', { person: s('Who paid'), group: GROUP, amount: n('Rupees'), expense_id: s('Id from pending') })],
+  ['mark_paid', 'Prepare recording a payment between the person and someone (money already paid, e.g. by UPI or cash). Defaults to what the group’s settle-up plan says. This is how to bring a balance to zero; there is no other way to change a balance.', S('', {
+    person: s('Their name'), group: GROUP, amount: n('Rupees; omit for the full amount owed'),
+    direction: { type: 'string', enum: ['they_paid_me', 'i_paid_them'], description: 'Omit to follow who owes whom' },
+  }, ['person'])],
+  ['edit_expense', 'Prepare changing an existing expense (not a payment): name, amount, date, category, who paid, or an equal split between named people. Changing the amount alone keeps everyone’s proportions. Get the id from find_expenses.', S('', {
+    expense_id: s('From find_expenses'), title: s('New name'), amount: n('New total in rupees'), date: s('YYYY-MM-DD'), category: CATS, paid_by: s('Who paid it all'),
+    split_between: { type: 'array', items: { type: 'string' }, description: 'Split equally between these names (include "me" if the person shares it)' },
+  }, ['expense_id'])],
+  ['delete_expense', 'Prepare deleting an expense or payment. It stays in history and can be restored. Get the id from find_expenses or pending.', S('', { expense_id: s('The id') }, ['expense_id'])],
+  ['restore_expense', 'Prepare bringing back an expense deleted in the last 60 days.', S('', { title: s('Words in its name'), group: GROUP, expense_id: s('The id, if known') })],
 ].map(([name, description, parameters]) => ({ type: 'function', function: { name, description, parameters } }))
