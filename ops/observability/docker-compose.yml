@@ -59,10 +59,25 @@ services:
       GF_USERS_ALLOW_SIGN_UP: 'false'
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      CALLMEBOT_URL: ${CALLMEBOT_URL:-}
+      WAHA_API_KEY: ${WAHA_API_KEY:-}
+      WHATSAPP_ALERT_TO: ${WHATSAPP_ALERT_TO:-}
     volumes: [./grafana/provisioning:/etc/grafana/provisioning:ro, ./grafana/dashboards:/var/lib/grafana/dashboards:ro, grafana:/var/lib/grafana]
     ports: ['3000:3000']          # from Caddy on homeproxy
     mem_limit: 512m
     depends_on: [loki, tempo, prometheus]
 
-volumes: { alloy: {}, loki: {}, tempo: {}, prometheus: {}, grafana: {} }
+  # WhatsApp for critical alerts: a spare number linked as a WhatsApp "linked device" (the same idea as Hermes's bridge).
+  # Internal only: no published port; only Grafana, on this network, talks to it, with WAHA_API_KEY.
+  waha:
+    <<: *common
+    image: devlikeapro/waha:noweb-2026.9.1
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: NOWEB
+      WAHA_API_KEY: ${WAHA_API_KEY:?set WAHA_API_KEY in .env}
+      WAHA_DASHBOARD_ENABLED: 'false'
+      WHATSAPP_SWAGGER_ENABLED: 'false'
+      WAHA_PRINT_QR: 'false'
+    volumes: [waha:/app/.sessions]
+    mem_limit: 384m
+
+volumes: { alloy: {}, loki: {}, tempo: {}, prometheus: {}, grafana: {}, waha: {} }

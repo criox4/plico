@@ -1,6 +1,6 @@
 # Plico observability (self-hosted LGTM)
 
-Grafana, Loki (logs), Tempo (traces) and Prometheus (metrics), fed by Grafana Alloy. Runs on a separate server, not next to
+Grafana, Loki (logs), Tempo (traces) and Prometheus (metrics), fed by Grafana Alloy; WAHA for WhatsApp alerts. Runs on a separate server, not next to
 the API, so it still sees (and reports) the API going down.
 
 | What | Where |
@@ -29,13 +29,24 @@ invite/claim tokens) before they leave the API.
   5xx above 5%, p95 above 2 s, push backlog over 50.
 
 ## Alerts to your phone
-Until contact points exist, alerts show in Grafana only.
-1. Telegram: message @BotFather → `/newbot` → token. Send your bot a message, then open
-   `https://api.telegram.org/bot<token>/getUpdates` and copy `chat.id`.
-2. WhatsApp (critical only): follow https://www.callmebot.com/blog/free-api-whatsapp-messages/ to get an API key, then
-   `CALLMEBOT_URL=https://api.callmebot.com/whatsapp.php?phone=<+91…>&apikey=<key>&text=Plico+alert`.
-3. Add `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `CALLMEBOT_URL` to `.env`, copy
-   `contactpoints.yaml.example` to `contactpoints.yaml`, and `docker compose up -d`.
+Routing (`grafana/provisioning/alerting/contactpoints.yaml`): everything → Telegram; `severity=critical` → Telegram
+and WhatsApp.
+- **Telegram:** a bot from @BotFather. `TELEGRAM_BOT_TOKEN` in `.env`; `TELEGRAM_CHAT_ID` from
+  `https://api.telegram.org/bot<token>/getUpdates` after sending the bot `/start`.
+- **WhatsApp:** the `waha` service ([WAHA](https://waha.devlike.pro), NOWEB engine), internal to this compose network
+  and called by Grafana's webhook with `X-Api-Key: $WAHA_API_KEY` and a custom JSON payload. A **spare number** is linked
+  as a WhatsApp linked device (sender); `WHATSAPP_ALERT_TO` is the full chat id it sends to: a group (`…@g.us`, joined
+  with `POST /api/default/groups/join {"code": "<invite code>"}`) or a person (`<number>@c.us`). Unofficial client, so
+  use a number you can afford to lose.
+- **Linking the spare phone:** `POST /api/sessions {"name":"default","start":true}`, then fetch
+  `GET /api/default/auth/qr` (`Accept: image/png`) and scan it (WhatsApp → Linked devices). The QR rotates about every
+  20 s, so refresh it until `GET /api/sessions/default` says `WORKING`. All calls from inside the network, e.g.
+  `docker compose exec -T grafana wget -qO- --header "X-Api-Key: $K" http://waha:3000/…`.
+- **Test:** Alerting → Contact points → Test, or the API
+  `POST /apis/notifications.alerting.grafana.app/v1beta1/namespaces/default/receivers/<id>/test` (Grafana 13).
+
+The contact points need all four values in `.env` before Grafana starts: a contact point missing its token (or a chat
+id that expands to a bare number) stops Grafana from starting.
 
 ## Everyday
 ```sh

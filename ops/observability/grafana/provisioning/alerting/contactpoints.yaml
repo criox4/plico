@@ -1,0 +1,36 @@
+# Where alerts go. Needs TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, WAHA_API_KEY and WHATSAPP_ALERT_TO in .env: Grafana
+# refuses to start if a contact point is missing its token, so set those before deploying this file.
+# Everything goes to Telegram; critical alerts (API down, telemetry stopped) also go to WhatsApp through WAHA.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: telegram
+    receivers:
+      - uid: plico-telegram
+        type: telegram
+        settings: { bottoken: $TELEGRAM_BOT_TOKEN, chatid: "$TELEGRAM_CHAT_ID" }
+  - orgId: 1
+    name: telegram-and-whatsapp
+    receivers:
+      - uid: plico-telegram-crit
+        type: telegram
+        settings: { bottoken: $TELEGRAM_BOT_TOKEN, chatid: "$TELEGRAM_CHAT_ID" }
+      - uid: plico-whatsapp
+        type: webhook
+        settings:
+          url: http://waha:3000/api/sendText
+          httpMethod: POST
+          headers: { X-Api-Key: $WAHA_API_KEY }
+          payload:
+            vars: { to: "$WHATSAPP_ALERT_TO" } # a full chat id: <group>@g.us or <number>@c.us (a bare number fails to load)
+            template: >-
+              {{ coll.Dict "session" "default" "chatId" .Vars.to
+              "text" (print "Plico alert (" .Status "): " .CommonLabels.alertname "\n" .CommonAnnotations.summary)
+              | data.ToJSON }}
+policies:
+  - orgId: 1
+    receiver: telegram
+    group_by: [alertname]
+    routes:
+      - receiver: telegram-and-whatsapp
+        object_matchers: [[severity, =, critical]]
