@@ -5,3 +5,14 @@ dist
 !.env.example
 .impeccable/review/
 server/generated/
+
+# Local planning, design notes and AI agent tooling (not part of the app)
+PLAN.md
+PRODUCT.md
+DESIGN.md
+.impeccable/
+.agents/
+.claude/
+.mcp.json
+skills-lock.json
+.private.git/
