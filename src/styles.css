@@ -864,6 +864,38 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
   .side-me small { color: var(--muted); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
+/* ---------- signed out, wide screens: the brand pane beside the form ---------- */
+.brand-pane { display: none; }
+@media (min-width: 900px) {
+  .screen:not(.has-nav) { --pane: clamp(360px, 40vw, 580px); padding-left: var(--pane); padding-bottom: 56px; }
+  .brand-pane {
+    position: fixed; inset: 0 auto 0 0; z-index: 7; width: var(--pane); display: flex; flex-direction: column; justify-content: space-between;
+    padding: calc(36px + env(safe-area-inset-top)) 48px 48px; overflow: hidden; isolation: isolate; background: #ECE9FF; color: #17171C;
+  }
+  .brand-pane .wordmark { padding-left: 0; color: #17171C; }
+  .brand-pane .ornament { color: var(--brand); opacity: .28; width: 720px; height: 720px; top: auto; right: -260px; bottom: -220px; }
+  .brand-pane-line { margin-top: 22px; font: 800 clamp(3.25rem, 5.4vw, 5rem)/.95 'Gabarito', var(--ui); letter-spacing: -.035em; max-width: 7ch; text-wrap: balance; }
+  .brand-pane-sub { margin-top: 16px; max-width: 26ch; font-size: 1.125rem; line-height: 1.45; color: #4A4A57; }
+  .screen:not(.has-nav) > .bar { padding: calc(20px + env(safe-area-inset-top)) 32px 8px; }
+  .screen:not(.has-nav) > .main { max-width: 480px; padding: min(6vh, 56px) 24px 0; }
+}
+
+/* ---------- welcome and invite, wide screens: the story left, the sample groups and the way in right ---------- */
+@media (min-width: 900px) {
+  .welcome {
+    max-width: 1180px; grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); grid-template-rows: none; align-content: center;
+    gap: 18px clamp(56px, 8vw, 128px); padding: calc(48px + env(safe-area-inset-top)) 48px 48px;
+  }
+  .welcome-top { display: contents; }
+  .welcome-top > * { grid-column: 1; }
+  .welcome-top > .wordmark { margin-bottom: 12px; }
+  .welcome-top h1 { font-size: clamp(3.5rem, 6.2vw, 5.75rem); line-height: .95; max-width: 8ch; }
+  .welcome .hello p { font-size: 1.125rem; }
+  .welcome .showcase, .welcome.invite .points { grid-column: 2; grid-row: 1 / 5; align-self: end; margin: 0; }
+  .welcome-actions { grid-column: 2; grid-row: 5 / 7; align-self: start; }
+  .welcome.invite .invite-card { padding: 36px 32px 32px; }
+}
+
 /* ---------- search, activity, loading, empty ---------- */
 .search-field { position: relative; margin: 8px 0 4px; }
 .search-field input::-webkit-search-cancel-button { filter: grayscale(1); opacity: .6; }
@@ -1090,6 +1122,13 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 @media (min-width: 900px) {
   .has-nav .main:has(> .dash) { max-width: 1240px; }
 }
+/* Group page: one column on phones; from 1180px the balance and expenses on the left, "Still to settle" in a sticky rail. */
+@media (min-width: 1180px) {
+  .has-nav .main:has(> .gv .gv-rail > *) { max-width: 1240px; }
+  .gv:has(.gv-rail > *) { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 0 40px; align-items: start; }
+  .gv-top, .gv-list { grid-column: 1; min-width: 0; }
+  .gv-rail { grid-column: 2; grid-row: 1 / span 2; position: sticky; top: 72px; padding-top: 12px; }
+}
 @media (min-width: 1180px) {
   .dash { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0 40px; align-items: start; }
   .dash-main, .dash-rail { display: flex; flex-direction: column; min-width: 0; }
@@ -1117,13 +1156,21 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .lp main { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
 
 .lp-hero { display: grid; gap: 36px; padding: 40px 0 24px; }
-.lp-made { margin-bottom: 16px; }
 .lp-hero h1 { font: 800 clamp(3rem, 12vw, 6rem)/.95 'Gabarito', var(--ui); letter-spacing: -.035em; text-wrap: balance; max-width: 9ch; }
 .lp-promise { margin-top: 20px; max-width: 34ch; font-size: clamp(1.125rem, 2.4vw, 1.375rem); line-height: 1.4; color: var(--muted); text-wrap: pretty; }
 .lp-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
 .lp-actions .btn { width: auto; margin: 0; padding: 0 26px; }
 .lp-actions.center { justify-content: center; }
 .lp-fine { margin-top: 16px; font-size: .9375rem; color: var(--muted); }
+/* Trust line: the India tag leads, the facts follow as one quiet run of ticks. */
+.lp-trust { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin: 22px 0 0; padding: 0; list-style: none; max-width: 36rem; font-size: .9375rem; color: var(--muted); }
+.lp-trust li { display: inline-flex; align-items: center; gap: 6px; }
+.lp-trust li .icon-svg { color: var(--link); }
+.lp-made {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 13px 0 10px; border-radius: 999px;
+  background: var(--surface); color: var(--ink); font-weight: 650; box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(23 23 28 / .05);
+}
+.lp-flag { width: 21px; height: 14px; flex: none; border-radius: 3px; box-shadow: 0 0 0 1px rgb(23 23 28 / .1); }
 .lp-hero-screen { display: none; }
 
 /* the live screen */

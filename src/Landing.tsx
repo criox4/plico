@@ -45,14 +45,19 @@ export function Landing() {
       <main>
         <section className="lp-hero">
           <div className="lp-hero-copy">
-            <p className="chip-state lp-made"><span aria-hidden>🇮🇳</span>&nbsp;Made for India</p>
             <h1>Hisaab sorted.</h1>
             <p className="lp-promise">“Bhai, GPay kar dena.” Then nobody remembers who paid. Plico keeps the hisaab for trips, rent and dinners, and you settle it over UPI.</p>
             <div className="lp-actions">
               <a className="btn primary" href="#/start">Get started</a>
               <a className="btn secondary" href="#/start">Coming from Splitwise? Bring your groups</a>
             </div>
-            <p className="lp-fine">You see the payee’s name before you pay. Stored in Mumbai. No ads, no trackers. Adding expenses is never paywalled.</p>
+            <ul className="lp-trust">
+              <li className="lp-made"><IndiaFlag />Made for India</li>
+              <li><Icon n="check" size={15} />Payee’s name before you pay</li>
+              <li><Icon n="check" size={15} />Stored in Mumbai</li>
+              <li><Icon n="check" size={15} />No ads, no trackers</li>
+              <li><Icon n="check" size={15} />Adding expenses is never paywalled</li>
+            </ul>
           </div>
           <div className="lp-hero-screen" aria-hidden><Phone step={0} still /></div>
         </section>
@@ -121,6 +126,19 @@ export function Landing() {
         <small>© 2026 Plico · Bengaluru, India</small>
       </footer>
     </div>
+  )
+}
+
+/** The tricolour drawn, not an emoji, so it renders the same everywhere (Windows shows flag emoji as "IN"). */
+function IndiaFlag() {
+  return (
+    <svg className="lp-flag" viewBox="0 0 30 20" aria-hidden>
+      <rect width="30" height="20" fill="#fff" />
+      <rect width="30" height="6.67" fill="#FF9933" />
+      <rect y="13.33" width="30" height="6.67" fill="#138808" />
+      <circle cx="15" cy="10" r="2.6" fill="none" stroke="#000080" strokeWidth=".7" />
+      <circle cx="15" cy="10" r=".7" fill="#000080" />
+    </svg>
   )
 }
 

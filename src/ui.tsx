@@ -205,6 +205,18 @@ export function Screen({ t, title, back, action, fab, children }: {
   return (
     <div className={`screen${shell ? ' has-nav' : ''}`} data-theme={t} style={themeVars(t)}>
       {shell && <Sidebar s={s} add={fab ?? '/add'} unread={sync.unread} here={here} />}
+      {!shell && (
+        // Signed out or not set up yet: on wide screens the brand holds the left half, the form stays a comfortable width.
+        <aside className="brand-pane" aria-hidden>
+          <Ornament t="classic" />
+          <Wordmark />
+          <div>
+            <Plico mood="settled" size={88} />
+            <p className="brand-pane-line">Hisaab sorted.</p>
+            <p className="brand-pane-sub">Split trips, rent and dinners. Settle up over UPI.</p>
+          </div>
+        </aside>
+      )}
       <header className="bar">
         {back ? <button className="iconbtn" onClick={typeof back === 'function' ? back : goBack} aria-label="Back"><Icon n="back" /></button>
           : !title && <span className="bar-brand"><Wordmark /></span>}
@@ -714,6 +726,8 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
   return (
     <Screen t={t} back title={groupTitle(g)} fab={`/g/${g.id}/add`}
       action={<button className="iconbtn" aria-label="Group settings" onClick={() => go(`/g/${g.id}/edit`)}><Icon n="settings" /></button>}>
+      {/* Wide screens: the balance and expenses on the left, who still owes whom in a rail on the right. */}
+      <div className="gv"><div className="gv-top">
       {g.cover && <div className="group-cover">{cover.url && <img src={cover.url} alt="" />}</div>}
       <Denomination t={t} amount={net} line={g.track ? 'Tracking only, no nudges' : verb(g, net)}
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
@@ -722,7 +736,8 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
       <PushAsk g={g} />
       <NeedsYou groups={[g]} />
       <SpendBar cats={byCat(spent, e => e.amount)} />
-      <AnimatePresence initial={false}>
+      </div>
+      <div className="gv-rail"><AnimatePresence initial={false}>
       {debts.length > 0 && <m.div key="debts" {...FADE}>
         <SectionHead title={g.track ? 'Balances' : 'Still to settle'}
           action={!g.track && toMe.length > 1 && <a className="link" href={wa(remindAll)} target="_blank" rel="noopener">Remind all</a>} />
@@ -751,10 +766,12 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
           ))}
         </AnimatePresence></ol>
       </m.div>}
-      </AnimatePresence>
+      </AnimatePresence></div>
+      <div className="gv-list">
       <SectionHead title="Expenses" action={<button className="link" onClick={() => go(`/g/${g.id}/audit`)}>Audit log</button>} />
       {list.length ? <ol className="ledger"><AnimatePresence initial={false}>{list.map(({ e, i }) => <LedgerRow key={e.id} g={g} e={e} serial={i + 1} />)}</AnimatePresence></ol>
         : <Peaceful />}
+      </div></div>
     </Screen>
   )
 }
