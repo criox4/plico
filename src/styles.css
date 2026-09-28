@@ -1117,6 +1117,7 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .lp main { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
 
 .lp-hero { display: grid; gap: 36px; padding: 40px 0 24px; }
+.lp-made { margin-bottom: 16px; }
 .lp-hero h1 { font: 800 clamp(3rem, 12vw, 6rem)/.95 'Gabarito', var(--ui); letter-spacing: -.035em; text-wrap: balance; max-width: 9ch; }
 .lp-promise { margin-top: 20px; max-width: 34ch; font-size: clamp(1.125rem, 2.4vw, 1.375rem); line-height: 1.4; color: var(--muted); text-wrap: pretty; }
 .lp-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }

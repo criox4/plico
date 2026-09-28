@@ -45,6 +45,7 @@ export function Landing() {
       <main>
         <section className="lp-hero">
           <div className="lp-hero-copy">
+            <p className="chip-state lp-made"><span aria-hidden>🇮🇳</span>&nbsp;Made for India</p>
             <h1>Hisaab sorted.</h1>
             <p className="lp-promise">“Bhai, GPay kar dena.” Then nobody remembers who paid. Plico keeps the hisaab for trips, rent and dinners, and you settle it over UPI.</p>
             <div className="lp-actions">
