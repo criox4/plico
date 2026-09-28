@@ -52,7 +52,7 @@ id that expands to a bare number) stops Grafana from starting.
 ```sh
 ssh <stack-host>
 cd /opt/plico-obs
-docker compose ps                  # all five Up
+docker compose ps                  # all six Up
 docker compose logs -f alloy       # what's arriving
 docker compose pull && docker compose up -d   # after bumping an image tag here
 ```
