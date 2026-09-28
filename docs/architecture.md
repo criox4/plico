@@ -33,7 +33,7 @@ Phones never talk to Supabase directly. Every read and write goes through our AP
 | Files | Supabase Storage via its REST API, proxied by our server (`server/storage.ts`) | Indian ISPs sinkhole `*.supabase.co`; proxying also lets us check group membership on every photo | Signed URLs straight to Supabase (blocked for many Indian users) |
 | AI capture | OpenRouter → `openai/gpt-6-luna`, strict JSON schema, `temperature 0`, `data_collection: deny` | Reads receipts, payment screenshots and sentences into a draft expense; nothing is saved without the user | On-device OCR (weak on Indian receipts), the HF `indian-receipt-parser-v2` model (evaluated, no hosted endpoint) |
 | Email | ZeptoMail (India) first, Resend fallback, console in dev | Transactional mail from India; a fallback when one provider is down | SES |
-| Hosting (planned) | Vercel for web + API on `plico.space` | One origin for cookie auth; env-var based config | Fly.io, Railway |
+| Hosting | Web on Vercel (`plico.space`); API as a Docker image behind Cloudflare and nginx (`api.plico.space`), deployed by GitHub Actions | Same-site subdomains keep cookie auth; the image runs on any host, so the API can move | Fly.io, Railway |
 | Tests | Plain Node `assert` scripts (`npm test`: money, splits, parsing, themes) + Playwright scripts for end-to-end flows | Zero test-framework dependencies | Vitest/Jest |
 
 ## Key decisions

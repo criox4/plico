@@ -55,6 +55,35 @@ The native apps talk to the API over HTTPS with bearer tokens, so they need a de
 
 ## How it fits together
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.png">
+  <img alt="Plico system architecture: the app (PWA, Android, iOS) with its offline store, Vercel for the web build, Cloudflare in front of the Hono API, Better Auth, Postgres and Supabase Storage, and the external services it calls" src="docs/diagrams/architecture-light.png">
+</picture>
+
+One app for web, Android and iOS keeps every edit on the device first. The API is the only thing that talks to the
+database and storage; AI, email and push are optional services it calls.
+
+### An edit, from one phone to everyone
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/sync-dark.png">
+  <img alt="Sequence of an offline expense edit: saved locally, queued in the outbox, sent to the API with its base version, written in a transaction with a hash-chained audit entry, then pulled and pushed to other members" src="docs/diagrams/sync-light.png">
+</picture>
+
+Edits never wait for the network. The outbox sends each change with the version it was based on; the server applies
+it only if nobody changed that expense in between, otherwise the app asks you which version to keep.
+
+### The money path
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/settle-dark.png">
+  <img alt="Workflow from adding an expense (typed, sentence or receipt photo) through splits, balances and the fewest-payments plan, to paying over UPI and the payee confirming" src="docs/diagrams/settle-light.png">
+</picture>
+
+Interactive versions with source links: [`docs/diagrams/`](docs/diagrams/) (open the `.html` files in a browser).
+
+### Stack
+
 | Part | Stack | Where |
 |---|---|---|
 | App | React 19, TypeScript, Vite, Capacitor 8, Motion | `src/` |
@@ -67,6 +96,7 @@ More detail:
 
 - [docs/architecture.md](docs/architecture.md): the system, the choices and why
 - [docs/user-flow.md](docs/user-flow.md): screens and flows
+- [docs/deploy.md](docs/deploy.md): branches, CI, deploying the web app and the API
 - [docs/observability.md](docs/observability.md): logs, traces, metrics and crash reports
 - [docs/compliance/](docs/compliance/): privacy and store disclosures
 
