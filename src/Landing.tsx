@@ -21,7 +21,9 @@ const STEPS: { id: string; title: string; body: string }[] = [
 
 export function Landing() {
   const [step, setStep] = useState(0)
+  const [card, setCard] = useState(0) // phones: the story card in view
   const refs = useRef<(HTMLElement | null)[]>([])
+  const rail = useRef<HTMLDivElement>(null)
   useEffect(() => ensureFonts(['classic']), [])
   // The chapter in the middle of the viewport drives the screen.
   useEffect(() => {
@@ -29,6 +31,12 @@ export function Landing() {
     refs.current.forEach(el => el && io.observe(el))
     return () => io.disconnect()
   }, [])
+  // Phones swipe the story sideways: the card nearest the left edge is the current one.
+  const onRail = () => {
+    const el = rail.current, first = refs.current[0]
+    if (el && first) setCard(Math.min(STEPS.length - 1, Math.round(el.scrollLeft / (first.offsetWidth + 12))))
+  }
+  const toCard = (i: number) => refs.current[i]?.scrollIntoView({ behavior: calm() ? 'auto' : 'smooth', block: 'nearest', inline: 'start' })
   const to = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: calm() ? 'auto' : 'smooth' })
   return (
     <div className="lp" data-theme="classic" style={themeVars('classic')}>
@@ -63,13 +71,19 @@ export function Landing() {
         </section>
 
         <section className="lp-story" id="how" aria-label="How Plico works">
-          <div className="lp-chapters">
+          <div className="lp-rail-head">
+            <h2>How it works</h2>
+            <div className="lp-pager" role="group" aria-label="Story cards">
+              {STEPS.map((x, i) => <button key={x.id} className={card === i ? 'on' : ''} aria-label={`${i + 1}. ${x.title}`} aria-current={card === i ? 'step' : undefined} onClick={() => toCard(i)} />)}
+            </div>
+          </div>
+          <div className="lp-chapters lp-rail" ref={rail} onScroll={onRail}>
             {STEPS.map((s, i) => (
               <article key={s.id} className={`lp-chapter${step === i ? ' on' : ''}`} data-step={i} ref={el => { refs.current[i] = el }}>
                 <p className="lp-step" aria-hidden>{i + 1} / {STEPS.length}</p>
                 <h2>{s.title}</h2>
                 <p>{s.body}</p>
-                <div className="lp-inline-screen" aria-hidden><Phone step={i} /></div>
+                <div className="lp-inline-screen" aria-hidden><Phone step={i} key={i === 0 && card === 0 ? 'on' : 'off'} /></div>
               </article>
             ))}
           </div>
@@ -78,13 +92,13 @@ export function Landing() {
 
         <section className="lp-band" aria-labelledby="india">
           <h2 id="india">Made for how groups in India actually pay.</h2>
-          <ul className="lp-facts">
+          <ul className="lp-facts lp-rail">
             <Fact icon="qr" title="Any UPI app">GPay, PhonePe, Paytm or your bank: Plico hands over the payment with the name and amount filled in.</Fact>
             <Fact icon="send" title="Reminders that stay friendly">Nudge on WhatsApp in your tone, with a pay link nobody needs an app to open.</Fact>
             <Fact icon="check" title="Works offline">Add expenses in a cab or a hill station. They sync when you’re back, and clashes are yours to resolve, never lost.</Fact>
             <Fact icon="direct" title="Friends and groups">Trips, flats, couples, families, office lunches, or just the two of you.</Fact>
           </ul>
-          <div className="lp-themes" aria-label="Every group can wear its own theme">
+          <div className="lp-themes lp-rail" aria-label="Every group can wear its own theme">
             {THEMES.slice(0, 12).map(t => (
               <span key={t.id} className="lp-theme" data-theme={t.id} style={themeVars(t.id)}><i style={{ background: t.c.accent }} />{t.name}</span>
             ))}
@@ -94,7 +108,7 @@ export function Landing() {
 
         <section className="lp-band lp-safety" id="safety" aria-labelledby="safe">
           <h2 id="safe">Safe by design.</h2>
-          <ul className="lp-facts">
+          <ul className="lp-facts lp-rail">
             <Fact icon="lock" title="The name before the payment">Every payment shows who you’re paying and their UPI ID first, and the payee confirms it arrived.</Fact>
             <Fact icon="shield" title="A sealed record">Each group’s log is chained, change after change, and your phone checks the seal itself.</Fact>
             <Fact icon="home" title="Kept in India">Your ledger is stored in Mumbai, under India’s data protection law, with parental consent for teens.</Fact>

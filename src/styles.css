@@ -1255,6 +1255,47 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
   .lp-foot { grid-template-columns: auto 1fr auto; align-items: center; }
   .lp-foot nav { justify-content: center; }
 }
+/* Phones: the landing swipes like an app. The story is a deck of cards, facts and themes are rails; each rail bleeds to the screen edge. */
+.lp-rail-head { display: none; }
+@media (max-width: 899px) {
+  .lp-rail {
+    display: flex; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding-inline: 20px;
+    margin-inline: -20px; padding: 6px 20px 22px; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .lp-rail::-webkit-scrollbar { display: none; }
+  .lp-rail > * { flex: none; scroll-snap-align: start; }
+
+  .lp-story { padding: 36px 0 20px; }
+  .lp-rail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .lp-rail-head h2 { font: 800 1.75rem/1.05 'Gabarito', var(--ui); letter-spacing: -.03em; }
+  .lp-pager { display: flex; align-items: center; }
+  .lp-pager button { width: 22px; height: 32px; display: grid; place-items: center; }
+  .lp-pager button::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 35%, transparent); transition: width var(--dur) var(--ease), background var(--dur) var(--ease); }
+  .lp-pager button.on::before { width: 20px; background: var(--accent); }
+
+  .lp-chapters { gap: 12px; }
+  .lp-chapter {
+    width: min(84vw, 360px); display: flex; flex-direction: column; padding: 22px 20px 0; overflow: hidden;
+    border-radius: 28px; background: var(--surface); box-shadow: var(--elev);
+  }
+  .lp-chapter h2 { font-size: 1.625rem; }
+  .lp-chapter > p:not(.lp-step) { font-size: 1rem; margin-top: 8px; }
+  .lp-inline-screen { margin: 20px -6px 0; margin-top: auto; padding-top: 20px; }
+  .lp-inline-screen .lp-phone {
+    width: 100%; height: 380px; border-radius: 22px 22px 0 0; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent);
+    -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent);
+  }
+
+  .lp-band { padding: 44px 0 28px; }
+  .lp-facts { margin-top: 18px; gap: 12px; }
+  .lp-facts li { width: min(74vw, 300px); flex-direction: column; gap: 14px; padding: 20px; border-radius: 22px; background: var(--surface); box-shadow: var(--elev); }
+  .lp-facts p { font-size: .9375rem; }
+  .lp-themes { flex-wrap: nowrap; gap: 8px; margin-top: 8px; padding-bottom: 14px; }
+  .lp-theme { scroll-snap-align: none; }
+  .lp-themes > :first-child { scroll-snap-align: start; }
+  .lp-caption { margin-top: 0; }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .lp-phone-body > * { animation: lp-in .45s var(--ease) both; }
   .lp-phone-body > *:nth-child(2) { animation-delay: .06s; }
