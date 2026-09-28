@@ -25,6 +25,7 @@ const num = (v?: string) => parseFloat((v ?? '').replace(/,/g, '')) || 0
 
 // Every theme side by side, for design review. `npm run dev` only: left out of production builds.
 const Gallery = import.meta.env.DEV ? lazy(() => import('./Gallery')) : null
+const OgImage = import.meta.env.DEV ? lazy(() => import('./OgImage')) : null
 
 export default function App() {
   const s = useStore()
@@ -46,6 +47,7 @@ export default function App() {
   }, [s])
 
   if (Gallery && r[0] === 'themes') return <Suspense fallback={null}><Gallery /></Suspense>
+  if (OgImage && r[0] === 'og') return <Suspense fallback={null}><OgImage /></Suspense>
   if (r[0] === 's') return <SharedPay p={r[1] ?? ''} />
   if (r[0] === 'reset') return <ResetPassword />
   if (r[0] === 'guardian' && r[1]) return <GuardianConsent token={r[1]} />

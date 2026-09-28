@@ -193,15 +193,18 @@ export function Money({ p, sign, className = '' }: { p: number; sign?: boolean; 
   return <span className={`money ${tone(p)} ${className}`}>{sign && p > 0 ? '+' : sign && p < 0 ? '−' : ''}{inr(p)}</span>
 }
 
-export function Screen({ t, title, back, action, fab, children }: {
-  t: ThemeId; title?: ReactNode; back?: boolean | (() => void); action?: ReactNode; fab?: string; children: ReactNode
+export function Screen({ t, title, back, action, fab, preview, children }: {
+  t: ThemeId; title?: ReactNode; back?: boolean | (() => void); action?: ReactNode; fab?: string
+  /** Render signed in with this sample state (the share-card page), whoever is looking. */
+  preview?: State; children: ReactNode
 }) {
-  const s = useStore()
+  const live = useStore()
+  const s = preview ?? live
   const sync = useSync()
-  const here = location.hash.replace(/^#\/?/, '').split('/')
+  const here = preview ? [''] : location.hash.replace(/^#\/?/, '').split('/')
   // The app's navigation, for anyone signed in and past the age question: a sidebar on wide screens,
   // bottom tabs on phones (only on the top-level screens, which pass `fab`).
-  const shell = sync.authed && !!s.user?.ageGroup && s.user.onboarded !== false
+  const shell = !!preview || (sync.authed && !!s.user?.ageGroup && s.user.onboarded !== false)
   return (
     <div className={`screen${shell ? ' has-nav' : ''}`} data-theme={t} style={themeVars(t)}>
       {shell && <Sidebar s={s} add={fab ?? '/add'} unread={sync.unread} here={here} />}
@@ -519,7 +522,7 @@ function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean 
 
 /** The dashboard: where your money stands, what needs you, and every group and person at a glance.
  *  Computed on the phone from the synced ledger, so it works offline. Phones stack it; wide screens add a right rail. */
-export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNode }) {
+export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?: ReactNode; preview?: boolean }) {
   const all = s.groups.map(g => ({ g, net: balances(g)[ME] ?? 0 }))
   const rows = all.filter(r => r.g.kind !== 'direct') // friends' balances count in the total, but aren't groups
   const live = all.filter(r => !r.g.track)
@@ -542,7 +545,7 @@ export function Home({ s, t, banner }: { s: State; t: ThemeId; banner?: ReactNod
     .slice(0, 6)
   const fresh = !rows.length
   return (
-    <Screen t={t} fab={s.groups.length ? '/add' : '/new'} action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
+    <Screen t={t} preview={preview ? s : undefined} fab={s.groups.length ? '/add' : '/new'} action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
       <div className="dash">
         <div className="dash-main">
           <div className="d-hero">
