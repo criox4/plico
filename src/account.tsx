@@ -8,6 +8,7 @@ import { API, authClient, token } from './auth-client'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, SegPill } from './ui'
+import { crashReportsOn, setCrashReports } from './sentry'
 import { disablePush, enablePush, pushState, type PushState } from './push'
 import { ClaimPreviewOut, InvitePreviewOut, NotifyOut, type NotifyPrefs, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
 
@@ -669,6 +670,7 @@ function AvatarPicker({ s }: { s: State }) {
 
 export function PrivacyPage({ s }: { s: State }) {
   const [busy, setBusy] = useState(false)
+  const [crash, setCrash] = useState(crashReportsOn)
   const [err, setErr] = useState('')
   const setAi = async (consent: boolean) => {
     setBusy(true); setErr('')
@@ -689,6 +691,9 @@ export function PrivacyPage({ s }: { s: State }) {
       <h2 className="form-h">AI reading</h2>
       <label className="check"><input type="checkbox" checked={!!s.user?.ai} disabled={busy} onChange={e => void setAi(e.target.checked)} />Read receipts, screenshots and typed expenses with AI</label>
       <p className="muted-p">On by default. When on, the photo or sentence and the first names in that group go to OpenRouter, which runs an OpenAI model to read it. Only providers that don’t store or train on it are used. When off, typing still works on your phone and nothing is sent.</p>
+      <h2 className="form-h">Crash reports</h2>
+      <label className="check"><input type="checkbox" checked={crash} onChange={e => { setCrash(e.target.checked); setCrashReports(e.target.checked) }} />Send crash reports to help fix problems</label>
+      <p className="muted-p">On by default, for this device. When something breaks, a report of what the app was doing goes to Sentry (stored in the EU). It never includes your name, email, amounts or what you typed; emails and links are removed on your phone first.</p>
       <h2 className="form-h">Your data</h2>
       <button className="btn secondary" disabled={busy} onClick={() => void download()}>Download my data</button>
       <p className="muted-p">A JSON file with your account, groups, expenses and sign-in history. To delete everything, use Delete account.</p>

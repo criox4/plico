@@ -14,6 +14,7 @@ dependencies {
     implementation project(':capacitor-push-notifications')
     implementation project(':capgo-capacitor-share-target')
     implementation project(':capgo-capacitor-social-login')
+    implementation project(':sentry-capacitor')
 
 }
 

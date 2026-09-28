@@ -15,8 +15,10 @@ Policy URLs (after deploy): Privacy https://plico.space/privacy/ · Terms https:
 | User Content → Photos or Videos (receipts, avatars, covers) | Yes | Yes | No | App Functionality |
 | User Content → Other User Content (expense titles, group names) | Yes | Yes | No | App Functionality |
 | Identifiers → User ID | Yes | Yes | No | App Functionality |
+| Diagnostics → Crash Data (Sentry; can be turned off) | Yes | No | No | App Functionality |
+| Diagnostics → Performance Data (Sentry, ~10% of screen loads) | Yes | No | No | App Functionality |
 
-Not collected: location, contacts, health, browsing/search history, purchases, usage data, diagnostics, device ID, sensitive info. Matches `ios/App/App/PrivacyInfo.xcprivacy`.
+Not collected: location, contacts, health, browsing/search history, purchases, usage data, other diagnostic data, device ID, sensitive info. Matches `ios/App/App/PrivacyInfo.xcprivacy`.
 
 Other App Store answers: age rating 12+ (no objectionable content; user-generated content between known people); not a payments app (UPI hand-off only, guideline 3.1 doesn't apply; no in-app purchases); account deletion in-app (5.1.1(v)); export compliance: uses standard HTTPS only (exempt).
 
@@ -34,8 +36,10 @@ Other App Store answers: age rating 12+ (no objectionable content; user-generate
 | Financial info → Other financial info (expenses, UPI ID) | Yes | Required | App functionality |
 | Photos and videos → Photos | Yes | Optional | App functionality |
 | App activity → Other user-generated content | Yes | Required | App functionality |
+| App info and performance → Crash logs (Sentry) | Yes | Optional (switch in Privacy and data) | App functionality |
+| App info and performance → Diagnostics (Sentry, screen load timings) | Yes | Optional | App functionality |
 
-Not collected: location, contacts, messages, audio, files, calendar, health, app activity/analytics, web browsing, device IDs, crash logs.
+Not collected: location, contacts, messages, audio, files, calendar, health, app activity/analytics, web browsing, device IDs.
 
 Other Play answers: Target audience 13+ (not designed for children; no Families program); Ads: No; Financial features: none of the listed regulated services (no payments, loans, crypto, UPI processing); Government app: No; Account deletion URL above.
 

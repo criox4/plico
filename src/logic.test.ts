@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -195,4 +195,18 @@ console.log('simplify ok')
   const q = enqueue([{ m: 'PUT', path: '/api/groups/g/expenses/e', body: 1, base: 3, via: 'ai' }], { m: 'PUT', path: '/api/groups/g/expenses/e', body: 2, base: 4 }, false)
   assert.deepEqual(q, [{ m: 'PUT', path: '/api/groups/g/expenses/e', body: 2, base: 3, via: 'ai' }])
   console.log('via ok')
+}
+
+// Crash reports: emails and tokens in addresses never leave the phone.
+{
+  const e = scrub({ request: { url: 'https://plico.space/#/f/bala.k@gmail.com/settle' }, transaction: '#/claim/0123456789abcdef0123456789abcdef',
+    breadcrumbs: [{ data: { url: '/api/invites/AbC123xyz/join' } }, { data: { url: '/api/public/claim/deadbeef' } }, { message: 'Navigated to #/add/f/riya@x.in' }, { message: '#/guardian/abc' }, { message: '#/g/5f0c-group-id' }],
+    exception: { values: [{ value: 'No user karan.shah+test@splittr.test' }] } })
+  assert.equal(e.request.url, 'https://plico.space/#/f/[hidden]/settle')
+  assert.equal(e.transaction, '#/claim/[hidden]')
+  assert.deepEqual(e.breadcrumbs.map((b: any) => b.data?.url ?? b.message), ['/api/invites/[hidden]/join', '/api/public/claim/[hidden]', 'Navigated to #/add/f/[hidden]', '#/guardian/[hidden]', '#/g/5f0c-group-id'])
+  assert.equal(e.exception.values[0].value, 'No user [email]')
+  assert.equal(scrub({ release: 'plico@0.1.0' }).release, 'plico@0.1.0', 'a release name is not an email')
+  assert.equal(scrub('A.B@Mail.Example.IN').toString(), '[email]')
+  console.log('crash report scrubbing ok')
 }

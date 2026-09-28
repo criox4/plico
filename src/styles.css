@@ -1231,3 +1231,8 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 @keyframes vt-in { from { opacity: 0; transform: translateX(18px); } }
 @keyframes vt-out-back { to { opacity: 0; transform: translateX(10px); } }
 @keyframes vt-in-back { from { opacity: 0; transform: translateX(-18px); } }
+
+/* The crash screen (main.tsx): no theme or store is assumed, so it stands on the defaults. */
+.crashed { min-height: 100dvh; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: var(--bg, #F8F7FC); color: var(--ink, #17171C); }
+.crashed h1 { font: 700 1.5rem/1.2 var(--ui, system-ui); }
+.crashed p { max-width: 30ch; color: var(--muted, #5E5E6A); }
