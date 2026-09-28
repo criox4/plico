@@ -26,7 +26,7 @@ it. The image and `.env` are the same everywhere.
 ### Host setup (once)
 ```sh
 mkdir -p /opt/plico && cd /opt/plico          # compose.yml and deploy.sh arrive with each deploy
-# .env: the API's secrets (see below). Never committed; mode 600.
+# .env: copy of .env.production (see below). Never committed; mode 600.
 bash cloudflare-ips.sh                          # from ops/deploy: which addresses are Cloudflare's
 certbot certonly --nginx -d api.plico.space     # needs the DNS record to exist
 cp nginx-api.conf /etc/nginx/sites-available/plico-api && ln -s ../sites-available/plico-api /etc/nginx/sites-enabled/
@@ -35,8 +35,12 @@ nginx -t && systemctl reload nginx
 nginx only accepts connections from Cloudflare's addresses and takes the visitor's IP from `CF-Connecting-IP`, so
 nobody can skip Cloudflare or fake their address for rate limiting. Cloudflare's SSL mode should be **Full (strict)**.
 
-### The API's `.env` in production
-Everything in `.env.example`, plus:
+### Settings files
+Locally: `.env.development` (`npm run server`, Prisma, Vite in dev) and `.env.production` (Vite builds; the API host).
+Both git-ignored. The host's copy is `/opt/plico/.env`: `scp .env.production <host>:/opt/plico/.env`. Migrations against
+production: `ENV_FILE=.env.production npm run db:migrate`.
+
+`.env.production` is everything in `.env.example`, plus:
 ```sh
 NODE_ENV=production
 PUBLIC_URL=https://plico.space              # the web app: CORS, trusted origins, links in emails

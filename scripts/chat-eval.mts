@@ -1,5 +1,5 @@
 // Ask Plico evaluation against the real model: normal questions and attacks. Needs the dev API (`npm run server`).
-//   npx tsx --env-file=.env scripts/chat-eval.mts
+//   npx tsx --env-file=.env.development scripts/chat-eval.mts
 // Makes throwaway @splittr.test users and groups, and deletes them at the end. Costs a few cents of model calls.
 import assert from 'node:assert/strict'
 import { auth } from '../server/auth.ts'

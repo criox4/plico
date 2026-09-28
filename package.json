@@ -10,7 +10,7 @@
     "test": "node src/logic.test.ts && node src/themes.test.ts && node server/push.test.ts && node server/chat.test.ts",
     "android": "npm run build && cap sync android && cap open android",
     "ios": "npm run build && cap sync ios && cap open ios",
-    "server": "tsx watch --env-file=.env server/index.ts",
+    "server": "tsx watch --env-file=.env.development server/index.ts",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate deploy"
   },

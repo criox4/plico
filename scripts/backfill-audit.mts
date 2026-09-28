@@ -1,5 +1,5 @@
 // One-off: rebuild the audit chain for groups that have none yet (existing data at the people/audit migration).
-//   npx tsx --env-file=.env scripts/backfill-audit.mts
+//   npx tsx --env-file=.env.development scripts/backfill-audit.mts
 import { audit } from '../server/audit.ts'
 import { db } from '../server/db.ts'
 

@@ -28,14 +28,15 @@ a database with other apps.
 ```sh
 git clone https://github.com/criox4/plico.git && cd plico
 npm install                  # also generates the Prisma client
-cp .env.example .env         # then fill in DATABASE_URL, DIRECT_URL and BETTER_AUTH_SECRET
+cp .env.example .env.development   # then fill in DATABASE_URL, DIRECT_URL and BETTER_AUTH_SECRET
 npm run db:migrate           # creates the splittr schema and tables
 npm run server               # API on http://localhost:8787
 npm run dev                  # app on http://localhost:5173 (proxies /api to the API)
 ```
 
 Open http://localhost:5173 and create an account. Email, file uploads, AI capture, Google sign-in and push
-notifications are optional: each switches on when its keys are present in `.env` (see `.env.example`).
+notifications are optional: each switches on when its keys are present in `.env.development` (see `.env.example`).
+Production settings live in `.env.production` (git-ignored); see [docs/deploy.md](docs/deploy.md).
 
 ## Tests
 

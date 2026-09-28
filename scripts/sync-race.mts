@@ -1,5 +1,5 @@
 // Sync v2 race test: three phones against the dev API (`npm run server` first).
-//   npx tsx --env-file=.env scripts/sync-race.mts
+//   npx tsx --env-file=.env.development scripts/sync-race.mts
 // Makes throwaway @splittr.test users and a group, and deletes them at the end.
 import assert from 'node:assert/strict'
 import { auth } from '../server/auth.ts'
