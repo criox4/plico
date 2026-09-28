@@ -19,11 +19,73 @@ const STEPS: { id: string; title: string; body: string }[] = [
   { id: 'record', title: 'Every change, on the record.', body: 'Who added, changed or deleted what, and what it did to each balance. Sealed, so nobody can quietly rewrite it.' },
 ]
 
+/**
+ * Phones: pin a section while scrolling down walks its card row sideways, the way Apple's product galleries move.
+ * The section grows by exactly the row's overflow (plus a short hold at each end), so one pixel down is one pixel across.
+ * Desktop and reduced motion keep the plain layout (on phones, a row you swipe).
+ */
+function usePinnedRail<T extends HTMLElement>(onProgress?: (p: number) => void) {
+  const pin = useRef<HTMLDivElement>(null)
+  const track = useRef<T>(null)
+  const geo = useRef({ dist: 0, hold: 0 })
+  const cb = useRef(onProgress)
+  cb.current = onProgress
+  useEffect(() => {
+    const el = pin.current, tr = track.current
+    if (!el || !tr) return
+    const mq = matchMedia('(max-width: 899px) and (prefers-reduced-motion: no-preference)')
+    let raf = 0
+    const frame = () => {
+      raf = 0
+      const { dist, hold } = geo.current
+      if (!mq.matches || !dist) return
+      const p = Math.min(1, Math.max(0, (-el.getBoundingClientRect().top - hold) / dist))
+      tr.style.transform = `translate3d(${-p * dist}px, 0, 0)`
+      cb.current?.(p)
+    }
+    const measure = () => {
+      if (!mq.matches) {
+        el.classList.remove('pinned'); el.style.height = ''; tr.style.transform = ''; geo.current.dist = 0
+        return
+      }
+      el.classList.add('pinned')
+      const last = tr.lastElementChild as HTMLElement | null
+      const pad = parseFloat(getComputedStyle(tr).paddingLeft) || 0
+      const dist = Math.max(0, (last ? last.offsetLeft + last.offsetWidth + pad : 0) - tr.clientWidth)
+      const hold = innerHeight * 0.12
+      geo.current = { dist, hold }
+      el.style.height = `${(el.firstElementChild as HTMLElement).offsetHeight + dist + hold * 2}px`
+      frame()
+    }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(frame) }
+    const ro = new ResizeObserver(measure) // fonts landing and rotation change the card widths
+    ro.observe(tr)
+    measure()
+    addEventListener('scroll', onScroll, { passive: true })
+    addEventListener('resize', measure)
+    mq.addEventListener('change', measure)
+    return () => {
+      ro.disconnect(); cancelAnimationFrame(raf)
+      removeEventListener('scroll', onScroll); removeEventListener('resize', measure); mq.removeEventListener('change', measure)
+    }
+  }, [])
+  /** Scroll the page to the point where the row has moved `f` (0–1) of the way. False when the row isn't pinned. */
+  const jump = (f: number) => {
+    const el = pin.current, { dist, hold } = geo.current
+    if (!el || !dist) return false
+    scrollTo({ top: scrollY + el.getBoundingClientRect().top + hold + f * dist, behavior: calm() ? 'auto' : 'smooth' })
+    return true
+  }
+  return { pin, track, jump }
+}
+
 export function Landing() {
   const [step, setStep] = useState(0)
   const [card, setCard] = useState(0) // phones: the story card in view
   const refs = useRef<(HTMLElement | null)[]>([])
-  const rail = useRef<HTMLDivElement>(null)
+  const story = usePinnedRail<HTMLDivElement>(p => setCard(Math.round(p * (STEPS.length - 1))))
+  const india = usePinnedRail<HTMLUListElement>()
+  const safety = usePinnedRail<HTMLUListElement>()
   useEffect(() => ensureFonts(['classic']), [])
   // The chapter in the middle of the viewport drives the screen.
   useEffect(() => {
@@ -33,10 +95,10 @@ export function Landing() {
   }, [])
   // Phones swipe the story sideways: the card nearest the left edge is the current one.
   const onRail = () => {
-    const el = rail.current, first = refs.current[0]
+    const el = story.track.current, first = refs.current[0]
     if (el && first) setCard(Math.min(STEPS.length - 1, Math.round(el.scrollLeft / (first.offsetWidth + 12))))
   }
-  const toCard = (i: number) => refs.current[i]?.scrollIntoView({ behavior: calm() ? 'auto' : 'smooth', block: 'nearest', inline: 'start' })
+  const toCard = (i: number) => story.jump(i / (STEPS.length - 1)) || refs.current[i]?.scrollIntoView({ behavior: calm() ? 'auto' : 'smooth', block: 'nearest', inline: 'start' })
   const to = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: calm() ? 'auto' : 'smooth' })
   return (
     <div className="lp" data-theme="classic" style={themeVars('classic')}>
@@ -71,13 +133,14 @@ export function Landing() {
         </section>
 
         <section className="lp-story" id="how" aria-label="How Plico works">
+          <div className="lp-pin" ref={story.pin}><div className="lp-pin-stage">
           <div className="lp-rail-head">
             <h2>How it works</h2>
             <div className="lp-pager" role="group" aria-label="Story cards">
               {STEPS.map((x, i) => <button key={x.id} className={card === i ? 'on' : ''} aria-label={`${i + 1}. ${x.title}`} aria-current={card === i ? 'step' : undefined} onClick={() => toCard(i)} />)}
             </div>
           </div>
-          <div className="lp-chapters lp-rail" ref={rail} onScroll={onRail}>
+          <div className="lp-chapters lp-rail" ref={story.track} onScroll={onRail}>
             {STEPS.map((s, i) => (
               <article key={s.id} className={`lp-chapter${step === i ? ' on' : ''}`} data-step={i} ref={el => { refs.current[i] = el }}>
                 <p className="lp-step" aria-hidden>{i + 1} / {STEPS.length}</p>
@@ -87,17 +150,20 @@ export function Landing() {
               </article>
             ))}
           </div>
+          </div></div>
           <div className="lp-sticky" aria-hidden><Phone step={step} /></div>
         </section>
 
         <section className="lp-band" aria-labelledby="india">
+          <div className="lp-pin" ref={india.pin}><div className="lp-pin-stage">
           <h2 id="india">Made for how groups in India actually pay.</h2>
-          <ul className="lp-facts lp-rail">
+          <ul className="lp-facts lp-rail" ref={india.track}>
             <Fact icon="qr" title="Any UPI app">GPay, PhonePe, Paytm or your bank: Plico hands over the payment with the name and amount filled in.</Fact>
             <Fact icon="send" title="Reminders that stay friendly">Nudge on WhatsApp in your tone, with a pay link nobody needs an app to open.</Fact>
             <Fact icon="check" title="Works offline">Add expenses in a cab or a hill station. They sync when you’re back, and clashes are yours to resolve, never lost.</Fact>
             <Fact icon="direct" title="Friends and groups">Trips, flats, couples, families, office lunches, or just the two of you.</Fact>
           </ul>
+          </div></div>
           <div className="lp-themes lp-rail" aria-label="Every group can wear its own theme">
             {THEMES.slice(0, 12).map(t => (
               <span key={t.id} className="lp-theme" data-theme={t.id} style={themeVars(t.id)}><i style={{ background: t.c.accent }} />{t.name}</span>
@@ -107,13 +173,15 @@ export function Landing() {
         </section>
 
         <section className="lp-band lp-safety" id="safety" aria-labelledby="safe">
+          <div className="lp-pin" ref={safety.pin}><div className="lp-pin-stage">
           <h2 id="safe">Safe by design.</h2>
-          <ul className="lp-facts lp-rail">
+          <ul className="lp-facts lp-rail" ref={safety.track}>
             <Fact icon="lock" title="The name before the payment">Every payment shows who you’re paying and their UPI ID first, and the payee confirms it arrived.</Fact>
             <Fact icon="shield" title="A sealed record">Each group’s log is chained, change after change, and your phone checks the seal itself.</Fact>
             <Fact icon="home" title="Kept in India">Your ledger is stored in Mumbai, under India’s data protection law, with parental consent for teens.</Fact>
             <Fact icon="user" title="No ads, no trackers">Plico doesn’t sell attention: no ad networks, no analytics following you around.</Fact>
           </ul>
+          </div></div>
         </section>
 
         <section className="lp-close" aria-labelledby="close">

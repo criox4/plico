@@ -1296,6 +1296,26 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
   .lp-caption { margin-top: 0; }
 }
 
+/* Phones with motion: each rail pins full-screen and scrolling down carries its cards across (usePinnedRail sets .pinned). */
+@media (max-width: 899px) {
+  .lp-pin.pinned { position: relative; }
+  .lp-pin.pinned > .lp-pin-stage {
+    position: sticky; top: 0; height: 100svh; display: flex; flex-direction: column; justify-content: center; gap: 4px;
+    margin-inline: -20px; padding: calc(72px + env(safe-area-inset-top)) 20px 12px; overflow: hidden;
+  }
+  .pinned .lp-rail { overflow: visible; scroll-snap-type: none; margin-inline: 0; padding-inline: 0; will-change: transform; }
+  .pinned .lp-chapter { height: min(640px, calc(100svh - 150px - env(safe-area-inset-top))); }
+  .pinned .lp-inline-screen { flex: 1 1 0; min-height: 0; margin-top: 0; }
+  .pinned .lp-inline-screen .lp-phone { height: 100%; }
+  .pinned .lp-facts { margin-top: 22px; }
+  .pinned .lp-facts li { height: min(420px, 54svh); justify-content: space-between; padding: 24px 22px; border-radius: 28px; }
+  .pinned .lp-facts .icon-svg { width: 56px; height: 56px; padding: 13px; border-radius: 16px; }
+  .pinned .lp-facts strong { font: 800 1.5rem/1.1 'Gabarito', var(--ui); letter-spacing: -.02em; }
+  .pinned .lp-facts p { gap: 10px; font-size: 1rem; }
+  .lp-band:has(.pinned) { padding-top: 0; }
+  .lp-story:has(.pinned) { padding-top: 0; }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .lp-phone-body > * { animation: lp-in .45s var(--ease) both; }
   .lp-phone-body > *:nth-child(2) { animation-delay: .06s; }
