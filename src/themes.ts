@@ -70,7 +70,7 @@ export const THEMES: ThemeDef[] = [
   },
   {
     id: 'khata', name: 'Khata', line: 'A red-bound bahi-khata: ruled paper, maroon margin, amounts in ink.',
-    dark: false, radius: 4, stroke: 1.8, ornament: 'ledger', celebrate: 'Hisaab clear', motion: 'calm',
+    dark: false, radius: 4, stroke: 1.8, ornament: 'ledger', celebrate: 'Khata closed', motion: 'calm',
     ui: "'Martel Sans'", num: "'Kalam'", fonts: [f.martelSans, f.kalam],
     c: { bg: '#F7E9CF', surface: '#FCF4E3', surface2: '#F1DFBD', ink: '#302B28', muted: '#65574A', line: '#E2CBA2',
       accent: '#8A3F4A', onAccent: '#FCF4E3', link: '#7A3140', pos: '#2A6A37', neg: '#B3261E', settled: '#80590F' },

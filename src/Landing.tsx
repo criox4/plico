@@ -45,13 +45,13 @@ export function Landing() {
       <main>
         <section className="lp-hero">
           <div className="lp-hero-copy">
-            <h1>Money together, sorted.</h1>
-            <p className="lp-promise">Split trips, rent and dinners. Settle up over UPI. You enjoy the moment; Plico remembers the money.</p>
+            <h1>Hisaab sorted.</h1>
+            <p className="lp-promise">“Bhai, GPay kar dena.” Then nobody remembers who paid. Plico keeps the hisaab for trips, rent and dinners, and you settle it over UPI.</p>
             <div className="lp-actions">
               <a className="btn primary" href="#/start">Get started</a>
-              <a className="btn secondary" href="#/signin">I have an account</a>
+              <a className="btn secondary" href="#/start">Coming from Splitwise? Bring your groups</a>
             </div>
-            <p className="lp-fine">Works in your browser, on any phone. Adding expenses is never paywalled.</p>
+            <p className="lp-fine">You see the payee’s name before you pay. Stored in Mumbai. No ads, no trackers. Adding expenses is never paywalled.</p>
           </div>
           <div className="lp-hero-screen" aria-hidden><Phone step={0} still /></div>
         </section>
@@ -136,7 +136,7 @@ function Phone({ step, still }: { step: number; still?: boolean }) {
         {step === 0 && <StepAdd still={still} />}
         {step === 1 && <StepOwe />}
         {step === 2 && <StepPay />}
-        {step === 3 && <Seal t="goa" burst={!calm()} caption="Everyone’s even ✨" />}
+        {step === 3 && <Seal t="goa" burst={!calm()} caption="Hisaab clear ✨" />}
         {step === 4 && <StepRecord />}
       </div>
     </div>

@@ -80,7 +80,7 @@ const verbShort = (g: Group, net: number) =>
 export const TONES = {
   gentle: (a: string, to: string, g: string) => `Tiny reminder: ${a} for ${to} from ${g} is still hanging around 👀`,
   normal: (a: string, to: string, g: string) => `${g}: ${a} still pending to ${to}.`,
-  shameless: (a: string, to: string, g: string) => `${g} is over. The ${a} subplot continues. It goes to ${to}.`,
+  shameless: (a: string, to: string, g: string) => `${g} khatam, hisaab abhi baaki hai 😄 ${a} → ${to}`,
 }
 export const shareLink = (s: State, g: Group, t: Transfer) =>
   `${PUBLIC}/#/s/${encodeShare({ g: groupTitle(g), f: realName(s, g, t.from), t: realName(s, g, t.to), v: upiOf(s, g, t.to) || undefined, a: t.amount })}`
@@ -373,7 +373,7 @@ function useJustSettled(gid: Id, open: number) {
   return burst
 }
 
-export function Seal({ t, replay = 0, caption = 'Everyone’s even ✨', burst }: { t: ThemeId; replay?: number; caption?: string; burst?: boolean }) {
+export function Seal({ t, replay = 0, caption = 'Hisaab clear ✨', burst }: { t: ThemeId; replay?: number; caption?: string; burst?: boolean }) {
   const id = useId()
   // On phones, a success tap as the seal lands and the confetti bursts (web has no reliable equivalent).
   useEffect(() => {

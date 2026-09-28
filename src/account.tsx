@@ -312,7 +312,7 @@ function ShowCard({ sample, pos, settled }: { sample: typeof SAMPLES[number]; po
         <span className="show-theme">{th.name}</span>
       </div>
       <p className={`show-num hero-num ${settled ? '' : sample.amount > 0 ? 'pos' : 'neg'}`}><span className="cur">₹</span>{inr(value).replace('₹', '')}</p>
-      <p className="show-line">{settled ? 'Paid over UPI. Everyone’s even ✨' : sample.line}</p>
+      <p className="show-line">{settled ? 'Paid over UPI. Hisaab clear ✨' : sample.line}</p>
       <span className="show-stamp">{th.celebrate}</span>
     </div>
   )
@@ -403,7 +403,7 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
       <div className="welcome" data-theme="classic" style={themeVars('classic')}>
         <div className="welcome-top">
           <Wordmark />
-          <h1>Money together, sorted.</h1>
+          <h1>Hisaab sorted.</h1>
           <div className="hello"><Plico mood="idle" size={52} /><p><strong>Hi. I’m Plico.</strong>I keep track of the awkward money stuff, so trips, rent and dinners stay fun.</p></div>
           {(notice || invited) && <p className="notice" role="status">{notice || 'You’ve been invited to a group. Create an account or sign in to join it.'}</p>}
           <Showcase />
