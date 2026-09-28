@@ -1,0 +1,51 @@
+# main → checks → image on GHCR → the API host pulls it (ops/deploy/deploy.sh rolls back if /health never passes).
+# The web app deploys separately: Vercel builds main on its own.
+name: Deploy API
+on:
+  push:
+    branches: [main]
+    paths: [server/**, src/**, prisma/**, package.json, package-lock.json, prisma.config.ts, tsconfig.json, Dockerfile, ops/deploy/**, .github/workflows/deploy-api.yml]
+  workflow_dispatch:
+
+concurrency: { group: deploy-api, cancel-in-progress: false }
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/criox4/plico-api:${{ github.sha }},ghcr.io/criox4/plico-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    environment: production
+    permissions: { contents: read, packages: read }
+    steps:
+      - uses: actions/checkout@v5
+      - name: SSH setup
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Ship and restart
+        env: { HOST: "${{ secrets.DEPLOY_HOST }}", TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          scp -q ops/deploy/compose.yml ops/deploy/deploy.sh "root@$HOST:/opt/plico/"
+          echo "$TOKEN" | ssh "root@$HOST" "docker login ghcr.io -u ${{ github.actor }} --password-stdin >/dev/null"
+          ssh "root@$HOST" "bash /opt/plico/deploy.sh ${{ github.sha }}"

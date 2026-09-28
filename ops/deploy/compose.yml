@@ -1,0 +1,9 @@
+# The API on its host. Lives at /opt/plico next to its .env (secrets, never committed); deploy.sh sets TAG.
+services:
+  api:
+    image: ghcr.io/criox4/plico-api:${TAG:-latest}
+    env_file: .env
+    ports: ["127.0.0.1:8787:8787"]   # only nginx on this host reaches it
+    restart: unless-stopped
+    mem_limit: 768m
+    logging: { driver: json-file, options: { max-size: 10m, max-file: "3" } }
