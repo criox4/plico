@@ -59,4 +59,5 @@ docker compose pull && docker compose up -d   # after bumping an image tag here
 Changing a config here: copy the file to the same path under `/opt/plico-obs`, then `docker compose up -d` (or
 `restart <service>`). Check YAML before copying: a bad alert file stops Grafana from starting.
 
-`PLICO_HEALTH_URL` in `.env` is what "API up" checks; point it at the production API's `/health` once deployed.
+`GRAFANA_URL` (its public address) and `GRAFANA_PROXY_IP` (the sign-in proxy allowed to pass `Remote-User`) in `.env`
+configure Grafana. `PLICO_HEALTH_URL` in `.env` is what "API up" checks; point it at the production API's `/health` once deployed.
