@@ -1,0 +1,68 @@
+# Plico observability: Grafana (dashboards, alerts), Loki (logs), Tempo (traces), Prometheus (metrics), and Alloy,
+# which receives the API's OpenTelemetry over HTTPS (via Cloudflare tunnel -> Caddy) and checks the API's /health.
+# Secrets come from ./.env on the server (never committed): OTLP_TOKEN, GRAFANA_ADMIN_PASSWORD, PLICO_HEALTH_URL.
+name: plico-obs
+x-common: &common
+  restart: unless-stopped
+  logging: { driver: local, options: { max-size: 10m, max-file: '3' } }
+
+services:
+  alloy:
+    <<: *common
+    image: grafana/alloy:v1.20.1
+    command: [run, --server.http.listen-addr=0.0.0.0:12345, --storage.path=/var/lib/alloy, /etc/alloy/config.alloy]
+    environment:
+      OTLP_TOKEN: ${OTLP_TOKEN:?set OTLP_TOKEN in .env}
+      PLICO_HEALTH_URL: ${PLICO_HEALTH_URL:-}
+    volumes: [./alloy/config.alloy:/etc/alloy/config.alloy:ro, alloy:/var/lib/alloy]
+    ports: ['4318:4318']          # OTLP/HTTP in, from Caddy on homeproxy
+    mem_limit: 512m
+    depends_on: [loki, tempo, prometheus]
+
+  loki:
+    <<: *common
+    image: grafana/loki:3.7.8
+    command: [-config.file=/etc/loki/config.yaml]
+    volumes: [./loki/config.yaml:/etc/loki/config.yaml:ro, loki:/loki]
+    mem_limit: 768m
+
+  tempo:
+    <<: *common
+    image: grafana/tempo:3.0.3
+    command: [-config.file=/etc/tempo/tempo.yaml]
+    volumes: [./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro, tempo:/var/tempo]
+    mem_limit: 768m
+
+  prometheus:
+    <<: *common
+    image: prom/prometheus:v3.15.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus, --storage.tsdb.retention.time=30d, --web.enable-remote-write-receiver, --web.enable-otlp-receiver]
+    volumes: [./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro, prometheus:/prometheus]
+    mem_limit: 768m
+
+  grafana:
+    <<: *common
+    image: grafana/grafana:13.2.2
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_SERVER_ROOT_URL: ${GRAFANA_URL}
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      # Signed in by your SSO proxy (it passes Remote-User); only the proxy's address is trusted to send that header.
+      GF_AUTH_PROXY_ENABLED: 'true'
+      GF_AUTH_PROXY_HEADER_NAME: Remote-User
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_HEADERS: Email:Remote-Email Name:Remote-Name
+      GF_AUTH_PROXY_AUTO_SIGN_UP: 'true'
+      GF_AUTH_PROXY_WHITELIST: ${GRAFANA_PROXY_IP}
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      CALLMEBOT_URL: ${CALLMEBOT_URL:-}
+    volumes: [./grafana/provisioning:/etc/grafana/provisioning:ro, ./grafana/dashboards:/var/lib/grafana/dashboards:ro, grafana:/var/lib/grafana]
+    ports: ['3000:3000']          # from Caddy on homeproxy
+    mem_limit: 512m
+    depends_on: [loki, tempo, prometheus]
+
+volumes: { alloy: {}, loki: {}, tempo: {}, prometheus: {}, grafana: {} }

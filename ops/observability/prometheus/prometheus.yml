@@ -1,0 +1,5 @@
+# Metrics arrive by remote write from Alloy (the API's OpenTelemetry metrics and the /health check). Kept 30 days.
+global: { scrape_interval: 30s, evaluation_interval: 30s }
+scrape_configs:
+  - job_name: prometheus
+    static_configs: [{ targets: ['localhost:9090'] }]

@@ -1,0 +1,594 @@
+{
+ "uid": "plico-api",
+ "title": "Plico API",
+ "tags": [
+  "plico"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "refresh": "30s",
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "type": "row",
+   "title": "Health",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 1
+  },
+  {
+   "title": "API up (checked from home)",
+   "type": "stat",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "min_over_time(probe_success{job=~\".*plico_api.*\"}[5m])",
+     "legendFormat": "up",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 1,
+    "w": 6,
+    "h": 5
+   },
+   "fieldConfig": {
+    "defaults": {
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "DOWN",
+         "color": "red"
+        },
+        "1": {
+         "text": "UP",
+         "color": "green"
+        }
+       }
+      }
+     ],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "colorMode": "background",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "id": 2
+  },
+  {
+   "title": "Requests / s",
+   "type": "stat",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "sum(rate(http_server_request_duration_seconds_count[5m]))",
+     "legendFormat": "",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 6,
+    "y": 1,
+    "w": 6,
+    "h": 5
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "id": 3
+  },
+  {
+   "title": "Server errors (5xx)",
+   "type": "stat",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count[5m])), 1e-9)",
+     "legendFormat": "",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 1,
+    "w": 6,
+    "h": 5
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.01
+       },
+       {
+        "color": "red",
+        "value": 0.05
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "id": 4
+  },
+  {
+   "title": "p95 response time",
+   "type": "stat",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket[5m])))",
+     "legendFormat": "",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 18,
+    "y": 1,
+    "w": 6,
+    "h": 5
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "id": 5
+  },
+  {
+   "type": "row",
+   "title": "API",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 6,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 6
+  },
+  {
+   "title": "Requests by route",
+   "type": "timeseries",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "sum by (http_route) (rate(http_server_request_duration_seconds_count[5m]))",
+     "legendFormat": "{{http_route}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 7,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "id": 7
+  },
+  {
+   "title": "p95 by route",
+   "type": "timeseries",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_duration_seconds_bucket[5m])))",
+     "legendFormat": "{{http_route}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 7,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "id": 8
+  },
+  {
+   "title": "Responses by status",
+   "type": "timeseries",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count[5m]))",
+     "legendFormat": "{{http_response_status_code}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 15,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "id": 9
+  },
+  {
+   "title": "Slowest routes (p95, 1h)",
+   "type": "table",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "topk(10, histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_duration_seconds_bucket[1h]))))",
+     "legendFormat": "{{http_route}}",
+     "refId": "A",
+     "instant": true,
+     "format": "table"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 15,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "id": 10
+  },
+  {
+   "type": "row",
+   "title": "Plico",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 23,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 11
+  },
+  {
+   "title": "Push notifications sent (1h)",
+   "type": "timeseries",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "sum by (channel, result) (increase(plico_push_deliveries_total[1h]))",
+     "legendFormat": "{{channel}} {{result}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 24,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "id": 12
+  },
+  {
+   "title": "Push waiting to send",
+   "type": "timeseries",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "plico_push_pending",
+     "legendFormat": "due, not sent",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 24,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "id": 13
+  },
+  {
+   "title": "Ask Plico questions (1h)",
+   "type": "timeseries",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "sum by (result) (increase(plico_chat_turns_total[1h]))",
+     "legendFormat": "{{result}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 32,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "id": 14
+  },
+  {
+   "title": "Ask Plico tools (24h)",
+   "type": "barchart",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "sort_desc(sum by (tool) (increase(plico_chat_tools_total[24h])))",
+     "legendFormat": "{{tool}}",
+     "refId": "A",
+     "instant": true,
+     "format": "table"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 32,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "id": 15
+  },
+  {
+   "title": "Receipts and sentences read (1h)",
+   "type": "timeseries",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "sum by (result) (increase(plico_ai_reads_total[1h]))",
+     "legendFormat": "{{result}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 40,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "id": 16
+  },
+  {
+   "title": "Emails (1h)",
+   "type": "timeseries",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prom"
+     },
+     "expr": "sum by (result) (increase(plico_email_sent_total[1h]))",
+     "legendFormat": "{{result}}",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 40,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "id": 17
+  },
+  {
+   "type": "row",
+   "title": "Logs",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 48,
+    "w": 24,
+    "h": 1
+   },
+   "panels": [],
+   "id": 18
+  },
+  {
+   "title": "Errors and warnings",
+   "type": "logs",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{service_name=\"plico-api\"} | severity_text=~\"ERROR|WARN\"",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 49,
+    "w": 24,
+    "h": 10
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "options": {
+    "showTime": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending"
+   },
+   "id": 19
+  }
+ ]
+}

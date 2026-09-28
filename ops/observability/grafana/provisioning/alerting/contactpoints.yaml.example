@@ -1,0 +1,27 @@
+# Copy to contactpoints.yaml on the server once TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID and CALLMEBOT_URL are in .env
+# (Grafana refuses to start with a contact point missing its token). Critical alerts also go to WhatsApp.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: telegram
+    receivers:
+      - uid: plico-telegram
+        type: telegram
+        settings: { bottoken: $TELEGRAM_BOT_TOKEN, chatid: "$TELEGRAM_CHAT_ID", parse_mode: HTML }
+  - orgId: 1
+    name: telegram-and-whatsapp
+    receivers:
+      - uid: plico-telegram-crit
+        type: telegram
+        settings: { bottoken: $TELEGRAM_BOT_TOKEN, chatid: "$TELEGRAM_CHAT_ID", parse_mode: HTML }
+      - uid: plico-whatsapp
+        type: webhook
+        # CallMeBot: https://api.callmebot.com/whatsapp.php?phone=<+91…>&apikey=<key>&text=… (GET)
+        settings: { url: $CALLMEBOT_URL, httpMethod: GET }
+policies:
+  - orgId: 1
+    receiver: telegram
+    group_by: [alertname]
+    routes:
+      - receiver: telegram-and-whatsapp
+        object_matchers: [[severity, =, critical]]

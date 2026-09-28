@@ -1,3 +1,4 @@
+import { httpTelemetry } from './otel.ts' // first: telemetry must be set up before anything else loads
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
@@ -12,6 +13,7 @@ import { IP_HEADER, clientIp, limiter } from './ip.ts'
 
 const app = new Hono()
 
+app.use('/api/*', httpTelemetry)
 app.use('*', secureHeaders({ crossOriginResourcePolicy: 'cross-origin' })) // cross-origin: native apps load avatars
 // Everything but photo uploads is small JSON; big bodies are refused before they're read.
 app.use('/api/*', async (c, next) => (/\/(files|avatar|ai\/read|chat)$/.test(c.req.path) ? next() : bodyLimit({ maxSize: 256 << 10 })(c, next)))

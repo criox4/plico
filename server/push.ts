@@ -1,5 +1,6 @@
 // Push notifications: the outbox (written with each audited change), the senders (Web Push, APNs, FCM) and the
 // worker that merges, limits and delivers. What gets said, and to whom, is in push-text.ts.
+import { count, gauge, traced } from './otel.ts'
 import { connect } from 'node:http2'
 import { sign } from 'node:crypto'
 import webpush from 'web-push'
@@ -110,6 +111,7 @@ const SEND: Record<string, (d: Device, m: Msg) => Promise<Result>> = { web: send
 /** Sends to every device; forgets the ones the push service says are gone. */
 export async function deliver(devices: Device[], m: Msg) {
   const results = await Promise.all(devices.map(d => (SEND[d.platform] ?? (async () => 'error' as const))(d, m)))
+  devices.forEach((d, i) => count.push.add(1, { channel: d.platform, result: results[i] }))
   const gone = devices.filter((_, i) => results[i] === 'gone').map(d => d.id)
   if (gone.length) await db.pushDevice.deleteMany({ where: { id: { in: gone } } })
   return results
@@ -209,11 +211,12 @@ export async function nudge(at = new Date()) {
 export function startPush() {
   if (env.PUSH_WORKER === 'off') return
   let busy = false, lastNudge = 0, lastPrune = 0
+  gauge.pushPending.addCallback(async r => r.observe(await db.notification.count({ where: { sentAt: null, dueAt: { lte: new Date() } } })))
   const tick = async () => {
     if (busy) return
     busy = true
     try {
-      await flush()
+      await traced('push.flush', flush)
       if (Date.now() - lastNudge > 5 * 60_000) { lastNudge = Date.now(); await nudge() }
       if (Date.now() - lastPrune > 3600_000) { lastPrune = Date.now(); await db.notification.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - 30 * 864e5) }, sentAt: { not: null } } }) }
     } catch (e) { console.error('push worker', e) } finally { busy = false }

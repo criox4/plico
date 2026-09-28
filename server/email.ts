@@ -1,5 +1,6 @@
 // Transactional email. ZeptoMail first, Resend as fallback, console when neither is configured (dev).
 // Every provider is plain fetch: no SDKs, and switching is a matter of env vars.
+import { count } from './otel.ts'
 const FROM = process.env.EMAIL_FROM || 'Plico <no-reply@plico.example>' // placeholder until a domain is verified
 const APP = process.env.PUBLIC_URL || 'http://localhost:5173'
 
@@ -37,12 +38,13 @@ async function resend(m: Mail) {
 export async function sendEmail(m: Mail) {
   for (const provider of [zeptomail, resend]) {
     try {
-      if (await provider(m)) return
+      if (await provider(m)) { count.email.add(1, { result: 'sent' }); return }
     } catch (e) {
       console.error('[email] provider failed, trying the next one:', (e as Error).message)
     }
   }
-  if (process.env.ZEPTOMAIL_TOKEN || process.env.RESEND_API_KEY) throw new Error('All email providers failed')
+  if (process.env.ZEPTOMAIL_TOKEN || process.env.RESEND_API_KEY) { count.email.add(1, { result: 'failed' }); throw new Error('All email providers failed') }
+  count.email.add(1, { result: 'dev' })
   console.log(`\n[email:dev] to ${m.to}\n  ${m.subject}\n  ${m.text.replace(/\n/g, '\n  ')}\n`)
 }
 

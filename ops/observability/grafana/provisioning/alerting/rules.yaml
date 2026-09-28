@@ -1,0 +1,114 @@
+# Plico alerts. Severity decides where they go (contact points and routing: contactpoints.yaml, once the
+# Telegram and WhatsApp keys exist). Thresholds are a starting point; tune them against real traffic.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: plico
+    folder: Plico
+    interval: 1m
+    rules:
+      - uid: plico-api-down
+        title: API is down
+        condition: C
+        for: 2m
+        noDataState: Alerting
+        execErrState: Error
+        labels: { severity: critical, team: plico }
+        annotations:
+          summary: "The Plico API isn't answering /health (checked from home)."
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model: { refId: A, instant: true, expr: 'min_over_time(probe_success{job=~".*plico_api.*"}[2m])' }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{ evaluator: { type: lt, params: [1] } }]
+      - uid: plico-errors
+        title: Server errors above 5%
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning, team: plico }
+        annotations:
+          summary: "More than 5% of API requests are failing with a server error."
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model: { refId: A, instant: true, expr: 'sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[10m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count[10m])), 0.01)' }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{ evaluator: { type: gt, params: [0.05] } }]
+      - uid: plico-slow
+        title: API is slow
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning, team: plico }
+        annotations:
+          summary: "The slowest 5% of API requests take over 2 seconds."
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model: { refId: A, instant: true, expr: 'histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket[10m])))' }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{ evaluator: { type: gt, params: [2] } }]
+      - uid: plico-push-stuck
+        title: Push notifications stuck
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning, team: plico }
+        annotations:
+          summary: "Over 50 notifications have been waiting for 15 minutes: the push worker may be stuck."
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model: { refId: A, instant: true, expr: 'max_over_time(plico_push_pending[10m])' }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{ evaluator: { type: gt, params: [50] } }]
+      - uid: plico-silent
+        title: API telemetry stopped
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical, team: plico }
+        annotations:
+          summary: "No telemetry from the API for 10 minutes: it may be down, or it lost its connection to the monitoring server."
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model: { refId: A, instant: true, expr: 'absent_over_time(target_info{job="plico-api"}[10m])' }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{ evaluator: { type: gt, params: [0] } }]

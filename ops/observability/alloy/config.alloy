@@ -1,0 +1,63 @@
+// Alloy: the only door in. The Plico API sends OpenTelemetry here (Cloudflare tunnel -> Caddy -> :4318) with a
+// bearer token; traces go to Tempo, logs to Loki, metrics to Prometheus. It also checks the API's /health from
+// this home network, so "the cloud server is down" gets noticed from outside it.
+
+otelcol.auth.bearer "api" {
+  token = sys.env("OTLP_TOKEN")
+}
+
+otelcol.receiver.otlp "api" {
+  http {
+    endpoint = "0.0.0.0:4318"
+    auth     = otelcol.auth.bearer.api.handler
+  }
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    metrics = [otelcol.exporter.prometheus.default.input]
+    logs    = [otelcol.exporter.otlphttp.loki.input]
+    traces  = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls { insecure = true }
+  }
+}
+
+otelcol.exporter.otlphttp "loki" {
+  client { endpoint = "http://loki:3100/otlp" }
+}
+
+otelcol.exporter.prometheus "default" {
+  forward_to = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+  endpoint { url = "http://prometheus:9090/api/v1/write" }
+}
+
+// The API's health, from outside the cloud host.
+prometheus.exporter.blackbox "health" {
+  config = "{ modules: { http_2xx: { prober: http, timeout: 5s, http: { valid_status_codes: [200] } } } }"
+  target {
+    name    = "plico_api"
+    address = sys.env("PLICO_HEALTH_URL")
+    module  = "http_2xx"
+  }
+}
+
+prometheus.scrape "health" {
+  targets         = prometheus.exporter.blackbox.health.targets
+  forward_to      = [prometheus.remote_write.local.receiver]
+  scrape_interval = "30s"
+  job_name        = "health"
+}

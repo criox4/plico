@@ -13,6 +13,7 @@ import { audit, changed } from './audit.ts'
 import { prefsOf } from './push-text.ts'
 import { chat } from './chat.ts'
 import { clientIp, limiter } from './ip.ts'
+import { count } from './otel.ts'
 import { createHash } from 'node:crypto'
 import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
@@ -650,8 +651,11 @@ api.post('/ai/read', bodyLimit({ maxSize: 7 << 20, onError: c => c.json({ error:
     members = (await db.member.findMany({ where: { groupId: b.groupId, OR: [{ userId: null }, { userId: { not: uid } }] }, select: { name: true } })).map(m => m.name)
   }
   try {
-    return c.json(await readExpense({ text: b.text, image: b.image, members, today: b.today }))
+    const read = await readExpense({ text: b.text, image: b.image, members, today: b.today })
+    count.ai.add(1, { result: 'read' })
+    return c.json(read)
   } catch (e) {
+    count.ai.add(1, { result: 'error' })
     console.error('[ai]', (e as Error).message)
     return c.json({ error: 'Couldn’t read that right now. You can still type it in.' }, 502)
   }
@@ -818,9 +822,17 @@ api.post('/chat', bodyLimit({ maxSize: 8 << 20, onError: c => c.json({ error: 'T
   chats.set(uid, [...recent, now])
   return streamSSE(c, async s => {
     try {
-      for await (const ev of chat(uid, b.messages, b.today, b.image)) await s.writeSSE({ data: JSON.stringify(ev) })
+      let outcome = 'answered'
+      for await (const ev of chat(uid, b.messages, b.today, b.image)) {
+        if (ev.type === 'declined') outcome = 'declined'
+        else if (ev.type === 'error') outcome = 'error'
+        else if (ev.type === 'tool') count.tool.add(1, { tool: ev.name })
+        await s.writeSSE({ data: JSON.stringify(ev) })
+      }
+      count.chat.add(1, { result: outcome })
     } catch (e) {
       console.error('[chat]', (e as Error).message)
+      count.chat.add(1, { result: 'error' })
       await s.writeSSE({ data: JSON.stringify({ type: 'error', message: 'I couldn’t answer that right now. Try again in a moment.' }) })
     }
   })
