@@ -1241,6 +1241,9 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .lp-foot nav { display: flex; flex-wrap: wrap; gap: 6px 18px; }
 .lp-foot a { color: var(--muted); font-weight: 600; font-size: .9375rem; min-height: 32px; display: inline-flex; align-items: center; }
 .lp-foot a:hover { color: var(--ink); }
+.lp-oss { grid-column: 1 / -1; font-size: .9375rem; line-height: 1.5; }
+.lp-oss a, .lp-foot .lp-oss a { display: inline; min-height: 0; color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+.lp-trust a { color: inherit; text-underline-offset: 3px; }
 
 @media (min-width: 900px) {
   .lp-links { display: flex; margin-right: 8px; }

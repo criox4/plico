@@ -9,6 +9,7 @@ import { Icon, type IconName } from './icons'
 import { Showcase, legalUrl } from './account'
 
 const PEOPLE = ['Rahul', 'Isha', 'Karan']
+const REPO = 'https://github.com/criox4/plico'
 const EACH = 84000 // ₹840 in paise: a ₹3,360 dinner, four ways
 
 const STEPS: { id: string; title: string; body: string }[] = [
@@ -136,6 +137,7 @@ export function Landing() {
               <li><Icon n="check" size={15} />Stored in Mumbai</li>
               <li><Icon n="check" size={15} />No ads, no trackers</li>
               <li><Icon n="check" size={15} />Adding expenses is never paywalled</li>
+              <li><Icon n="check" size={15} /><a href={REPO} target="_blank" rel="noopener">Completely open source</a></li>
             </ul>
           </div>
           <div className="lp-hero-screen"><Showcase /></div>
@@ -215,6 +217,10 @@ export function Landing() {
           <a href="mailto:privacy@plico.space">privacy@plico.space</a>
         </nav>
         <small>© 2026 Plico · Bengaluru, India</small>
+        <p className="lp-oss">
+          Plico is completely open source (AGPL-3.0): <a href={REPO} target="_blank" rel="noopener">read the code on GitHub</a>.
+          Developed by Ashutosh Pradhan (<a href="https://github.com/criox4" target="_blank" rel="noopener">@criox4</a>).
+        </p>
       </footer>
     </div>
   )
