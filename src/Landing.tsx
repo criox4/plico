@@ -155,7 +155,7 @@ export function Landing() {
                 <p className="lp-step" aria-hidden>{i + 1} / {STEPS.length}</p>
                 <h2>{s.title}</h2>
                 <p>{s.body}</p>
-                <div className="lp-inline-screen" aria-hidden><Phone step={i} key={i === 0 && card === 0 ? 'on' : 'off'} /></div>
+                <div className="lp-inline-screen" aria-hidden><Phone step={i} key={card === i ? 'on' : 'off'} /></div>
               </article>
             ))}
           </div>
