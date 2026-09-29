@@ -11,7 +11,7 @@
 
 ## The API pipeline
 `push to main` → CI (`npm test`, `npm run build`) → Docker image to `ghcr.io/criox4/plico-api:<sha>` and `:latest` →
-SSH to the host → `ops/deploy/deploy.sh <sha>` pulls it, restarts, and waits for `/health`; if it never passes, it
+SSH to the host, where the deploy key can only run `ops/deploy/gate.sh` (`deploy <sha>`) → `deploy.sh <sha>` pulls it, restarts, and waits for `/health`; if it never passes, it
 starts the previous image again and the run fails. Run it by hand from Actions → Deploy API → Run workflow.
 
 Moving the API to another host: set it up as below, update the three `DEPLOY_*` secrets, point the `api` DNS record at
@@ -25,7 +25,8 @@ it. The image and `.env` are the same everywhere.
 
 ### Host setup (once)
 ```sh
-mkdir -p /opt/plico && cd /opt/plico          # compose.yml and deploy.sh arrive with each deploy
+mkdir -p /opt/plico && cd /opt/plico          # copy compose.yml, deploy.sh and gate.sh here (by hand, also after changing them)
+chmod 700 gate.sh   # authorized_keys: restrict,command="/opt/plico/gate.sh" <deploy public key>
 # .env: copy of .env.production (see below). Never committed; mode 600.
 bash cloudflare-ips.sh                          # from ops/deploy: which addresses are Cloudflare's
 certbot certonly --nginx -d api.plico.space     # needs the DNS record to exist
