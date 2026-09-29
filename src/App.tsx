@@ -197,6 +197,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
   const [quick, setQuick] = useState('')
   const [reading, setReading] = useState(false)
   const [capErr, setCapErr] = useState('')
+  const [hint, setHint] = useState('') // a head count the group's size didn't settle
   const [items, setItems] = useState<Item[] | null>(null)
   const [extras, setExtras] = useState(0)
 
@@ -246,6 +247,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
     if (q.cat) setCat(q.cat)
     if (q.payer) { setMulti(false); setPayer(q.payer) }
     if (q.people?.length) { setMode('equal'); setInp(Object.fromEntries(g.members.map(m => [m.id, q.people!.includes(m.id) ? '1' : '0']))) }
+    setHint(q.count ? `Split ${q.count} ways? Choose who’s in under Split.` : '')
   }
   const fromRead = (r: Read) => {
     const who = (n: string) => matchMember(n, g.members)
@@ -338,10 +340,13 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
   const form = (
     <form className="form add-form" onSubmit={e => { e.preventDefault(); void save() }}>
       {!old && <WithPicker s={s} value={target} onChange={setTarget} locked={!!gid} />}
-      {!old && !(sync.ai && s.user?.ai) && (
+      {/* Typing works without AI and without a connection; offline, it's the only reader there is. */}
+      {!old && (!(sync.ai && s.user?.ai) || sync.offline) && (
         <div className="capture">
           <input className="quick-in" placeholder="Type it: Dinner 3200, Karan paid, except Riya" aria-label="Type the expense in a sentence" value={quick} maxLength={200}
             enterKeyHint="done" onChange={e => setQuick(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void typeIt() } }} onBlur={() => void typeIt()} />
+          {sync.offline && <p className="error offline-read" role="status">You’re offline, so Plico reads this without AI and it may be inaccurate. Check the amount, who paid and the split.</p>}
+          {hint && <p className="note">{hint}</p>}
         </div>
       )}
       {reading && <p className="reading" role="status"><Plico mood="thinking" size={28} />Reading it…</p>}
