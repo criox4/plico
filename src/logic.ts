@@ -282,7 +282,8 @@ export function fromSplitwise(row: SwRow, ids: Id[]): Expense | null {
 }
 
 // ---------- quick add: "Dinner 3200 paid by Karan except Riya" ----------
-export type Quick = { title?: string; amount?: number; payer?: Id; people?: Id[]; cat?: string }
+/** `count`: a head count ("split 4") that didn't match the group's size, so who's in is left to the person. */
+export type Quick = { title?: string; amount?: number; payer?: Id; people?: Id[]; cat?: string; count?: number }
 
 /** Offline category from brands and everyday words Indians actually type. Order matters: first match wins. */
 const VENDOR_CATS: [RegExp, string][] = [
@@ -313,6 +314,13 @@ export function parseQuick(text: string, members: { id: Id; name: string }[]): Q
   const out: Quick = {}
   const find = (w: string) => matchMember(w, members)
   const names = (s: string) => s.split(/,|\band\b|&|\+/i).map(find).filter((x): x is Id => !!x)
+  // A head count first, so its number is never read as the amount: "split 4", "split into 4", "4 ways", "for 4 people",
+  // "4 log", "3360/4".
+  const c = t.match(/\bsplit\s+(?:in(?:to)?\s+|between\s+|among\s+)?(\d{1,2})(?:\s*(?:ways?|people|persons?|log))?\b/i)
+    ?? t.match(/\b(?:for\s+|between\s+)?(\d{1,2})\s*(?:ways?|people|persons?|pax|log)\b/i)
+    ?? t.match(/(?<=\d)\s*\/\s*(\d{1,2})\b/)
+  const heads = c ? +c[1] : 0
+  if (c) t = t.replace(c[0], ' ')
   const m = t.match(/(?:₹|rs\.?|inr)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k|thousand|l|lakh)?\b/i)
   if (m) {
     const n = parseFloat(m[1].replace(/,/g, '')) * ({ k: 1e3, thousand: 1e3, l: 1e5, lakh: 1e5 }[m[2]?.toLowerCase() ?? ''] ?? 1)
@@ -337,6 +345,10 @@ export function parseQuick(text: string, members: { id: Id; name: string }[]): Q
   } else if (only && !/\b(everyone|all|everybody)\b/i.test(only[1])) {
     const ids = names(only[1])
     if (ids.length) { out.people = [...new Set([ME, ...ids])]; t = t.replace(only[0], ' ') }
+  }
+  if (heads > 1 && !out.people) {
+    if (heads === members.length) out.people = members.map(x => x.id)
+    else out.count = heads
   }
   t = t.replace(/\b(everyone|everybody|all|split|equally|evenly|only)\b/gi, ' ').replace(/\s+/g, ' ').replace(/^[\s,.;:-]+|[\s,.;:-]+$/g, '').replace(/\s+,/g, ',')
   if (t) out.title = t[0].toUpperCase() + t.slice(1)

@@ -84,6 +84,15 @@ assert.deepEqual(parseQuick('Rent 65k', mem), { amount: 6500000, title: 'Rent', 
 assert.deepEqual(parseQuick('₹1,450.50 groceries with riya', mem), { amount: 145050, people: [ME, 'r'], title: 'Groceries', cat: 'groceries' })
 assert.equal(parseQuick('Blinkit 640', mem).cat, 'groceries'); assert.equal(parseQuick('BESCOM 1240', mem).cat, 'bills'); assert.equal(parseQuick('Swiggy instamart 300', mem).cat, 'groceries')
 assert.equal(parseQuick('Coffee', mem).amount, undefined)
+// head counts: the number never reaches the title or the amount
+const all = [ME, 'r', 'k', 'a']
+assert.deepEqual(parseQuick('Dinner at Gunpowder 3360 split 4', mem), { amount: 336000, people: all, title: 'Dinner at Gunpowder', cat: 'food' })
+assert.deepEqual(parseQuick('split 4 ways dinner 3360', mem), { amount: 336000, people: all, title: 'Dinner', cat: 'food' })
+assert.deepEqual(parseQuick('Cab 900 for 4 people', mem), { amount: 90000, people: all, title: 'Cab', cat: 'transport' })
+assert.deepEqual(parseQuick('Dinner 1200/4', mem), { amount: 120000, people: all, title: 'Dinner', cat: 'food' })
+assert.deepEqual(parseQuick('Chai 120 3 log', mem), { amount: 12000, count: 3, title: 'Chai', cat: 'food' })
+assert.deepEqual(parseQuick('Movie 900 split into 3', mem), { amount: 90000, count: 3, title: 'Movie', cat: 'fun' })
+assert.deepEqual(parseQuick('Uber 850 with Arjun, split 2', mem), { amount: 85000, people: [ME, 'a'], title: 'Uber', cat: 'transport' })
 
 // item split: extras follow item subtotals, totals add up exactly
 const is = itemSplit([{ name: 'Burger', amount: 42000, who: [ME] }, { name: 'Pasta', amount: 58000, who: ['r'] }, { name: 'Beer x3', amount: 90000, who: [ME, 'r', 'k'] }], 10800)
