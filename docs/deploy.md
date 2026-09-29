@@ -50,7 +50,7 @@ CLIENT_IP_HEADER=x-real-ip                  # set by nginx from Cloudflare's hea
 OTEL_EXPORTER_OTLP_ENDPOINT=…               # optional: see docs/observability.md
 OTEL_EXPORTER_OTLP_HEADERS=…
 ADMIN_EMAIL=you@example.com                # /admin: the one email that can sign in
-ADMIN_PASSWORD_HASH=scrypt$…               # from `npm run admin:password`; without both, /admin is a 404
+ADMIN_PASSWORD_HASH=scrypt:…               # from `npm run admin:password`; without both, /admin is a 404
 GRAFANA_URL=…                               # optional: a link on the admin page
 ```
 

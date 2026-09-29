@@ -12,17 +12,17 @@ import { clientIp, limiter } from './ip.ts'
 import { inr } from '../src/logic.ts'
 
 const EMAIL = process.env.ADMIN_EMAIL?.trim().toLowerCase()
-const HASH = process.env.ADMIN_PASSWORD_HASH?.trim() // scrypt$<salt hex>$<key hex>
+const HASH = process.env.ADMIN_PASSWORD_HASH?.trim() // scrypt:<salt hex>:<key hex> (':' because Docker Compose expands '$' in env files)
 const COOKIE = '__Host-plico-admin'
 const HOURS = 12
 const key = () => `${process.env.BETTER_AUTH_SECRET}:${HASH}`
 const derive = promisify(scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>
 
 /** scrypt, the same format scripts/admin-password.mts writes. */
-export const hashPassword = async (pw: string, salt: Buffer) => `scrypt$${salt.toString('hex')}$${(await derive(pw, salt, 64)).toString('hex')}`
+export const hashPassword = async (pw: string, salt: Buffer) => `scrypt:${salt.toString('hex')}:${(await derive(pw, salt, 64)).toString('hex')}`
 
 async function passwordOk(pw: string) {
-  const [alg, salt, want] = HASH!.split('$')
+  const [alg, salt, want] = HASH!.split(/[:$]/)
   if (alg !== 'scrypt' || !salt || !want) return false
   const got = await derive(pw, Buffer.from(salt, 'hex'), 64)
   const exp = Buffer.from(want, 'hex')
