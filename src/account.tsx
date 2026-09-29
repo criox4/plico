@@ -318,7 +318,7 @@ function ShowCard({ sample, pos, settled }: { sample: typeof SAMPLES[number]; po
   )
 }
 
-function Showcase() {
+export function Showcase() {
   const [front, setFront] = useState(0)
   const [phase, setPhase] = useState<'show' | 'settle' | 'out'>('show')
   const [retry, setRetry] = useState(0)

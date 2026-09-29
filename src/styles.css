@@ -1171,7 +1171,7 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
   background: var(--surface); color: var(--ink); font-weight: 650; box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(23 23 28 / .05);
 }
 .lp-flag { width: 21px; height: 14px; flex: none; border-radius: 3px; box-shadow: 0 0 0 1px rgb(23 23 28 / .1); }
-.lp-hero-screen { display: none; }
+.lp-hero-screen .showcase { max-width: 440px; }
 
 /* the live screen */
 .lp-phone {
@@ -1244,7 +1244,9 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
   .lp-links { display: flex; margin-right: 8px; }
   .lp-bar, .lp main, .lp-foot { padding-left: 40px; padding-right: 40px; }
   .lp-hero { grid-template-columns: 1.15fr .85fr; align-items: center; padding: 64px 0 48px; min-height: calc(100dvh - 72px); }
-  .lp-hero-screen { display: block; }
+  .lp-hero-screen .show-stack { height: 232px; }
+  .lp-hero-screen .show-card { padding: 22px 24px; }
+  .lp-hero-screen .show-card .show-num.hero-num { margin-top: 22px; font-size: min(4.5rem, calc(var(--fit, 150) * .8cqi / 7)); }
   .lp-story { display: grid; grid-template-columns: 1.15fr .85fr; gap: 40px; padding-top: 48px; }
   .lp-chapters { gap: 0; }
   .lp-chapter { min-height: 78vh; display: flex; flex-direction: column; justify-content: center; opacity: .5; transition: opacity .4s var(--ease); }

@@ -6,7 +6,7 @@ import { inr, upiLink } from './logic'
 import { themeVars, ensureFonts, THEMES } from './themes'
 import { Avatar, Denomination, Plico, Seal, Wordmark, calm, useQr } from './ui'
 import { Icon, type IconName } from './icons'
-import { legalUrl } from './account'
+import { Showcase, legalUrl } from './account'
 
 const PEOPLE = ['Rahul', 'Isha', 'Karan']
 const EACH = 84000 // ₹840 in paise: a ₹3,360 dinner, four ways
@@ -138,7 +138,7 @@ export function Landing() {
               <li><Icon n="check" size={15} />Adding expenses is never paywalled</li>
             </ul>
           </div>
-          <div className="lp-hero-screen" aria-hidden><Phone step={0} still /></div>
+          <div className="lp-hero-screen"><Showcase /></div>
         </section>
 
         <section className="lp-story" id="how" aria-label="How Plico works">
@@ -238,12 +238,12 @@ function Fact({ icon, title, children }: { icon: IconName; title: string; childr
 }
 
 /** The live screen: a sample trip, one step of the loop at a time. */
-function Phone({ step, still }: { step: number; still?: boolean }) {
+function Phone({ step }: { step: number }) {
   return (
-    <div className={`lp-phone${still ? ' still' : ''}`} data-theme="goa" style={themeVars('goa')}>
+    <div className="lp-phone" data-theme="goa" style={themeVars('goa')}>
       <div className="lp-phone-bar"><Icon n="back" size={18} /><strong>Goa ’26</strong><span className="lp-sample">Sample</span></div>
       <div className={`lp-phone-body${step === 3 ? ' center' : ''}`} key={step}>
-        {step === 0 && <StepAdd still={still} />}
+        {step === 0 && <StepAdd />}
         {step === 1 && <StepOwe />}
         {step === 2 && <StepPay />}
         {step === 3 && <Seal t="goa" burst={!calm()} caption="Hisaab clear ✨" />}
@@ -253,9 +253,9 @@ function Phone({ step, still }: { step: number; still?: boolean }) {
   )
 }
 
-function StepAdd({ still }: { still?: boolean }) {
+function StepAdd() {
   const line = 'Dinner at Gunpowder 3360 split 4'
-  const [n, setN] = useState(still || calm() ? line.length : 0)
+  const [n, setN] = useState(calm() ? line.length : 0)
   useEffect(() => {
     if (n >= line.length) return
     const t = setTimeout(() => setN(n + 1), 38)
