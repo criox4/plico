@@ -12,7 +12,8 @@
     "ios": "npm run build && cap sync ios && cap open ios",
     "server": "tsx watch --env-file=.env.development server/index.ts",
     "postinstall": "prisma generate",
-    "db:migrate": "prisma migrate deploy"
+    "db:migrate": "prisma migrate deploy",
+    "admin:password": "tsx scripts/admin-password.mts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

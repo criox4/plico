@@ -49,7 +49,13 @@ BETTER_AUTH_URL=https://api.plico.space     # where sign-in callbacks land
 CLIENT_IP_HEADER=x-real-ip                  # set by nginx from Cloudflare's header
 OTEL_EXPORTER_OTLP_ENDPOINT=…               # optional: see docs/observability.md
 OTEL_EXPORTER_OTLP_HEADERS=…
+ADMIN_EMAIL=you@example.com                # /admin: the one email that can sign in
+ADMIN_PASSWORD_HASH=scrypt$…               # from `npm run admin:password`; without both, /admin is a 404
+GRAFANA_URL=…                               # optional: a link on the admin page
 ```
+
+**Admin page:** `https://api.plico.space/admin`. Its own login (not a Plico account), totals only, cached a minute.
+Five wrong passwords from one address lock it for 15 minutes. Changing the hash signs every admin session out.
 
 ## The web app on Vercel
 Import the repo in Vercel (`vercel.json` holds the build settings), add the domain `plico.space`, and set:

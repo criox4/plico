@@ -6,6 +6,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { secureHeaders } from 'hono/secure-headers'
 import { ORIGINS, auth } from './auth.ts'
 import { api, publicApi } from './api.ts'
+import { admin } from './admin.ts'
 import { BUCKET, getFile } from './storage.ts'
 import { aiReady } from './ai.ts'
 import { pushConfig, startPush } from './push.ts'
@@ -59,6 +60,7 @@ app.get('/api/files/avatars/:uid/:name', async c => {
 app.route('/api', publicApi)
 app.route('/api', api)
 app.get('/health', c => c.text('ok'))
+app.route('/admin', admin) // its own login; 404 unless ADMIN_EMAIL and ADMIN_PASSWORD_HASH are set
 
 const port = Number(process.env.PORT) || 8787
 serve({ fetch: app.fetch, port }, () => console.log(`Plico API on http://localhost:${port}`))
