@@ -47,7 +47,8 @@ prometheus.remote_write "local" {
 
 // The API's health, from outside the cloud host.
 prometheus.exporter.blackbox "health" {
-  config = "{ modules: { http_2xx: { prober: http, timeout: 5s, http: { valid_status_codes: [200] } } } }"
+  // ip4: the compose network has no IPv6, and Cloudflare names resolve to IPv6 first (blackbox prefers it by default).
+  config = "{ modules: { http_2xx: { prober: http, timeout: 5s, http: { valid_status_codes: [200], preferred_ip_protocol: ip4 } } } }"
   target {
     name    = "plico_api"
     address = sys.env("PLICO_HEALTH_URL")
