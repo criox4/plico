@@ -24,6 +24,13 @@ const STEPS: { id: string; title: string; body: string }[] = [
  * The section grows by exactly the row's overflow (plus a short hold at each end), so one pixel down is one pixel across.
  * Desktop and reduced motion keep the plain layout (on phones, a row you swipe).
  */
+// Rails currently stuck to the screen. While any is, the top bar slides away so the cards get its height.
+const stuck = new Set<HTMLElement>()
+const barAway = (el: HTMLElement, on: boolean) => {
+  if (on) stuck.add(el); else stuck.delete(el)
+  document.documentElement.classList.toggle('lp-bar-away', stuck.size > 0)
+}
+
 function usePinnedRail<T extends HTMLElement>(onProgress?: (p: number) => void) {
   const pin = useRef<HTMLDivElement>(null)
   const track = useRef<T>(null)
@@ -38,8 +45,10 @@ function usePinnedRail<T extends HTMLElement>(onProgress?: (p: number) => void) 
     const frame = () => {
       raf = 0
       const { dist, hold } = geo.current
-      if (!mq.matches || !dist) return
-      const p = Math.min(1, Math.max(0, (-el.getBoundingClientRect().top - hold) / dist))
+      if (!mq.matches || !dist) return barAway(el, false)
+      const box = el.getBoundingClientRect()
+      barAway(el, box.top <= 0 && box.bottom >= innerHeight)
+      const p = Math.min(1, Math.max(0, (-box.top - hold) / dist))
       tr.style.transform = `translate3d(${-p * dist}px, 0, 0)`
       cb.current?.(p)
     }
@@ -65,7 +74,7 @@ function usePinnedRail<T extends HTMLElement>(onProgress?: (p: number) => void) 
     addEventListener('resize', measure)
     mq.addEventListener('change', measure)
     return () => {
-      ro.disconnect(); cancelAnimationFrame(raf)
+      ro.disconnect(); cancelAnimationFrame(raf); barAway(el, false)
       removeEventListener('scroll', onScroll); removeEventListener('resize', measure); mq.removeEventListener('change', measure)
     }
   }, [])

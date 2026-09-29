@@ -1300,11 +1300,14 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 @media (max-width: 899px) {
   .lp-pin.pinned { position: relative; }
   .lp-pin.pinned > .lp-pin-stage {
-    position: sticky; top: 0; height: 100svh; display: flex; flex-direction: column; justify-content: center; gap: 4px;
-    margin-inline: -20px; padding: calc(72px + env(safe-area-inset-top)) 20px 12px; overflow: hidden;
+    position: sticky; top: 0; height: 100svh; height: 100dvh; display: flex; flex-direction: column; justify-content: center; gap: 4px;
+    margin-inline: -20px; padding: calc(16px + env(safe-area-inset-top)) 20px 12px; overflow: hidden;
   }
+  /* While a rail is stuck the bar steps aside (Landing.tsx: barAway), so the stage uses the whole screen. */
+  .lp-bar { transition: translate .3s var(--ease); }
+  .lp-bar-away .lp-bar { translate: 0 -100%; }
   .pinned .lp-rail { overflow: visible; scroll-snap-type: none; margin-inline: 0; padding-inline: 0; will-change: transform; }
-  .pinned .lp-chapter { height: min(640px, calc(100svh - 150px - env(safe-area-inset-top))); }
+  .pinned .lp-chapter { height: min(720px, calc(100svh - 94px - env(safe-area-inset-top))); height: min(720px, calc(100dvh - 94px - env(safe-area-inset-top))); }
   .pinned .lp-inline-screen { flex: 1 1 0; min-height: 0; margin-top: 0; }
   .pinned .lp-inline-screen .lp-phone { height: 100%; }
   .pinned .lp-facts { margin-top: 22px; }
