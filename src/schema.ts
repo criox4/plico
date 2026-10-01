@@ -99,9 +99,25 @@ export const Snap = z.object({
 export const SnapFull = z.extend(Snap, {
   mode: z.nullish(z.enum(['equal', 'exact', 'percent', 'shares'])), input: z.nullish(z.record(z.string(), z.number())), repeatDay: z.nullish(z.int()),
 })
+/** How a settlement was paid and what its receipt showed. Settlements count when recorded; this only says how sure we are. */
+export const VerifiedBy = z.enum(['payee', 'screenshot'])
+export const Proof = z.object({
+  method: z.enum(['upi', 'cash', 'bank']), note: z.optional(z.string()), file: z.optional(z.string()),
+  /** What the AI read off the payer's UPI receipt. */
+  read: z.optional(z.object({ amount: z.nullable(z.int()), utr: z.nullable(z.string()), payee: z.nullable(z.string()), at: z.nullable(z.string()), status: z.nullable(z.string()) })),
+  /** Each check on that receipt; all true = verified by screenshot. fresh: its transaction ID hasn't proved another settlement. */
+  checks: z.optional(z.object({ amount: z.boolean(), payee: z.boolean(), time: z.boolean(), fresh: z.boolean() })),
+})
+/** The payer's proof for one settlement: how they paid, an optional UPI transaction ID or note, and an optional receipt screenshot. */
+export const ProofIn = z.object({
+  method: z.enum(['upi', 'cash', 'bank']), utr: z.optional(z.string().check(z.trim(), z.regex(/^\d{12}$/, 'A UPI transaction ID has 12 digits'))), note: z.optional(text(120)),
+  image: z.optional(z.string().check(z.regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/), z.maxLength(7_000_000))),
+})
+export const ProofOut = z.object({ verifiedBy: z.nullable(VerifiedBy), proof: Proof })
 export const ServerExpense = z.extend(Snap, {
   id: z.string(), mode: z.nullable(z.enum(['equal', 'exact', 'percent', 'shares'])), input: z.nullable(z.record(z.string(), z.number())),
   repeatDay: z.nullable(z.int()), version: z.int(), deletedAt: z.nullable(When), updatedAt: When,
+  verifiedBy: z.nullish(VerifiedBy), proof: z.nullish(Proof),
 })
 export const ServerMember = z.object({
   id: z.string(), name: z.string(), upi: z.nullable(z.string()), upi2: z.nullish(z.string()), userId: z.nullable(z.string()), email: z.nullable(z.string()),

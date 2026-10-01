@@ -29,8 +29,9 @@ export type Expense = {
   input?: Record<Id, number> // raw split input, kept so edits reopen as entered
   settle?: true
   receipt?: string // photo file name, stored with the group
-  pending?: true // settlement waiting for the payee to confirm; doesn't move balances yet
+  pending?: true // settlement not verified yet (payee or screenshot); it counts straight away, settling first like Splitwise
   rejected?: true // the payee says it hasn't arrived; doesn't move balances
+  verifiedBy?: 'payee' | 'screenshot' // how a settlement was verified
   repeat?: { next: string; day: number } // monthly
   v?: number // the server version this copy is; edits send it so the server can spot stale ones
 }
@@ -92,7 +93,7 @@ export function split(total: number, mode: SplitMode, input: Record<Id, number>)
 export function balances(g: Group): Record<Id, number> {
   const b: Record<Id, number> = Object.fromEntries(g.members.map(m => [m.id, 0]))
   for (const e of g.expenses) {
-    if (e.pending || e.rejected) continue
+    if (e.rejected) continue
     for (const k in e.paid) b[k] = (b[k] ?? 0) + e.paid[k]
     for (const k in e.owed) b[k] = (b[k] ?? 0) - e.owed[k]
   }
@@ -106,13 +107,13 @@ export function balances(g: Group): Record<Id, number> {
 export function pairwise(g: Group, a: Id, b: Id): number {
   let n = 0
   for (const e of g.expenses) {
-    if (e.pending || e.rejected || !e.amount) continue
+    if (e.rejected || !e.amount) continue
     n += ((e.owed[b] ?? 0) * (e.paid[a] ?? 0) - (e.owed[a] ?? 0) * (e.paid[b] ?? 0)) / e.amount
   }
   return Math.round(n)
 }
 
-/** A settlement waits for the payee unless the payee recorded it or can't confirm (a guest without an account). */
+/** A settlement asks the payee to verify it unless the payee recorded it or can't (a guest without an account). It counts either way. */
 export const needsConfirm = (g: Group, to: Id) => to !== ME && !!g.members.find(m => m.id === to)?.joined
 
 /** The fewest payments that settle everyone. The minimum is (people with a balance) − (the most groups they can be
@@ -497,7 +498,7 @@ export function canon(v: unknown): string {
 export function effectOf(before: Snap | null, after: Snap | null): Record<Id, number> {
   const net = (x: Snap | null) => {
     const out: Record<Id, number> = {}
-    if (!x || x.pending || x.rejected) return out // unconfirmed settlements don't move balances yet
+    if (!x || x.rejected) return out // a payment the payee says never arrived doesn't move balances
     for (const s of x.shares) out[s.memberId] = (out[s.memberId] ?? 0) + s.paid - s.owed
     return out
   }

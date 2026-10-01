@@ -163,8 +163,12 @@ model Expense {
   mode        String?
   input       Json?
   settle      Boolean        @default(false)
-  pending     Boolean        @default(false) /// settlement waiting for the payee to confirm; excluded from balances
+  pending     Boolean        @default(false) /// settlement not verified yet; counts in balances all the same (settle first, verify after)
   rejected    Boolean        @default(false) /// payee said it hasn't arrived; excluded from balances until the payer dismisses it
+  verifiedBy  String? /// "payee" (they said they got it, or recorded it) or "screenshot" (every check on the payer's receipt passed)
+  verifiedAt  DateTime?
+  proof       Json? /// how it was paid and what the receipt showed: { method, note?, file?, read?, checks? }
+  utr         String? /// the UPI transaction ID from the receipt or typed by the payer: one payment can't prove two settlements
   receipt     String? /// photo file name in the private bucket, under the group's folder
   repeatNext  String?
   repeatDay   Int?
@@ -178,6 +182,7 @@ model Expense {
 
   @@index([groupId])
   @@index([groupId, updatedAt])
+  @@index([utr])
   @@map("expense")
   @@schema("splittr")
 }

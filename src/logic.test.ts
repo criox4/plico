@@ -40,13 +40,14 @@ assert.ok(sharesError(1000, { a: 900 }, { a: 500, b: 500 }, m))
 assert.ok(sharesError(1000, { a: 1000 }, { a: 500, x: 500 }, m))
 assert.ok(sharesError(1000, { a: 1000.5 }, { a: 1000.5 }, m))
 assert.ok(sharesError(0, {}, {}, m))
-// a settlement waiting for the payee doesn't move balances until it's confirmed
+// a settlement counts as soon as it's recorded, verified or not; only one the payee rejects stops counting
 const p: Group = { id: 'p', name: 'P', kind: 'friends', theme: 'classic', members: [{ id: ME, name: 'Me' }, { id: 'r', name: 'Rahul', joined: true }, { id: 'q', name: 'Guest' }],
   expenses: [{ id: 'd', title: 'Dinner', cat: 'food', date: '2026-09-26', amount: 2000, paid: { r: 2000 }, owed: { [ME]: 1000, r: 1000 } }] }
 p.expenses.push({ id: 's1', title: 'Settlement', cat: 'check', date: '2026-09-26', amount: 1000, paid: { [ME]: 1000 }, owed: { r: 1000 }, settle: true, pending: true })
-assert.equal(balances(p)[ME], -1000)
-delete p.expenses[1].pending
 assert.equal(balances(p)[ME], 0)
+p.expenses[1].rejected = true
+assert.equal(balances(p)[ME], -1000)
+delete p.expenses[1].rejected
 assert.equal(needsConfirm(p, 'r'), true) // Rahul has an account: he confirms
 assert.equal(needsConfirm(p, 'q'), false) // a guest can't confirm
 assert.equal(needsConfirm(p, ME), false) // I'm the payee: my word is enough
@@ -140,7 +141,7 @@ const trio: Group = { id: 't', name: 'T', kind: 'trip', theme: 'goa', members: [
 ] }
 assert.equal(pairwise(trio, ME, 'r'), 2700)   // R owes me 3000 for the hotel, I owe R 300 for the cab
 assert.equal(pairwise(trio, 'r', ME), -2700)
-assert.equal(pairwise(trio, ME, 'k'), 3000)   // the pending settlement doesn't count yet
+assert.equal(pairwise(trio, ME, 'k'), 2000)   // K's unverified payment back counts already
 assert.equal(pairwise(trio, 'r', 'k'), 0)
 // the pairwise balances add up to the group balance
 const bb = balances(trio)
@@ -154,8 +155,9 @@ assert.deepEqual(effectOf(null, s1), { a: 600, b: -600 })
 assert.deepEqual(effectOf(s1, null), { a: -600, b: 600 })
 assert.deepEqual(effectOf(s1, { ...s1, amount: 1500, shares: [{ memberId: 'a', paid: 1500, owed: 750 }, { memberId: 'b', paid: 0, owed: 750 }] }), { a: 150, b: -150 })
 const st: Snap = { title: 'S', cat: 'check', date: '2026-09-01', amount: 500, settle: true, pending: true, shares: [{ memberId: 'b', paid: 500, owed: 0 }, { memberId: 'a', paid: 0, owed: 500 }] }
-assert.deepEqual(effectOf(null, st), {})
-assert.deepEqual(effectOf(st, { ...st, pending: false }), { a: -500, b: 500 })
+assert.deepEqual(effectOf(null, st), { a: -500, b: 500 })
+assert.deepEqual(effectOf(st, { ...st, pending: false }), {}) // verifying moves nothing
+assert.deepEqual(effectOf(st, { ...st, rejected: true }), { a: 500, b: -500 }) // "not received" undoes it
 const ent = { groupId: 'g', seq: 1, kind: 'expense.created', byName: 'A', at: '2026-09-01T00:00:00.000Z', effect: { b: -1, a: 1 }, prevHash: '0' }
 assert.equal(auditPayload(ent), auditPayload({ ...ent, effect: { a: 1, b: -1 } }))
 console.log('friends + audit ok')

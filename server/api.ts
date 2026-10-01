@@ -186,7 +186,7 @@ const withShares = { shares: { select: { memberId: true, paid: true, owed: true 
 type Stored = Prisma.ExpenseGetPayload<{ include: typeof withShares }>
 const sortKeys = (o: unknown) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b))) : o ?? null)
 /** An expense as history and conflict checks see it (key order normalised: jsonb reorders keys). */
-const snapOf = (e: Omit<Stored, 'id' | 'groupId' | 'createdById' | 'createdAt' | 'updatedAt' | 'version' | 'deletedAt' | 'updatedById'>) => ({
+const snapOf = (e: Omit<Stored, 'id' | 'groupId' | 'createdById' | 'createdAt' | 'updatedAt' | 'version' | 'deletedAt' | 'updatedById' | 'verifiedBy' | 'verifiedAt' | 'proof' | 'utr'>) => ({
   title: e.title, cat: e.cat, date: e.date, amount: e.amount, mode: e.mode, input: sortKeys(e.input), settle: e.settle, pending: e.pending, rejected: e.rejected,
   receipt: e.receipt, repeatNext: e.repeatNext, repeatDay: e.repeatDay,
   shares: [...e.shares].filter(x => x.paid || x.owed).sort((a, b) => a.memberId.localeCompare(b.memberId)).map(x => ({ memberId: x.memberId, paid: x.paid, owed: x.owed })),
