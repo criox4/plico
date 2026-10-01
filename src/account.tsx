@@ -10,7 +10,11 @@ import { Icon, type IconName } from './icons'
 import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, SegPill } from './ui'
 import { crashReportsOn, setCrashReports } from './sentry'
 import { disablePush, enablePush, pushState, type PushState } from './push'
-import { ClaimPreviewOut, InvitePreviewOut, NotifyOut, type NotifyPrefs, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
+import { ClaimPreviewOut, InvitePreviewOut, NotifyOut, PhoneStartOut, PhoneStatusOut, type NotifyPrefs, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
+import type { z } from 'zod/mini'
+
+type PhoneStatus = z.infer<typeof PhoneStatusOut>
+type PhoneStart = z.infer<typeof PhoneStartOut>
 
 const origin = () => location.origin + location.pathname.replace(/index\.html$/, '')
 const msg = (e: unknown, fallback = 'That didn’t work. Your balances are safe. Try again.') =>
@@ -711,15 +715,19 @@ export function PrivacyPage({ s }: { s: State }) {
 }
 
 export function ProfilePage({ s }: { s: State }) {
+  const [phone, setPhone] = useState<PhoneStatus | null>(null)
+  useEffect(() => { void api('/api/me/phone').then(r => setPhone(PhoneStatusOut.parse(r)), () => {}) }, [])
+  const verified = !!(phone?.available && phone.phone)
   return (
     <Page s={s} title="Profile">
       <AvatarPicker s={s} />
       <label className="field"><span>Name</span><input value={s.me.name} maxLength={40} autoComplete="name" onChange={e => update(d => { d.me.name = e.target.value })} /></label>
-      <label className="field"><span>Phone</span>
+      {!verified && <label className="field"><span>Phone</span>
         <input type="tel" value={s.me.phone ?? ''} placeholder="+91 98765 43210" autoComplete="tel" aria-invalid={!!s.me.phone && !isPhone(s.me.phone)}
           onChange={e => update(d => { d.me.phone = e.target.value })} />
         <small>Shown to people in your groups so they can reach you.</small>
-      </label>
+      </label>}
+      {phone?.available && <PhoneVerify status={phone} set={setPhone} />}
       <label className="field"><span>UPI ID</span>
         <input value={s.me.upi} placeholder="name@okhdfcbank" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
           aria-invalid={!!s.me.upi && !isVpa(s.me.upi)} onChange={e => update(d => { d.me.upi = e.target.value.trim() })} />
@@ -731,6 +739,66 @@ export function ProfilePage({ s }: { s: State }) {
         <small>Optional, from another bank or app. Friends can switch to it if the first one isn’t working.</small>
       </label>
     </Page>
+  )
+}
+
+const prettyPhone = (p: string) => p.replace(/^\+91(\d{5})(\d{5})$/, '+91 $1 $2')
+
+/** Prove a number by sending Plico a WhatsApp message from it: the app opens WhatsApp with the code typed in,
+ *  then checks every 3 seconds (only while the screen is open and in front) until the Yes tap lands or the code runs out. */
+function PhoneVerify({ status, set }: { status: PhoneStatus; set: (p: PhoneStatus) => void }) {
+  const [wait, setWait] = useState<PhoneStart | null>(null)
+  const [done, setDone] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    if (!wait) return
+    let id = 0
+    const tick = async () => {
+      if (Date.now() > Date.parse(wait.expiresAt)) { setWait(null); setErr('That code expired. Start again.'); return }
+      const r = await api('/api/me/phone').then(x => PhoneStatusOut.parse(x), () => null)
+      if (!r || r.pending) return
+      setWait(null); set(r)
+      if (r.phone) { setDone(true); update(d => { d.me.phone = r.phone! }) } // the proven number is the one friends see
+      else setErr('Nothing changed. Start again if you meant to.') // they tapped No
+    }
+    const run = () => { clearInterval(id); if (document.visibilityState === 'visible') { void tick(); id = window.setInterval(tick, 3000) } }
+    run()
+    document.addEventListener('visibilitychange', run)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', run) }
+  }, [wait, set])
+  const start = async () => {
+    setBusy(true); setErr(''); setDone(false)
+    try {
+      const w = PhoneStartOut.parse(await api('/api/me/phone/start', { method: 'POST' }))
+      setWait(w)
+      window.open(w.link, '_blank') // a browser may block this after the await; the Open WhatsApp link below is the fallback
+    } catch (e) { setErr(msg(e)) } finally { setBusy(false) }
+  }
+  const remove = async () => {
+    if (!confirm('Remove your verified number? People won’t be able to add you by it.')) return
+    setErr(''); setDone(false)
+    try { await api('/api/me/phone', { method: 'DELETE' }); set({ ...status, phone: null, verifiedAt: null }) } catch (e) { setErr(msg(e)) }
+  }
+  const why = <small>So people can add you by your number, and spots added under it become yours.</small>
+  return (
+    <div className="field">
+      <span>Phone</span>
+      {status.phone ? <>
+        <p><strong>{prettyPhone(status.phone)}</strong> <span className="chip-state ok">Verified on WhatsApp</span></p>
+        {done && <p className="notice" role="status">Done. Your number is linked to Plico.</p>}
+        {why}
+        <button type="button" className="link" onClick={() => void remove()}>Remove</button>
+      </> : wait ? <>
+        <p className="notice" role="status">Send the message in WhatsApp, then tap Yes.</p>
+        <a className="btn secondary" href={wait.link} target="_blank" rel="noopener"><Icon n="send" />Open WhatsApp</a>
+        <button type="button" className="link center-link" onClick={() => setWait(null)}>Cancel</button>
+      </> : <>
+        <button type="button" className="btn secondary" disabled={busy} onClick={() => void start()}><Icon n="send" />{busy ? 'Starting…' : 'Verify with WhatsApp'}</button>
+        {why}
+      </>}
+      {err && <p className="error" role="alert">{err}</p>}
+    </div>
   )
 }
 

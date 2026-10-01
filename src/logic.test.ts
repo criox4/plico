@@ -219,6 +219,7 @@ console.log('simplify ok')
   assert.equal(scrub({ release: 'plico@0.1.0' }).release, 'plico@0.1.0', 'a release name is not an email')
   assert.equal(scrub('A.B@Mail.Example.IN').toString(), '[email]')
   assert.equal(scrub('#/u/abc123xyz0 /api/public/u/abc123xyz0'), '#/u/[hidden] /api/public/u/[hidden]', 'friend links are secrets too')
+  assert.equal(scrub('No spot for +919876543210 or +91 98765 43210').toString(), 'No spot for [phone] or [phone]')
   console.log('crash report scrubbing ok')
 }
 

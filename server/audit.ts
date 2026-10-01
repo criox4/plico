@@ -34,14 +34,22 @@ export function changed<T extends Record<string, unknown>>(a: T, b: T) {
 }
 
 /** Splitwise-style: every spot added under this verified email becomes this user's, unless they're already in that group. */
-export async function linkByEmail(userId: string, email: string) {
+export const linkByEmail = (userId: string, email: string) =>
+  linkSpots(userId, { email: { equals: email.trim(), mode: 'insensitive' } }, m => ({ name: m.name, email: m.email, how: 'email' }))
+
+/** The same for a number proven over WhatsApp (server/whatsapp.ts). Spots store +<country><number>, as verifiedPhone does. */
+export const linkByPhone = (userId: string, phone: string) =>
+  linkSpots(userId, { phone }, m => ({ name: m.name, phone: m.phone, how: 'phone' }))
+
+type Spot = { name: string; email: string | null; phone: string | null }
+async function linkSpots(userId: string, match: Prisma.MemberWhereInput, after: (m: Spot) => object) {
   const user = await db.user.findUnique({ where: { id: userId }, select: { name: true } })
-  const spots = await db.member.findMany({ where: { email: { equals: email.trim(), mode: 'insensitive' }, userId: null, group: { members: { none: { userId } } } } })
+  const spots = await db.member.findMany({ where: { ...match, userId: null, group: { members: { none: { userId } } } } })
   for (const m of spots) {
     await db.$transaction(async tx => {
       // Their account's own name replaces whatever the inviter typed.
       const { count } = await tx.member.updateMany({ where: { id: m.id, userId: null }, data: { userId, inviteToken: null, ...(user?.name && { name: user.name }) } })
-      if (count) await audit(tx, m.groupId, { kind: 'member.joined', memberId: m.id, byId: userId, byName: user?.name ?? m.name, after: { name: m.name, email: m.email, how: 'email' } })
+      if (count) await audit(tx, m.groupId, { kind: 'member.joined', memberId: m.id, byId: userId, byName: user?.name ?? m.name, after: after(m) })
     })
   }
   return spots.length

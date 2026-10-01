@@ -7,6 +7,7 @@ import { secureHeaders } from 'hono/secure-headers'
 import { ORIGINS, auth } from './auth.ts'
 import { api, publicApi } from './api.ts'
 import { admin } from './admin.ts'
+import { whatsapp } from './whatsapp.ts'
 import { BUCKET, getFile } from './storage.ts'
 import { aiReady } from './ai.ts'
 import { pushConfig, startPush } from './push.ts'
@@ -61,6 +62,8 @@ app.route('/api', publicApi)
 app.route('/api', api)
 app.get('/health', c => c.text('ok'))
 app.route('/admin', admin) // its own login; 404 unless ADMIN_EMAIL and ADMIN_PASSWORD_HASH are set
+// Meta's calls for phone verification: outside /api (no CORS, no session), proven by their signature; 404 unless WA_* are set.
+app.route('/webhooks/whatsapp', whatsapp)
 
 const port = Number(process.env.PORT) || 8787
 serve({ fetch: app.fetch, port }, () => console.log(`Plico API on http://localhost:${port}`))

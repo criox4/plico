@@ -12,6 +12,7 @@ import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
 import { prefsOf } from './push-text.ts'
 import { chat } from './chat.ts'
+import { mePhone } from './whatsapp.ts'
 import { clientIp, limiter } from './ip.ts'
 import { count } from './otel.ts'
 import { createHash, randomInt } from 'node:crypto'
@@ -100,6 +101,8 @@ api.use('*', async (c, next) => {
   if (!open && u.ageGroup === 'teen' && !u.guardianConsentAt) return c.json({ error: 'Waiting for a parent’s consent', code: 'guardian' }, 403)
   await next()
 })
+
+api.route('/me/phone', mePhone) // verifying a phone number over WhatsApp (server/whatsapp.ts)
 
 // ---------- age, parental consent, AI consent, data export ----------
 async function askGuardian(uid: string) {
@@ -707,8 +710,10 @@ api.post('/invites/:code/join', async c => {
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
   const uid = c.get('userId')
   if (g.members.some(m => m.userId === uid)) return c.json({ id: g.id })
-  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, emailVerified: true, name: true } })
-  const spot = me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined
+  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, emailVerified: true, name: true, verifiedPhone: true } })
+  // Their spot by verified email, else by the number they proved on WhatsApp.
+  const spot = (me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined)
+    ?? (me.verifiedPhone ? g.members.find(m => !m.userId && m.phone === me.verifiedPhone) : undefined)
   await db.$transaction(async tx => {
     if (spot) {
       const { count } = await tx.member.updateMany({ where: { id: spot.id, userId: null }, data: { userId: uid, inviteToken: null, name: me.name } })
