@@ -114,11 +114,12 @@ export const ProofIn = z.object({
   method: z.enum(['upi', 'cash', 'bank']), utr: z.optional(z.string().check(z.trim(), z.regex(/^\d{12}$/, 'A UPI transaction ID has 12 digits'))), note: z.optional(text(120)),
   image: z.optional(z.string().check(z.regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/), z.maxLength(7_000_000))),
 })
+export type Proof = z.infer<typeof Proof>
 export const ProofOut = z.object({ verifiedBy: z.nullable(VerifiedBy), proof: Proof, version: z.optional(z.int()), pending: z.optional(z.boolean()) })
 export const ServerExpense = z.extend(Snap, {
   id: z.string(), mode: z.nullable(z.enum(['equal', 'exact', 'percent', 'shares'])), input: z.nullable(z.record(z.string(), z.number())),
   repeatDay: z.nullable(z.int()), version: z.int(), deletedAt: z.nullable(When), updatedAt: When,
-  verifiedBy: z.nullish(VerifiedBy), proof: z.nullish(Proof),
+  verifiedBy: z.nullish(VerifiedBy), proof: z.nullish(Proof), utr: z.nullish(z.string()),
 })
 export const ServerMember = z.object({
   id: z.string(), name: z.string(), upi: z.nullable(z.string()), upi2: z.nullish(z.string()), userId: z.nullable(z.string()), email: z.nullable(z.string()),

@@ -2,11 +2,12 @@ import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { bodyLimit } from 'hono/body-limit'
 import * as z from 'zod/mini'
-import { AgeIn, AiConsentIn, ChatIn, ExpenseIn, FileName, FriendCode, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, NotifyIn, ParentConsentIn, PushDeviceIn, PushTokenIn, ReadIn, RemindIn, SeenIn, Token } from '../src/schema.ts'
+import { AgeIn, AiConsentIn, ChatIn, ExpenseIn, FileName, FriendCode, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, NotifyIn, ParentConsentIn, ProofIn, PushDeviceIn, PushTokenIn, ReadIn, RemindIn, SeenIn, Token, type Proof } from '../src/schema.ts'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
 import { mail } from './email.ts'
-import { aiReady, readExpense } from './ai.ts'
+import { aiReady, readExpense, readReceipt } from './ai.ts'
+import { NO_READ, checkReceipt, type ReceiptRead } from './proof.ts'
 import { BUCKET, deleteFile, getFile, imageType, putFile, storageReady } from './storage.ts'
 import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
@@ -573,6 +574,60 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   return c.json({ ok: true, version, pending: data.pending, verifiedBy })
 })
 
+// The payer's proof for a settlement: how they paid, a UPI transaction ID or a note, and optionally their UPI receipt,
+// kept with the group's files. A receipt whose amount, payee, time and status check out, and whose transaction ID hasn't
+// proved another settlement, verifies it ("screenshot") without waiting for the payee. It counted all along either way.
+api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onError: c => c.json({ error: 'That photo is too large' }, 413) }), async c => {
+  const [gid, eid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('eid'))]
+  const uid = c.get('userId')
+  const me = await membership(gid, uid)
+  if (!me) return c.json(notFound, 404)
+  const b = ProofIn.parse(await c.req.json())
+  const e = await db.expense.findUnique({ where: { id: eid }, include: withShares })
+  if (!e || e.groupId !== gid || !e.settle || e.deletedAt) return c.json(notFound, 404)
+  if (e.shares.find(s => s.paid > 0)?.memberId !== me.id) return c.json({ error: 'Only the person who paid can add proof' }, 403)
+  if (e.rejected) return c.json({ error: 'They said this one hasn’t arrived. Share the transaction ID with them, or pay again.' }, 409)
+  const prev = e.proof as Proof | null
+  // A new receipt replaces the old one; without one, the last receipt and what was read off it stay.
+  let file = prev?.file, read: ReceiptRead | null = prev?.read ?? null
+  if (b.image) {
+    if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
+    const buf = Buffer.from(b.image.slice(b.image.indexOf(',') + 1), 'base64'), type = imageType(buf)
+    if (!type) return c.json({ error: 'That isn’t a photo we can use (JPEG, PNG or WebP)' }, 400)
+    if (buf.length > 6 << 20) return c.json({ error: 'Images up to 6 MB' }, 400)
+    file = `${crypto.randomUUID()}.${EXT[type]}`
+    await putFile(BUCKET.private, `${gid}/${file}`, buf, type)
+    read = null
+    // AI off (or at the hourly limit): the receipt is kept for people to look at, but nothing reads or verifies it.
+    const u = await db.user.findUnique({ where: { id: uid }, select: { aiOffAt: true } })
+    if (aiReady() && u && !u.aiOffAt && aiTurn(uid)) {
+      try { read = await readReceipt(b.image); count.ai.add(1, { result: 'receipt' }) }
+      catch (err) { count.ai.add(1, { result: 'error' }); console.error('[ai]', (err as Error).message) }
+    }
+  }
+  const utr = b.utr ?? read?.utr ?? null
+  // ponytail: checked, not enforced: two proofs racing with the same transaction ID could both pass. A unique index on utr if that's ever seen.
+  const used = !!utr && (await db.expense.count({ where: { utr, id: { not: eid }, settle: true, deletedAt: null } })) > 0
+  const payee = await db.member.findUniqueOrThrow({ where: { id: e.shares.find(s => s.owed > 0)!.memberId }, select: { name: true, upi: true, upi2: true } })
+  const r = read || utr ? checkReceipt(read ?? NO_READ, { amount: e.amount, createdAt: e.createdAt, payee }, used) : null
+  const proof: Proof = { method: b.method, ...(b.note && { note: b.note }), ...(file && { file }), ...(read && { read }), ...(r && { checks: r.checks }) }
+  if (b.image && prev?.file && prev.file !== file) void deleteFile(BUCKET.private, `${gid}/${prev.file}`)
+  if (r?.verified && e.pending) {
+    // Verified: a new version, on the record, so every phone pulls it and the payee hears (push.ts).
+    try {
+      await db.$transaction(async tx => {
+        const { count } = await tx.expense.updateMany({ where: { id: eid, version: e.version }, data: { pending: false, verifiedBy: 'screenshot', verifiedAt: new Date(), proof, utr, updatedById: uid, version: { increment: 1 } } })
+        if (!count) throw new Stale()
+        await audit(tx, gid, { kind: 'expense.edited', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), before: snapOf(e), after: snapOf({ ...e, pending: false, verifiedBy: 'screenshot' }) })
+      })
+    } catch (err) { if (err instanceof Stale) return conflict(c, eid); throw err }
+    return c.json({ verifiedBy: 'screenshot', proof, version: e.version + 1, pending: false })
+  }
+  // Proof alone moves no money and changes no version: phones pick it up by its update time.
+  const saved = await db.expense.update({ where: { id: eid }, data: { proof, utr }, select: { verifiedBy: true, version: true, pending: true } })
+  return c.json({ verifiedBy: saved.verifiedBy, proof, version: saved.version, pending: saved.pending })
+})
+
 // Soft delete: the expense leaves balances but stays in history, can be restored, and reaches other phones as a tombstone.
 api.delete('/groups/:gid/expenses/:eid', async c => {
   const [gid, eid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('eid'))]
@@ -655,15 +710,20 @@ api.get('/groups/:gid/files/:name', async c => {
 
 // ---------- reading expenses: a sentence, a receipt photo, a payment screenshot ----------
 const reads = new Map<string, number[]>() // ponytail: per-process limiter; move to the DB if we run several instances
+/** One more AI read for this person this hour (receipts, screenshots, payment proof), or false at the limit. */
+function aiTurn(uid: string) {
+  const now = Date.now(), recent = (reads.get(uid) ?? []).filter(t => now - t < 3600_000)
+  if (recent.length >= 40) return false
+  reads.set(uid, [...recent, now])
+  return true
+}
 api.post('/ai/read', bodyLimit({ maxSize: 7 << 20, onError: c => c.json({ error: 'That photo is too large' }, 413) }), async c => {
   if (!aiReady()) return c.json({ error: 'Reading receipts isn’t set up yet' }, 503)
   const me = await db.user.findUnique({ where: { id: c.get('userId') }, select: { aiOffAt: true } })
   if (!me || me.aiOffAt) return c.json({ error: 'AI reading is off. Turn it on in Privacy and data.', code: 'ai-consent' }, 403)
   const b = ReadIn.parse(await c.req.json())
-  const uid = c.get('userId'), now = Date.now()
-  const recent = (reads.get(uid) ?? []).filter(t => now - t < 3600_000)
-  if (recent.length >= 40) return c.json({ error: 'That’s a lot of scans for one hour. Try again a little later.' }, 429)
-  reads.set(uid, [...recent, now])
+  const uid = c.get('userId')
+  if (!aiTurn(uid)) return c.json({ error: 'That’s a lot of scans for one hour. Try again a little later.' }, 429)
   let members: string[] = []
   if (b.groupId) {
     if (!(await membership(b.groupId, uid))) return c.json(notFound, 404)
