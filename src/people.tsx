@@ -5,7 +5,7 @@ import { AnimatePresence } from 'motion/react'
 import { ME, findFriend, friendsIn, inr, normPhone, needsConfirm, pairwise, today, uid, type Friend, type Group, type Id } from './logic'
 import { update, type State } from './store'
 import { api, pull, syncNow } from './sync'
-import { Avatar, Denomination, LedgerRow, Plico, Screen, SectionHead, Settle, TONES, count, go, groupTitle, wa, SegPill } from './ui'
+import { Avatar, Denomination, LedgerRow, PUBLIC, Plico, Screen, SectionHead, Settle, TONES, count, go, groupTitle, useQr, wa, SegPill } from './ui'
 export { groupTitle }
 import { Icon } from './icons'
 import { canPickContact, pickContact } from './contacts'
@@ -166,6 +166,7 @@ export function Friends({ s }: { s: State }) {
       <SectionHead title={rows.length ? count(rows.length, 'friend', 'friends') : 'Friends'}
         action={<button className="link" aria-expanded={adding} onClick={() => setAdding(!adding)}>{adding ? 'Close' : 'Add a friend'}</button>} />
       {adding && <AddFriend s={s} onDone={() => setAdding(false)} />}
+      <YourLink s={s} />
       {rows.length > 3 && (
         <div className="seg friend-filter" role="tablist" aria-label="Show">
           {([['all', 'All'], ['owed', 'Owe you'], ['owe', 'You owe'], ['even', 'Settled']] as [Filter, string][]).map(([id, label]) => (
@@ -225,6 +226,52 @@ function AddFriend({ s, onDone }: { s: State; onDone: () => void }) {
       {err && <p className="error" role="alert">{err}</p>}
       <small>Not on Plico yet? They get an invite, and expenses with them wait until they join.</small>
     </div>
+  )
+}
+
+// ---------- your "add me" link ----------
+// Cached on the device, per account, so opening your own link here can say so before anyone taps anything.
+// ponytail: a reset on another device leaves this copy stale until the next reset here; refetch on open if that bites.
+const CODE = 'plico-friend-code'
+let mine: { uid: string; code: string } | null = (() => { try { return JSON.parse(localStorage.getItem(CODE) ?? 'null') } catch { return null } })()
+const keepCode = (uid: string, code: string) => { mine = { uid, code }; try { localStorage.setItem(CODE, JSON.stringify(mine)) } catch { /* a convenience */ } }
+export const ownCode = (s: State) => (mine && mine.uid === s.user?.id ? mine.code : '')
+
+function YourLink({ s }: { s: State }) {
+  const [open, setOpen] = useState(false)
+  const [code, setCode] = useState(() => ownCode(s))
+  const [err, setErr] = useState('')
+  const [resetting, setResetting] = useState(false)
+  const got = (r: { code: string }) => { if (s.user) keepCode(s.user.id, r.code); setCode(r.code); setErr(''); setResetting(false) }
+  const fail = (e: unknown) => setErr(navigator.onLine ? (e as Error).message : 'Your link needs a connection.')
+  useEffect(() => { if (open && !code) api<{ code: string }>('/api/me/friend-code').then(got, fail) }, [open, code]) // eslint-disable-line react-hooks/exhaustive-deps
+  const link = code ? `${PUBLIC}/#/u/${code}` : ''
+  const qr = useQr(open ? link : '')
+  const text = `Add me on Plico so we can split and settle up: ${link}`
+  return (
+    <section className="your-link">
+      <button type="button" className="your-link-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon n="qr" size={22} /><span className="grow"><strong>Your link</strong><small>Friends tap it or scan it, and you’re friends on Plico</small></span>
+        <span className="link">{open ? 'Close' : 'Show'}</span>
+      </button>
+      {open && (link ? <div className="your-link-body">
+        {qr && <div className="qr-plate qr-sm"><img src={qr} alt="QR code to add you on Plico" /></div>}
+        {'share' in navigator
+          ? <button type="button" className="btn primary" onClick={() => void navigator.share({ text }).catch(() => {})}><Icon n="send" size={18} />Share your link</button>
+          : <a className="btn primary" href={wa(text)} target="_blank" rel="noopener"><Icon n="send" size={18} />Share on WhatsApp</a>}
+        <button type="button" className="link center-link" onClick={() => navigator.clipboard?.writeText(link)}><Icon n="copy" size={18} />Copy link</button>
+        {resetting ? (
+          <div className="confirm" role="group" aria-label="Make a new link">
+            <p>Make a new link? The old one stops working, so anyone who has it can’t add you with it.</p>
+            <div className="row">
+              <button type="button" className="btn primary" onClick={() => api<{ code: string }>('/api/me/friend-code/reset', { method: 'POST', body: '{}' }).then(got, fail)}>Make a new link</button>
+              <button type="button" className="btn secondary" onClick={() => setResetting(false)}>Keep this one</button>
+            </div>
+          </div>
+        ) : <button type="button" className="link center-link" onClick={() => setResetting(true)}><Icon n="lock" size={18} />Reset link</button>}
+        {err && <p className="error" role="alert">{err}</p>}
+      </div> : <p className="muted-p">{err || 'Loading your link…'}</p>)}
+    </section>
   )
 }
 

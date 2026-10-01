@@ -217,6 +217,7 @@ console.log('simplify ok')
   assert.equal(e.exception.values[0].value, 'No user [email]')
   assert.equal(scrub({ release: 'plico@0.1.0' }).release, 'plico@0.1.0', 'a release name is not an email')
   assert.equal(scrub('A.B@Mail.Example.IN').toString(), '[email]')
+  assert.equal(scrub('#/u/abc123xyz0 /api/public/u/abc123xyz0'), '#/u/[hidden] /api/public/u/[hidden]', 'friend links are secrets too')
   console.log('crash report scrubbing ok')
 }
 

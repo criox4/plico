@@ -4,7 +4,9 @@ import { commitDraft, type Target } from './draft'
 import { Suspense, lazy, useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
-import { update, useStore, type State } from './store'
+import { getState, update, useStore, type State } from './store'
+import { API } from './auth-client'
+import { FriendCardOut } from './schema'
 import { api, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
@@ -16,7 +18,7 @@ import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
 import { Search } from './search'
-import { FriendPage, FriendSettle, Friends, PeoplePicker, WhatsAppInvite, emailOk, friendBy, useInviteLink, friendsOf, groupTitle, type Person as Pick } from './people'
+import { FriendPage, FriendSettle, Friends, PeoplePicker, WhatsAppInvite, emailOk, friendBy, friendPath, ownCode, useInviteLink, friendsOf, groupTitle, type Person as Pick } from './people'
 
 const back = () => (history.length > 1 ? history.back() : go('/'))
 const edit = (gid: Id, fn: (g: Group) => void) => update(d => { const g = d.groups.find(x => x.id === gid); if (g) fn(g) })
@@ -53,6 +55,7 @@ export default function App() {
   if (r[0] === 'guardian' && r[1]) return <GuardianConsent token={r[1]} />
   if (sync.booting) return <Splash />
   if (!sync.authed && (r[0] === 'join' || r[0] === 'claim') && r[1]) return <InvitePreview s={s} kind={r[0]} code={r[1]} />
+  if (!sync.authed && r[0] === 'u' && r[1]) return <FriendLink s={s} code={r[1]} />
   // plico.space, signed out, first visit on the web: the front door. Phone apps and returning people go straight to sign-in.
   if (!sync.authed && !Capacitor.isNativePlatform() && !s.user && !r[0]) return <Landing />
   if (!sync.authed && r[0] === 'signin') return <AuthFlow s={s} start="signin" />
@@ -64,6 +67,7 @@ export default function App() {
   if (r[0] === 'claim' && r[1]) return <Claim s={s} token={r[1]} />
   if (r[0] === 'delete' && r[1]) return <DeleteConfirm s={s} token={r[1]} />
   if (r[0] === 'join' && r[1]) return <JoinGroup s={s} code={r[1]} />
+  if (r[0] === 'u' && r[1]) return <FriendLink s={s} code={r[1]} />
   if (r[0] === 'me') {
     const Page = { profile: ProfilePage, theme: AppearancePage, tone: NotificationsPage, notify: NotificationsPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage, privacy: PrivacyPage }[r[1] ?? '']
     return Page ? <Page key={r[1]} s={s} /> : <AccountHub s={s} />
@@ -764,6 +768,48 @@ function JoinGroup({ s, code }: { s: State; code: string }) {
           <h1 className="q">{inv.name}</h1>
           <p className="muted-p">{count(inv.people, 'person is', 'people are')} splitting here. If someone added you by email, you get that spot and its balance.</p>
           <button className="btn primary" disabled={busy} onClick={() => void join()}>Join as {s.me.name || 'me'}</button>
+          {err && <p className="error" role="alert">{err}</p>}
+        </div>
+      )}
+    </Screen>
+  )
+}
+
+/** Someone's "add me" link (#/u/<code>). Signed out: who it is, then sign in, and the link carries on after it,
+ * just like a group invite. Signed in: add them, and land on your page with them. */
+function FriendLink({ s, code }: { s: State; code: string }) {
+  const sync = useSync()
+  const [p, setP] = useState<{ name: string; image: string | null } | null>(null)
+  const [err, setErr] = useState('')
+  const [ready, setReady] = useState(false)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    fetch(`${API}/api/public/u/${code}`).then(async r => {
+      const j: unknown = await r.json().catch(() => ({}))
+      const out = FriendCardOut.safeParse(j)
+      if (r.ok && out.success) setP(out.data); else setErr((j as { error?: string }).error ?? 'This link is no longer valid. Ask them for a fresh one.')
+    }, () => setErr('Can’t reach Plico. Check your connection and try again.'))
+  }, [code])
+  if (!sync.authed && (ready || err)) return <AuthFlow s={s} notice={p ? `Sign in or create your account to add ${p.name}.` : `${err.replace(/\.?$/, '.')} You can still sign in.`} />
+  if (!sync.authed && !p) return <Splash />
+  const own = code === ownCode(s)
+  const add = async () => {
+    setBusy(true); setErr('')
+    try {
+      const r = await api<{ id: string }>(`/api/friends/code/${code}`, { method: 'POST', body: '{}' })
+      await pull()
+      const f = friendsOf(getState()).find(x => x.direct?.id === r.id)
+      location.replace('#' + (f ? friendPath(f) : '/friends'))
+    } catch (e) { setErr((e as Error).message); setBusy(false) }
+  }
+  return (
+    <Screen t={s.theme} back={sync.authed} title="Add a friend">
+      {!p ? <p className="empty">{err || 'Opening link…'}</p> : (
+        <div className="form">
+          <div className="friend-head"><Avatar name={p.name} image={p.image} size={72} /><p><strong>{p.name}</strong><small>{own ? 'This is your own link' : 'wants to split and settle up with you on Plico'}</small></p></div>
+          {own ? <p className="muted-p">Share it with friends: when they open it and add you, you’re friends here, ready to split.</p>
+            : sync.authed ? <button className="btn primary" disabled={busy} onClick={() => void add()}>{busy ? 'Adding…' : `Add ${p.name} as a friend`}</button>
+            : <button className="btn primary" onClick={() => setReady(true)}>Sign in to add {p.name}</button>}
           {err && <p className="error" role="alert">{err}</p>}
         </div>
       )}

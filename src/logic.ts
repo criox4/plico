@@ -522,6 +522,6 @@ export const GENESIS = '0'.repeat(64)
 // ---------- crash reports ----------
 const EMAIL = /[\w.+-]+@[\w-]+(\.[\w-]+)*\.[a-z]{2,}\b/gi // ends in a letters-only domain: not "plico@0.1.0"
 // Paths whose next segment is private: an email or a secret token, in app routes (#/…) and API paths alike.
-const PRIVATE_PATH = /((?:#\/|\/api\/(?:public\/)?)(?:claim|join|invites|guardian|delete|f|add\/f)\/)[^/?#"\s\\]+/g
+const PRIVATE_PATH = /((?:#\/|\/api\/(?:public\/)?)(?:claim|join|invites|guardian|delete|f|add\/f|u|friends\/code)\/)[^/?#"\s\\]+/g
 /** A crash report as it may leave the device: every email and every token-bearing path segment removed. */
 export const scrub = <T>(x: T): T => JSON.parse(JSON.stringify(x).replace(PRIVATE_PATH, '$1[hidden]').replace(EMAIL, '[email]'))

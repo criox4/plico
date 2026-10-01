@@ -818,6 +818,11 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .friend-head small { color: var(--muted); overflow-wrap: anywhere; }
 .friend-actions .btn { flex: 1; margin: 0; }
 .link-row { width: 100%; text-align: left; }
+.your-link { margin: 4px 0 14px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--elev); }
+.your-link-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 16px; min-height: 56px; text-align: left; }
+.your-link-head span.grow { display: grid; }
+.your-link-head small { color: var(--muted); }
+.your-link-body { display: grid; gap: 8px; padding: 0 16px 16px; }
 .add-friend { margin: 4px 0 18px; padding: 16px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--elev); }
 .friend-filter { margin: 0 0 12px; }
 .friend-filter small { margin-left: 6px; font-weight: 600; opacity: .7; font-variant-numeric: tabular-nums; }
