@@ -7,7 +7,8 @@ import { useSyncExternalStore } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
 import { ME, enqueue, isVpa, normPhone, rebase, runRecurring, uid, type Expense, type Group, type Op, type Theme, type Tone } from './logic'
-import { ConflictOut, GroupsOut, ReadOut, SavedOut, UnreadOut, type ExpenseInput, type Read, type ServerExpense, type ServerGroup, type Snap, type SnapFull } from './schema'
+import type * as z from 'zod/mini'
+import { ConflictOut, GroupsOut, ProofIn, ProofOut, ReadOut, SavedOut, UnreadOut, type ExpenseInput, type Read, type ServerExpense, type ServerGroup, type Snap, type SnapFull } from './schema'
 export type { Read, ServerExpense }
 import { blank, getState, onLocalChange, setRemote, update, type State } from './store'
 import { API, authClient, token } from './auth-client'
@@ -20,7 +21,9 @@ export type Issue = {
   by?: string; action?: string // conflict: who changed it, and how (edited, deleted, ...)
 }
 type Status = {
-  authed: boolean; booting: boolean; pending: number; offline: boolean; error: string; issues: Issue[]
+  authed: boolean; booting: boolean; pending: number
+  synced: boolean // a pull has landed since launch: the phone's copy is current
+ offline: boolean; error: string; issues: Issue[]
   unread: number // Activity entries by other people you haven't seen
   google: boolean; googleWebClientId: string | null; googleIosClientId: string | null; ai: boolean
   push: { web: string | null; ios: boolean; android: boolean } // push channels the server can send on; web is the VAPID public key
@@ -58,7 +61,7 @@ let missedPull = false // a pull was skipped because an edit was pending
 
 // Signed in = we know the user. A dead session is only concluded from the server (never from being offline).
 let status: Status = {
-  authed: !!getState().user, booting: true, pending: outbox.length, offline: !navigator.onLine, error: '', issues, unread: 0,
+  authed: !!getState().user, booting: true, synced: false, pending: outbox.length, offline: !navigator.onLine, error: '', issues, unread: 0,
   google: false, googleWebClientId: null, googleIosClientId: null, ai: false, push: { web: null, ios: false, android: false },
 }
 const subs = new Set<() => void>()
@@ -164,12 +167,13 @@ export const syncNow = () => flush()
 const opIds = (path: string) => path.match(/^\/api\/groups\/([^/?]+)(?:\/expenses\/([^/?]+))?/) ?? []
 const groupName = (gid: string) => snap.groups.find(g => g.id === gid)?.name ?? getState().groups.find(g => g.id === gid)?.name
 
-/** Record the server's version for an expense locally (state and snapshot alike, so nothing gets queued). */
-function setVersion(gid: string, eid: string, v: number) {
-  const bump = (st: State) => { const e = st.groups.find(g => g.id === gid)?.expenses.find(x => x.id === eid); if (e) e.v = v }
+/** Change an expense locally as the server already has it (state and snapshot alike, so nothing gets queued). */
+function patch(gid: string, eid: string, f: (e: Expense) => void) {
+  const bump = (st: State) => { const e = st.groups.find(g => g.id === gid)?.expenses.find(x => x.id === eid); if (e) f(e) }
   setRemote(bump)
   snap = structuredClone(snap); bump(snap)
 }
+const setVersion = (gid: string, eid: string, v: number) => patch(gid, eid, e => { e.v = v })
 
 function addIssue(i: Omit<Issue, 'id' | 'at'>) {
   issues = [...issues, { ...i, id: uid(), at: new Date().toISOString() }]
@@ -241,6 +245,7 @@ export function expenseFromServer(e: Omit<ServerExpense, 'version' | 'deletedAt'
     id: e.id, title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid, owed,
     mode: e.mode ?? undefined, input: e.input ? Object.fromEntries(Object.entries(e.input).map(([k, v]) => [id(k), v])) : undefined,
     settle: e.settle || undefined, pending: e.pending || undefined, rejected: e.rejected || undefined, receipt: e.receipt ?? undefined,
+    verifiedBy: e.verifiedBy ?? undefined, proof: e.proof ?? undefined,
     repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay } : undefined, v: e.version,
   }
 }
@@ -300,7 +305,7 @@ export async function pull() {
   })
   setCursor(gap ? null : data.now)
   snap = getState()
-  setStatus({ offline: false })
+  setStatus({ offline: false, synced: true })
   void req('/api/me/activity?peek=1').then(r => (r.ok ? r.json() : null)).then(j => { const u = UnreadOut.safeParse(j); if (u.success) setStatus({ unread: u.data.unread }) }).catch(() => {})
 }
 
@@ -364,6 +369,22 @@ export async function revertExpense(gid: string, eid: string, to: SnapFull, vers
     repeat: to.repeatNext && to.repeatDay ? { next: to.repeatNext, day: to.repeatDay } : null, base: current, revertOf: version,
   }) })
   await flush(); await pull()
+}
+
+/** The payer's proof for a settlement (needs a connection). A settlement recorded a moment ago is sent first. */
+export async function addProof(gid: string, eid: string, body: z.input<typeof ProofIn>) {
+  const ok = ProofIn.safeParse(body)
+  if (!ok.success) throw new Error(ok.error.issues[0].message)
+  queueNow()
+  for (let i = 0; outbox.some(o => opIds(o.path)[2] === eid); i++) {
+    if (i > 20 || status.offline) throw new Error(NET)
+    await flush()
+    await new Promise(r => setTimeout(r, 300)) // another flush may hold it on the wire
+  }
+  const out = ProofOut.parse(await api(`/api/groups/${gid}/expenses/${eid}/proof`, { method: 'POST', body: JSON.stringify(ok.data) }))
+  patch(gid, eid, e => { e.proof = out.proof; if (out.verifiedBy) { e.verifiedBy = out.verifiedBy; delete e.pending } })
+  void pull()
+  return out
 }
 
 /** Shrink a photo on the phone before it travels: JPEG, longest side at most `max`. */

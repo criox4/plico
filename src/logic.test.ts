@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, friendsIn, findFriend, personKey, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, friendsIn, findFriend, personKey, verifyLabel, missedChecks, showUtr, toCheck, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -250,4 +250,20 @@ assert.equal(normPhone('riya@x.com'), null)
   assert.equal(findFriend(fs, 'p:+919876543210')?.name, 'Riya')
   assert.equal(personKey({ id: 'x', name: 'Nobody' }), undefined)
   console.log('friends ok')
+}
+
+{
+  // Settle first, verify after: the label says how sure we are; the payee's list holds only unanswered payments to them.
+  const e = { id: 'x', title: 'Settlement', cat: 'check', date: '2026-10-01', amount: 500, paid: { a: 500 }, owed: { [ME]: 500 }, settle: true as const }
+  assert.equal(verifyLabel({ ...e, pending: true }), 'Not verified')
+  assert.equal(verifyLabel({ ...e, verifiedBy: 'screenshot' }), 'Verified · screenshot')
+  assert.equal(verifyLabel({ ...e, verifiedBy: 'payee' }), 'Verified')
+  assert.equal(verifyLabel({ ...e, pending: true, rejected: true }), '')
+  assert.equal(missedChecks({ method: 'upi', checks: { amount: false, payee: true, time: false, fresh: true } }), 'amount / time')
+  assert.equal(missedChecks({ method: 'cash' }), '')
+  assert.equal(showUtr('412345678901', false), '•••• 8901')
+  assert.ok(toCheck({ ...e, pending: true }))
+  assert.ok(!toCheck({ ...e, pending: true, rejected: true }))
+  assert.ok(!toCheck({ ...e, pending: true, paid: { [ME]: 500 }, owed: { a: 500 } }))
+  console.log('verify ok')
 }

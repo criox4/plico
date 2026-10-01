@@ -1,13 +1,13 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
-import { ME, balances, personKey, pairwise, simplify, today, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
+import { ME, balances, missedChecks, personKey, pairwise, showUtr, simplify, toCheck, today, verifyLabel, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import { update, useStore, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { IssuesBanner } from './history'
 import { friendBalance, friendPath, friendsOf } from './people'
 import { API } from './auth-client'
-import { api, fileUrl, useSync } from './sync'
+import { addProof, api, fileUrl, photoData, pull, useSync } from './sync'
 import { enablePush, mayAsk, notNow, pushState, type PushState } from './push'
 import { ChatButton } from './chat'
 import { AnimatePresence } from 'motion/react'
@@ -452,19 +452,19 @@ export function LedgerRow({ g, e, serial, showGroup }: { g: Group; e: Group['exp
   return (
     <m.li className="ledger-row" {...ROW}>
       <button onClick={() => go(`/g/${g.id}/e/${e.id}`)}>
-        <span className={`cat ${e.settle && !e.pending && !e.rejected ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
+        <span className={`cat ${e.settle && !e.rejected ? 'cat-settled' : ''}`}><Icon n={e.settle ? 'check' : (e.cat as IconName)} /></span>
         <span className="lr-body">
           <strong>{e.settle ? `${by} paid ${lower(who(g, Object.keys(e.owed)[0]))}` : e.title}</strong>
-          <small><span className="serial">{no} · </span>{e.rejected ? 'not received' : e.pending ? 'waiting to confirm' : e.settle ? 'settlement' : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${groupTitle(g)}` : ''}</small>
+          <small><span className="serial">{no} · </span>{e.rejected ? 'not received' : e.settle ? ['settlement', verifyLabel(e)].filter(Boolean).join(' · ') : `${inr(e.amount)}, ${lower(by)} paid`}{showGroup ? ` · ${groupTitle(g)}` : ''}</small>
         </span>
-        {e.settle ? <span className="lr-amt"><span className={`money ${e.pending || e.rejected ? 'muted-ink' : 'settled-ink'}`}>{inr(e.amount)}</span></span>
+        {e.settle ? <span className="lr-amt"><span className={`money ${e.rejected ? 'muted-ink' : 'settled-ink'}`}>{inr(e.amount)}</span></span>
           : <span className="lr-amt"><Money p={mine} sign /><small>{mine > 0 ? 'you lent' : mine < 0 ? 'your share' : 'not in it'}</small></span>}
       </button>
     </m.li>
   )
 }
 
-// ---------- settlements waiting for the payee ----------
+// ---------- settlements: they count when recorded; the payee says whether it arrived ----------
 const ends = (e: Expense) => ({ from: Object.keys(e.paid)[0], to: Object.keys(e.owed)[0] })
 const setPending = (gid: Id, eid: Id, ok: boolean) => update(d => {
   const g = d.groups.find(x => x.id === gid)
@@ -472,7 +472,8 @@ const setPending = (gid: Id, eid: Id, ok: boolean) => update(d => {
   const e = g.expenses.find(x => x.id === eid)
   if (!e) return
   delete e.pending
-  if (!ok) e.rejected = true // tells the payer; they dismiss or pay again
+  if (ok) e.verifiedBy = 'payee' // the server sets it too; this shows it before the next pull
+  else e.rejected = true // tells the payer; they dismiss or pay again
 })
 const drop = (gid: Id, eid: Id) => update(d => {
   const g = d.groups.find(x => x.id === gid)
@@ -494,23 +495,23 @@ export function NotReceivedCard({ g, e, showGroup }: { g: Group; e: Expense; sho
   )
 }
 
-/** The payee's side: someone says they paid you. You're the only one who can say it arrived. */
+/** The payee's side: someone says they paid you. It already counts; you're the only one who can say it arrived. */
 export function ConfirmCard({ g, e, showGroup }: { g: Group; e: Expense; showGroup?: boolean }) {
   const { from } = ends(e)
   return (
     <m.li className="confirm-card" {...ROW}>
       <p><strong>{who(g, from)} marked <span className="money">{inr(e.amount)}</span> as paid to you</strong>
-        <small>{showGroup ? `${groupTitle(g)} · ` : ''}Check your UPI app first.</small></p>
+        <small>{showGroup ? `${groupTitle(g)} · ` : ''}It already counts. Check your UPI app, then say if it arrived.</small></p>
       <span className="debt-actions">
         <button className="btn-sm" onClick={() => setPending(g.id, e.id, true)}><Icon n="check" size={16} />Got it</button>
-        <button className="btn-sm ghost" onClick={() => setPending(g.id, e.id, false)}>Not yet</button>
+        <button className="btn-sm ghost" onClick={() => setPending(g.id, e.id, false)}>Not received</button>
       </span>
     </m.li>
   )
 }
-const waitingFor = (g: Group) => g.expenses.filter(e => e.pending && ends(e).to === ME)
+const waitingFor = (g: Group) => g.expenses.filter(toCheck)
 const bounced = (g: Group) => g.expenses.filter(e => e.rejected && ends(e).from === ME)
-/** Settlements that need you: confirm money you received, or deal with money that didn't arrive. */
+/** Settlements that need you: say whether money arrived, or deal with money that didn't. */
 function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean }) {
   const items = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup={showGroup} />),
     ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup={showGroup} />)])
@@ -661,8 +662,7 @@ function ThisMonth({ groups }: { groups: Group[] }) {
   )
 }
 
-/** Money waiting on you: payments to confirm, payments that bounced, and what you owe. */
-/** Money waiting on you: payments to confirm, payments that bounced, and who you owe, net across every group you share
+/** Money waiting on you: payments to check, payments that bounced, and who you owe, net across every group you share
  *  (if Bala owes you more elsewhere, you don't owe Bala). Tracking-only groups never ask for money. */
 function DashNeeds({ s }: { s: State }) {
   const groups = s.groups
@@ -672,11 +672,10 @@ function DashNeeds({ s }: { s: State }) {
     .map(f => {
       const live = f.spots.filter(x => !x.g.track)
       const n = live.reduce((a, x) => a + pairwise(x.g, ME, x.id), 0)
-      const waiting = live.some(x => x.g.expenses.some(e => e.pending && ends(e).from === ME && ends(e).to === x.id))
       const where = live.filter(x => pairwise(x.g, ME, x.id) !== 0)
-      return { f, n, waiting, where }
+      return { f, n, where }
     })
-    .filter(x => x.n < 0 && !x.waiting).sort((a, b) => a.n - b.n)
+    .filter(x => x.n < 0).sort((a, b) => a.n - b.n)
   return (
     <section className="d-needs" aria-labelledby="d-needs">
       <SectionHead title="Needs you" id="d-needs" />
@@ -724,7 +723,6 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
   const friends = friendsOf(s)
   const burst = useJustSettled(g.id, debts.length)
   const cover = useGroupImage(g.id, g.cover)
-  const waiting = (d: Transfer) => g.expenses.find(e => e.pending && ends(e).from === d.from && ends(e).to === d.to)
   const list = g.expenses.map((e, i) => ({ e, i })).sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
   const remindAll = `Tiny reminder from ${groupTitle(g)}:\n` + toMe.map(d => `${realName(s, g, d.from)}: ${inr(d.amount)} → ${shareLink(s, g, d)}`).join('\n')
   return (
@@ -754,7 +752,7 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
                 <span className="who">{who(g, d.to)}</span>
               </span>
               <span className={`money ${d.to === ME ? 'pos' : d.from === ME ? 'neg' : ''}`}>{inr(d.amount)}</span>
-              {!g.track && waiting(d) && d.to !== ME ? <small className="debt-wait">Paid {inr(waiting(d)!.amount)}. Waiting for {who(g, d.to)} to confirm.</small> : !g.track && (
+              {!g.track && (
                 <span className="debt-actions">
                   <button className="btn-sm" onClick={() => go(`/g/${g.id}/pay/${d.from}/${d.to}/${d.amount}`)}>Settle</button>
                   {d.to === ME && <RemindButton s={s} g={g} d={d} />}
@@ -808,7 +806,7 @@ function PushAsk({ g }: { g: Group }) {
   const mine = g.expenses.find(e => e.pending && ends(e).from === ME)
   return (
     <section className="confirm-card push-ask">
-      <p><strong>{mine ? `Get told when ${who(g, ends(mine).to)} confirms your payment?` : 'Get told when someone adds an expense or pays you?'}</strong>
+      <p><strong>{mine ? `Get told when ${who(g, ends(mine).to)} checks your payment?` : 'Get told when someone adds an expense or pays you?'}</strong>
         <small>Payments right away; everything else bundled, and never at night.</small></p>
       <span className="debt-actions">
         <button className="btn-sm" onClick={() => void enablePush(sync.push).catch(() => false).finally(() => setHide(true))}><Icon n="bell" size={16} />Turn on</button>
@@ -819,7 +817,9 @@ function PushAsk({ g }: { g: Group }) {
 }
 
 export function Settle({ s, g, from, to, amount, t = s.theme, onRecord }: {
-  s: State; g: Group; from: Id; to: Id; amount: number; t?: ThemeId; onRecord?: (paise: number, vpa: string) => void
+  s: State; g: Group; from: Id; to: Id; amount: number; t?: ThemeId
+  /** Returns the settlement to offer proof for (yours, to someone who'll check it); otherwise it moves on by itself. */
+  onRecord?: (paise: number, vpa: string) => { gid: Id; eid: Id } | void
 }) {
   const payee = realName(s, g, to)
   const [backup, setBackup] = useState(false)
@@ -830,6 +830,8 @@ export function Settle({ s, g, from, to, amount, t = s.theme, onRecord }: {
   const note = g.kind === 'direct' ? 'Plico settlement' : `${g.name} settlement`
   const link = isVpa(vpa) ? upiLink(vpa, payee, amount, note) : ''
   const qr = useQr(link)
+  const [proof, setProof] = useState<{ gid: Id; eid: Id; method: Method } | null>(null)
+  const record = (method: Method) => { const x = onRecord?.(amount, vpa); if (x) setProof({ ...x, method }) }
   return (
     <Screen t={t} back title="Settle up">
       <section className="pay" aria-label="Payment details">
@@ -849,13 +851,97 @@ export function Settle({ s, g, from, to, amount, t = s.theme, onRecord }: {
         <div className="confirm" role="group" aria-label="Payment result">
           <p>Did your {inr(amount)} payment to {payee} go through?</p>
           <div className="row">
-            <button className="btn primary" onClick={() => onRecord?.(amount, vpa)}>Yes, paid</button>
+            <button className="btn primary" onClick={() => record('upi')}>Yes, paid</button>
             <button className="btn secondary" onClick={() => setAsked(false)}>Not yet</button>
           </div>
         </div>
       ) : (
-        <button className="link center-link" onClick={() => onRecord?.(amount, vpa)}><Icon n="cash" size={18} />Paid in cash or another way</button>
+        <button className="link center-link" onClick={() => record('cash')}><Icon n="cash" size={18} />Paid in cash or another way</button>
       )}
+      {proof && <ProofSheet gid={proof.gid} eid={proof.eid} payee={payee} method={proof.method} onClose={goBack} />}
     </Screen>
   )
+}
+
+// ---------- proof: settle first, verify after ----------
+/** A small bottom sheet (centred on wide screens). Closes on the scrim, Escape, or its own buttons. */
+export function Sheet({ open, onClose, label, children }: { open: boolean; onClose: () => void; label: string; children: ReactNode }) {
+  const s = useStore()
+  useEffect(() => {
+    if (!open) return
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    addEventListener('keydown', k)
+    return () => removeEventListener('keydown', k)
+  }, [open, onClose])
+  return (
+    <AnimatePresence>
+      {open && (
+        <m.div key="sheet" className="sheet-scrim" data-theme={s.theme} style={themeVars(s.theme)} onClick={e => { if (e.target === e.currentTarget) onClose() }} {...FADE}>
+          <m.section className="sheet" role="dialog" aria-modal="true" aria-label={label} initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={SPRING}>{children}</m.section>
+        </m.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+type Method = 'upi' | 'cash' | 'bank'
+const METHODS: Record<Method, string> = { upi: 'UPI', cash: 'Cash', bank: 'Bank transfer' }
+
+/** After "I paid": optional proof. The payment is already recorded and counts; a receipt screenshot can verify it on the spot. */
+export function ProofSheet({ gid, eid, payee, method: m0 = 'upi', onClose }: { gid: Id; eid: Id; payee: string; method?: Method; onClose: () => void }) {
+  const [manual, setManual] = useState(false)
+  const [method, setMethod] = useState<Method>(m0)
+  const [utr, setUtr] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [done, setDone] = useState('')
+  const offline = !navigator.onLine
+  const send = async (body: () => Promise<Parameters<typeof addProof>[2]>) => {
+    setBusy(true); setErr('')
+    try {
+      const r = await addProof(gid, eid, await body())
+      const miss = missedChecks(r.proof)
+      setDone(r.verifiedBy ? 'Verified from your receipt.' : miss ? `Couldn’t match it (${miss}). ${payee} will be asked to check.` : `Saved. ${payee} will be asked to check.`)
+    } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <Sheet open onClose={onClose} label="Add proof">
+      <h2>{done ? 'Payment recorded' : 'Add proof (optional)'}</h2>
+      {done ? <p role="status">{done}</p>
+        : offline ? <p role="status">Your payment is saved and counts. You’re offline, so add proof later from the payment’s details.</p>
+        : <>
+          <p className="muted-p">Your payment already counts. Proof helps {payee} trust it at a glance.</p>
+          {!manual ? <>
+            <label className="btn primary" aria-busy={busy}>
+              <input type="file" accept="image/*" className="sr-only" disabled={busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void send(async () => ({ method: 'upi', image: await photoData(f) })) }} />
+              <Icon n="qr" />{busy ? 'Checking your receipt…' : 'Attach screenshot'}
+            </label>
+            <button className="btn secondary" disabled={busy} onClick={() => setManual(true)}>No screenshot</button>
+          </> : (
+            <form className="form" onSubmit={e => { e.preventDefault(); void send(async () => ({ method, utr: (method === 'upi' && utr) || undefined, note: note.trim() || undefined })) }}>
+              <div className="seg" role="radiogroup" aria-label="How you paid">
+                {(Object.keys(METHODS) as Method[]).map(k => <button type="button" key={k} role="radio" aria-checked={method === k} className={method === k ? 'on' : ''} onClick={() => setMethod(k)}>{method === k && <SegPill id="proof" />}{METHODS[k]}</button>)}
+              </div>
+              {method === 'upi' && <label className="field"><span>UPI transaction ID (optional)</span>
+                <input inputMode="numeric" placeholder="12 digits" maxLength={12} value={utr} onChange={e => setUtr(e.target.value.replace(/\D/g, ''))} /></label>}
+              <label className="field"><span>Note (optional)</span><input value={note} maxLength={120} onChange={e => setNote(e.target.value)} /></label>
+              <button className="btn primary" disabled={busy}>{busy ? 'Saving…' : 'Save proof'}</button>
+            </form>
+          )}
+          {err && <p className="error" role="alert">{err}</p>}
+        </>}
+      <button className="link center-link" onClick={onClose}>{done || offline ? 'Done' : 'Skip'}</button>
+    </Sheet>
+  )
+}
+
+/** A settlement's details: the payer can add proof while it isn't verified. */
+export function SettlementProof({ g, e }: { g: Group; e: Expense }) {
+  const { from, to } = ends(e)
+  const [adding, setAdding] = useState(false)
+  return <>
+    {from === ME && e.pending && !e.rejected && <button className="btn secondary" onClick={() => setAdding(true)}><Icon n="plus" />{e.proof ? 'Update proof' : 'Add proof'}</button>}
+    {adding && <ProofSheet gid={g.id} eid={e.id} payee={who(g, to)} onClose={() => setAdding(false)} />}
+  </>
 }

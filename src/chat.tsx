@@ -272,9 +272,9 @@ function SimpleCard({ c, set, close }: { c: Exclude<Card, { type: 'expense' }>; 
         if (![from, to].every(id => g.members.some(m => m.id === id))) return set({ err: 'People in that group changed. Ask again.' })
         const id = uid(); markAi(id)
         update(d => { d.groups.find(x => x.id === g.id)?.expenses.push({ id, title: 'Settlement', cat: 'check', date: today(), amount: c.amount, paid: { [from]: c.amount }, owed: { [to]: c.amount }, settle: true, ...(needsConfirm(g, to) && { pending: true }) }) })
-        set({ done: c.confirm ? 'Recorded. It counts once they confirm.' : 'Recorded' })
+        set({ done: c.confirm ? 'Recorded, and it counts. Add proof from the payment’s details if you like.' : 'Recorded' })
       } else if (c.type === 'confirm') {
-        if (!find(c.expenseId)?.pending) return set({ err: 'That payment isn’t waiting any more.' })
+        if (!find(c.expenseId)?.pending) return set({ err: 'That payment’s already been checked.' })
         markAi(c.expenseId)
         update(d => { const e = d.groups.find(x => x.id === g.id)?.expenses.find(x => x.id === c.expenseId); if (e) { delete e.pending; if (!yes) e.rejected = true } })
         set({ done: yes ? 'Confirmed' : 'Marked as not arrived' })

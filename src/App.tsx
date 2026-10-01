@@ -11,7 +11,7 @@ import { api, pull, readExpense, refreshUser, uploadImage, useSync, type Read } 
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who, SegPill } from './ui'
+import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
@@ -92,7 +92,9 @@ export default function App() {
     if (r[2] === 'pay' && r[3] && r[4] && +r[5] > 0) {
       const [from, to] = [r[3], r[4]]
       const record = (p: number) => {
-        edit(g.id, x => { x.expenses.push({ id: uid(), title: 'Settlement', cat: 'check', date: today(), amount: p, paid: { [from]: p }, owed: { [to]: p }, settle: true, ...(needsConfirm(x, to) && { pending: true }) }) })
+        const id = uid(), check = needsConfirm(g, to)
+        edit(g.id, x => { x.expenses.push({ id, title: 'Settlement', cat: 'check', date: today(), amount: p, paid: { [from]: p }, owed: { [to]: p }, settle: true, ...(check && { pending: true }) }) })
+        if (check && from === ME) return { gid: g.id, eid: id } // counts now; proof is optional, offered next
         back()
       }
       return <Settle s={s} g={g} from={from} to={to} amount={+r[5]} onRecord={record} />
@@ -240,6 +242,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
           <p className="pay-amt"><span className="money settled-ink">{inr(old.amount)}</span></p>
           <p className="pay-for">{new Date(old.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
         </section>
+        <SettlementProof g={g} e={old} />
         <button className="btn secondary" onClick={del}>Delete settlement</button>
         <button className="link center-link" onClick={() => go(`/g/${g.id}/e/${old.id}/history`)}>See history</button>
       </Screen>
