@@ -88,10 +88,12 @@ export const Token = z.string().check(z.regex(/^[a-f0-9]{32}$/))
 export const InviteCode = z.string().check(z.maxLength(40))
 
 // ---------- responses ----------
+/** How a settlement was verified: the payee said they got it (or recorded it), or every check on the payer's receipt passed. */
+export const VerifiedBy = z.enum(['payee', 'screenshot'])
 /** One version of an expense, as history and conflicts see it. Member ids are server ids. */
 export const Snap = z.object({
   title: z.string(), cat: z.string(), date: z.string(), amount: z.int(),
-  settle: z.optional(z.boolean()), pending: z.optional(z.boolean()), rejected: z.optional(z.boolean()),
+  settle: z.optional(z.boolean()), pending: z.optional(z.boolean()), rejected: z.optional(z.boolean()), verifiedBy: z.nullish(VerifiedBy),
   receipt: z.nullish(z.string()), repeatNext: z.nullish(z.string()),
   shares: z.array(z.object({ memberId: z.string(), paid: z.int(), owed: z.int() })),
 })
@@ -100,7 +102,6 @@ export const SnapFull = z.extend(Snap, {
   mode: z.nullish(z.enum(['equal', 'exact', 'percent', 'shares'])), input: z.nullish(z.record(z.string(), z.number())), repeatDay: z.nullish(z.int()),
 })
 /** How a settlement was paid and what its receipt showed. Settlements count when recorded; this only says how sure we are. */
-export const VerifiedBy = z.enum(['payee', 'screenshot'])
 export const Proof = z.object({
   method: z.enum(['upi', 'cash', 'bank']), note: z.optional(z.string()), file: z.optional(z.string()),
   /** What the AI read off the payer's UPI receipt. */
@@ -113,7 +114,7 @@ export const ProofIn = z.object({
   method: z.enum(['upi', 'cash', 'bank']), utr: z.optional(z.string().check(z.trim(), z.regex(/^\d{12}$/, 'A UPI transaction ID has 12 digits'))), note: z.optional(text(120)),
   image: z.optional(z.string().check(z.regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/), z.maxLength(7_000_000))),
 })
-export const ProofOut = z.object({ verifiedBy: z.nullable(VerifiedBy), proof: Proof })
+export const ProofOut = z.object({ verifiedBy: z.nullable(VerifiedBy), proof: Proof, version: z.optional(z.int()), pending: z.optional(z.boolean()) })
 export const ServerExpense = z.extend(Snap, {
   id: z.string(), mode: z.nullable(z.enum(['equal', 'exact', 'percent', 'shares'])), input: z.nullable(z.record(z.string(), z.number())),
   repeatDay: z.nullable(z.int()), version: z.int(), deletedAt: z.nullable(When), updatedAt: When,
@@ -130,7 +131,7 @@ export const ServerGroup = z.object({
   full: z.boolean(),
 })
 export const GroupsOut = z.object({ now: When, groups: z.array(ServerGroup) })
-export const SavedOut = z.object({ ok: z.literal(true), version: z.optional(z.int()), pending: z.optional(z.boolean()), ignored: z.optional(z.boolean()) })
+export const SavedOut = z.object({ ok: z.literal(true), version: z.optional(z.int()), pending: z.optional(z.boolean()), verifiedBy: z.nullish(VerifiedBy), ignored: z.optional(z.boolean()) })
 export const ConflictOut = z.object({
   code: z.literal('conflict'), error: z.string(), theirs: z.nullable(ServerExpense), by: z.string(), at: z.nullish(When), action: z.optional(z.string()),
 })

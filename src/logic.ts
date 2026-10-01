@@ -470,7 +470,7 @@ export function changes(a: Snap, b: Snap, name: (id: Id) => string): string[] {
   if (removed.length) out.push(`took ${list(removed.map(name))} out of the split`)
   if (!added.length && !removed.length && a.amount === b.amount && a.shares.some(x => x.owed !== (b.shares.find(y => y.memberId === x.memberId)?.owed ?? 0)))
     out.push('changed who owes how much')
-  if (a.settle && a.pending && !b.pending && !b.rejected) out.push('confirmed the payment arrived')
+  if (a.settle && a.pending && !b.pending && !b.rejected) out.push(b.verifiedBy === 'screenshot' ? 'verified it from the UPI receipt' : 'confirmed the payment arrived')
   if (!a.rejected && b.rejected) out.push('said the payment hasn’t arrived')
   if ((a.receipt ?? null) !== (b.receipt ?? null)) out.push(b.receipt ? (a.receipt ? 'replaced the receipt' : 'added a receipt') : 'removed the receipt')
   if (!!a.repeatNext !== !!b.repeatNext) out.push(b.repeatNext ? 'made it repeat monthly' : 'stopped it repeating')

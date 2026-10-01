@@ -164,7 +164,7 @@ api.get('/me/export', async c => {
     where: { members: { some: { userId: uid } } },
     select: { id: true, name: true, kind: true, theme: true, emoji: true, createdAt: true,
       members: { select: { id: true, name: true, upi: true, upi2: true, email: true, phone: true, userId: true } },
-      expenses: { select: { id: true, title: true, cat: true, date: true, amount: true, settle: true, pending: true, rejected: true, receipt: true, createdAt: true, version: true, deletedAt: true, shares: { select: { memberId: true, paid: true, owed: true } } } } },
+      expenses: { select: { id: true, title: true, cat: true, date: true, amount: true, settle: true, pending: true, rejected: true, verifiedBy: true, proof: true, receipt: true, createdAt: true, version: true, deletedAt: true, shares: { select: { memberId: true, paid: true, owed: true } } } } },
   })
   const history = await db.auditEvent.findMany({ where: { byId: uid }, orderBy: { at: 'asc' }, select: { groupId: true, seq: true, kind: true, expenseId: true, memberId: true, at: true, before: true, after: true, effect: true } })
   const data = { exportedAt: new Date(), note: 'Amounts are in paise (₹1 = 100 paise). Photos are listed by file name; download them from the app. "history" lists the changes you made.', user, signIns: accounts, sessions, groups, history }
@@ -186,8 +186,9 @@ const withShares = { shares: { select: { memberId: true, paid: true, owed: true 
 type Stored = Prisma.ExpenseGetPayload<{ include: typeof withShares }>
 const sortKeys = (o: unknown) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b))) : o ?? null)
 /** An expense as history and conflict checks see it (key order normalised: jsonb reorders keys). */
-const snapOf = (e: Omit<Stored, 'id' | 'groupId' | 'createdById' | 'createdAt' | 'updatedAt' | 'version' | 'deletedAt' | 'updatedById' | 'verifiedBy' | 'verifiedAt' | 'proof' | 'utr'>) => ({
+const snapOf = (e: Omit<Stored, 'id' | 'groupId' | 'createdById' | 'createdAt' | 'updatedAt' | 'version' | 'deletedAt' | 'updatedById' | 'verifiedBy' | 'verifiedAt' | 'proof' | 'utr'> & { verifiedBy?: string | null }) => ({
   title: e.title, cat: e.cat, date: e.date, amount: e.amount, mode: e.mode, input: sortKeys(e.input), settle: e.settle, pending: e.pending, rejected: e.rejected,
+  ...(e.verifiedBy && { verifiedBy: e.verifiedBy }), // only when set, so entries from before verification look as they did
   receipt: e.receipt, repeatNext: e.repeatNext, repeatDay: e.repeatDay,
   shares: [...e.shares].filter(x => x.paid || x.owed).sort((a, b) => a.memberId.localeCompare(b.memberId)).map(x => ({ memberId: x.memberId, paid: x.paid, owed: x.owed })),
 })
@@ -338,7 +339,7 @@ api.post('/groups/:gid/leave', async c => {
   if (!me) return c.json({ ok: true })
   const g = await db.group.findUniqueOrThrow({ where: { id: gid }, include: { members: { where: { userId: { not: null } }, orderBy: { createdAt: 'asc' } } } })
   if (g.kind === 'direct') return c.json({ error: 'A balance with a friend can’t be left' }, 400)
-  const shares = await db.expenseShare.findMany({ where: { memberId: me.id, expense: { deletedAt: null, pending: false, rejected: false } }, select: { paid: true, owed: true } })
+  const shares = await db.expenseShare.findMany({ where: { memberId: me.id, expense: { deletedAt: null, rejected: false } }, select: { paid: true, owed: true } })
   const balance = shares.reduce((a, s) => a + s.paid - s.owed, 0)
   if (balance) return c.json({ error: balance > 0 ? 'People still owe you here. Settle up first.' : 'You still owe money here. Settle up first.', balance }, 409)
   const heir = g.members.find(m => m.userId !== uid)
@@ -504,24 +505,29 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   const existing = await db.expense.findUnique({ where: { id: eid }, include: withShares })
   if (existing && existing.groupId !== gid) return c.json(notFound, 404)
 
-  // Only the payee can confirm a settlement (or nobody can, when the payee is a guest). Anyone else's
-  // record waits for them; an already confirmed one stays confirmed while its amount is unchanged.
+  // A settlement counts as soon as it's recorded; `pending` only means not verified yet. Only the payee can verify it
+  // (or nobody can, when the payee is a guest: then it's verified at once). Anyone else's record waits for them; a
+  // verified one stays verified while its amount is unchanged.
   const payee = b.settle ? all.find(m => m.id === Object.keys(b.owed)[0]) : undefined
   const canConfirm = !payee?.userId || payee.userId === uid
   const pending = !!b.settle && (canConfirm ? !!b.pending : !(existing && !existing.pending && existing.amount === b.amount))
-  // Only the payee can say it hasn't arrived.
+  // Only the payee can say it hasn't arrived: the one thing that stops a settlement counting.
   const rejected = !!b.settle && (payee?.userId === uid ? !!b.rejected : !!existing?.rejected)
+  // Verified by the payee, unless it already was (by them or by the payer's receipt) at this amount.
+  const kept = existing?.verifiedBy && !existing.pending && !existing.rejected && existing.amount === b.amount
+  const verifiedBy = b.settle && !pending && !rejected ? (kept ? existing.verifiedBy : 'payee') : null
+  const verifiedAt = verifiedBy ? (kept ? existing.verifiedAt : new Date()) : null
 
   const ids = new Set([...Object.keys(b.paid), ...Object.keys(b.owed)])
   const shares = [...ids].map(memberId => ({ memberId, paid: b.paid[memberId] ?? 0, owed: b.owed[memberId] ?? 0 }))
   const data = {
     title: b.title, cat: b.cat, date: b.date, amount: b.amount, mode: b.mode ?? null, input: b.input ?? Prisma.DbNull,
-    settle: !!b.settle, pending: pending && !rejected, rejected, receipt: b.receipt ?? null, repeatNext: b.repeat?.next ?? null, repeatDay: b.repeat?.day ?? null,
+    settle: !!b.settle, pending: pending && !rejected, rejected, verifiedBy, verifiedAt, receipt: b.receipt ?? null, repeatNext: b.repeat?.next ?? null, repeatDay: b.repeat?.day ?? null,
   }
   const after = snapOf({ ...data, input: b.input ?? null, shares })
   if (existing) {
     // Already exactly this (a retry whose first response got lost, or the same edit twice): nothing to do.
-    if (!existing.deletedAt && same(snapOf(existing), after)) return c.json({ ok: true, version: existing.version, pending: existing.pending })
+    if (!existing.deletedAt && same(snapOf(existing), after)) return c.json({ ok: true, version: existing.version, pending: existing.pending, verifiedBy: existing.verifiedBy })
     // Stale edit: started from an older version. A deleted expense only comes back from its current version (a deliberate restore).
     if (existing.deletedAt ? b.base !== existing.version : b.base !== undefined && b.base !== existing.version) return conflict(c, eid)
   }
@@ -549,7 +555,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
     if (!raced) throw e
     // Lost a race: identical content is fine (two phones making the same monthly repeat), anything else is a conflict.
     const now = await db.expense.findUnique({ where: { id: eid }, include: withShares })
-    if (now && !now.deletedAt && same(snapOf(now), after)) return c.json({ ok: true, version: now.version, pending: now.pending })
+    if (now && !now.deletedAt && same(snapOf(now), after)) return c.json({ ok: true, version: now.version, pending: now.pending, verifiedBy: now.verifiedBy })
     return conflict(c, eid)
   }
   if (rejected && !existing?.rejected) {
@@ -564,7 +570,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
     const by = payer?.userId === uid ? c.get('userName') : (payer?.name ?? c.get('userName'))
     void mail.paid(payee.user.email, by, g?.name ?? 'your group', b.amount).catch(console.error)
   }
-  return c.json({ ok: true, version, pending })
+  return c.json({ ok: true, version, pending: data.pending, verifiedBy })
 })
 
 // Soft delete: the expense leaves balances but stays in history, can be restored, and reaches other phones as a tombstone.
@@ -864,7 +870,7 @@ api.put('/me/notify', async c => {
 /** Each member's balance in a group, in paise (what balances() in logic.ts computes, on the server). */
 const nets = async (gid: string) => new Map((await db.$queryRaw<{ memberId: string; net: number }[]>`
   SELECT s."memberId", SUM(s."paid" - s."owed")::int AS net FROM "splittr"."expense_share" s JOIN "splittr"."expense" e ON e."id" = s."expenseId"
-  WHERE e."groupId" = ${gid} AND e."deletedAt" IS NULL AND NOT e."pending" AND NOT e."rejected" GROUP BY s."memberId"`).map(r => [r.memberId, r.net]))
+  WHERE e."groupId" = ${gid} AND e."deletedAt" IS NULL AND NOT e."rejected" GROUP BY s."memberId"`).map(r => [r.memberId, r.net]))
 
 const DAY = 864e5
 /** Remind someone who owes you. Once per person per group a day, and three a week to anyone in a group. */
