@@ -22,6 +22,7 @@
 		6CE756FCF464A0B6B55EC7AA /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 0E01AE26A5F819E8446D8DAD /* PrivacyInfo.xcprivacy */; };
 		70679C59E005A9755A7E37BC /* PlicoWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 225C60FF9E09532F7FEC9CDA /* PlicoWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8E9F1153F78A8A37FD4BCD3E /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DC9BDE25B3DD8C0CEF3ADB96 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		9582B6852FE993A70072D4E8 /* ContactPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6842FE993A50072D4E8 /* ContactPicker.swift */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		9807A9B40EAEA08B88373C43 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00C6454B6C852503F02C66F /* ShareViewController.swift */; };
 		A049032E2641B4E0F866684F /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 74220D69805E7C2DAEE8C830 /* Foundation.framework */; };
@@ -79,6 +80,7 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		664D333984EBBA36352A595C /* App.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		74220D69805E7C2DAEE8C830 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		9582B6842FE993A50072D4E8 /* ContactPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactPicker.swift; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		9D031CFFE88C44D384142B9B /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/WidgetKit.framework; sourceTree = DEVELOPER_DIR; };
@@ -158,6 +160,7 @@
 			isa = PBXGroup;
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
+				9582B6842FE993A50072D4E8 /* ContactPicker.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -341,6 +344,7 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+				9582B6852FE993A70072D4E8 /* ContactPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
