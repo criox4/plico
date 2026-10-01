@@ -7,11 +7,11 @@ import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, pars
 import { getState, update, useStore, type State } from './store'
 import { API } from './auth-client'
 import { FriendCardOut } from './schema'
-import { api, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
+import { addProof, api, photoData, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, go, useQr, useRoute, wa, who, SegPill } from './ui'
+import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
@@ -29,7 +29,19 @@ const num = (v?: string) => parseFloat((v ?? '').replace(/,/g, '')) || 0
 const Gallery = import.meta.env.DEV ? lazy(() => import('./Gallery')) : null
 const OgImage = import.meta.env.DEV ? lazy(() => import('./OgImage')) : null
 
+/** A tapped push opens where it points; one about a group also asks about payments to you there (a payment's own
+ *  page, #/g/<id>/e/<id>, has its own Got it / Not received). */
+const openPush = (url: string) => {
+  go(url)
+  const gid = /^#\/g\/([^/]+)$/.exec(url)?.[1]
+  if (gid) askPaid(gid)
+}
+
 export default function App() {
+  return <><Page /><PaidCheck /></>
+}
+
+function Page() {
   const s = useStore()
   const r = useRoute()
   const sync = useSync()
@@ -42,7 +54,7 @@ export default function App() {
     addEventListener('keydown', k)
     return () => removeEventListener('keydown', k)
   }, [sync.authed])
-  useEffect(() => { if (sync.authed && !sync.booting) void resumePush(sync.push, go) }, [sync.authed, sync.booting, sync.push])
+  useEffect(() => { if (sync.authed && !sync.booting) void resumePush(sync.push, openPush) }, [sync.authed, sync.booting, sync.push])
   useEffect(() => {
     ensureFonts([s.theme, ...s.groups.map(g => g.theme)])
     document.body.style.background = theme(s.theme).c.bg
@@ -92,7 +104,9 @@ export default function App() {
     if (r[2] === 'pay' && r[3] && r[4] && +r[5] > 0) {
       const [from, to] = [r[3], r[4]]
       const record = (p: number) => {
-        edit(g.id, x => { x.expenses.push({ id: uid(), title: 'Settlement', cat: 'check', date: today(), amount: p, paid: { [from]: p }, owed: { [to]: p }, settle: true, ...(needsConfirm(x, to) && { pending: true }) }) })
+        const id = uid(), check = needsConfirm(g, to)
+        edit(g.id, x => { x.expenses.push({ id, title: 'Settlement', cat: 'check', date: today(), amount: p, paid: { [from]: p }, owed: { [to]: p }, settle: true, ...(check && { pending: true }) }) })
+        if (check && from === ME) return { gid: g.id, eid: id } // counts now; proof is optional, offered next
         back()
       }
       return <Settle s={s} g={g} from={from} to={to} amount={+r[5]} onRecord={record} />
@@ -215,10 +229,16 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
     setPayer(ME); setMulti(false); setPaidIn({}); setMode('equal'); setInp(flags(g)); setItems(null)
     if (!real) setReceipt(undefined)
   }, [targetKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A screenshot shared in right after you paid someone is most likely that payment's receipt: ask before reading it as a bill.
+  const [proofAsk, setProofAsk] = useState<{ g: Group; e: Expense; image: Blob } | null>(null)
   useEffect(() => {
     if (!shared) return
     void takeShared().then(p => {
-      if (p?.image) scan(p.image)
+      const since = new Date(Date.now() - 3 * 864e5).toLocaleDateString('en-CA')
+      const own = p?.image && s.groups.flatMap(g => g.expenses.filter(e => e.settle && e.pending && !e.rejected && e.paid[ME] && e.date >= since).map(e => ({ g, e })))
+        .sort((a, b) => b.e.date.localeCompare(a.e.date))[0]
+      if (own) setProofAsk({ ...own, image: p.image! })
+      else if (p?.image) scan(p.image)
       else if (p?.text) { setQuick(p.text.slice(0, 200)); void typeIt(p.text.slice(0, 200)) }
     })
   }, [shared]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -240,6 +260,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
           <p className="pay-amt"><span className="money settled-ink">{inr(old.amount)}</span></p>
           <p className="pay-for">{new Date(old.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
         </section>
+        <SettlementProof g={g} e={old} />
         <button className="btn secondary" onClick={del}>Delete settlement</button>
         <button className="link center-link" onClick={() => go(`/g/${g.id}/e/${old.id}/history`)}>See history</button>
       </Screen>
@@ -282,6 +303,26 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
       if (!r.amount && !r.items.length) setCapErr('Couldn’t find an amount in that photo. Type it in instead.')
       fromRead(r)
     } catch (e) { setCapErr((e as Error).message) } finally { setReading(false) }
+  }
+  if (proofAsk) {
+    const { g: pg, e: pe, image } = proofAsk
+    const asProof = async () => {
+      setReading(true); setCapErr('')
+      try { await addProof(pg.id, pe.id, { method: 'upi', image: await photoData(image) }); location.replace(`#/g/${pg.id}/e/${pe.id}`) } // its details show how the check went
+      catch (x) { setCapErr((x as Error).message) } finally { setReading(false) }
+    }
+    return (
+      <Screen t={s.theme} back title="Shared screenshot">
+        <div className="confirm" role="group" aria-label="Use as payment proof">
+          <p>Use this as proof for {inr(pe.amount)} to {who(pg, Object.keys(pe.owed)[0])}?</p>
+          {capErr && <p className="error" role="alert">{capErr}</p>}
+          <div className="row">
+            <button className="btn primary" disabled={reading} onClick={() => void asProof()}>{reading ? 'Checking…' : 'Yes'}</button>
+            <button className="btn secondary" disabled={reading} onClick={() => { setProofAsk(null); setCapErr(''); scan(image) }}>No, add an expense</button>
+          </div>
+        </div>
+      </Screen>
+    )
   }
   const useItems = () => {
     if (!items) return

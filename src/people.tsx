@@ -328,17 +328,22 @@ export function FriendSettle({ s, k }: { s: State; k: string }) {
   const iPay = n < 0
   const record = (paise: number) => {
     let left = paise
+    const mine: { gid: Id; eid: Id }[] = [] // your payments the payee will be asked to check
     update(d => {
       const all = f.spots.map(x => ({ g: d.groups.find(y => y.id === x.g.id)!, id: x.id })).filter(x => x.g).map(x => ({ ...x, n: pairwise(x.g, ME, x.id) }))
       const spots = all.filter(x => (iPay ? x.n < 0 : x.n > 0)).sort((a, b) => Math.abs(b.n) - Math.abs(a.n))
-      const pay = (g: Group, id: Id, amt: number) => g.expenses.push({ id: uid(), title: 'Settlement', cat: 'check', date: today(), amount: amt,
-        paid: { [iPay ? ME : id]: amt }, owed: { [iPay ? id : ME]: amt }, settle: true, ...(iPay && needsConfirm(g, id) && { pending: true }) })
-      // They're paying you the net: groups where you owe them are cleared against it, so every group ends square.
-      // Those offsets only reduce what you collect, and you're recording the payment yourself, so nothing waits on anyone.
-      // (When you pay the net, your payment waits for their confirmation, so no offsets are recorded ahead of it.)
-      if (!iPay && paise >= Math.abs(n)) for (const x of all.filter(x => x.n < 0)) {
+      const pay = (g: Group, id: Id, amt: number) => {
+        const eid = uid(), check = iPay && needsConfirm(g, id)
+        g.expenses.push({ id: eid, title: 'Settlement', cat: 'check', date: today(), amount: amt,
+          paid: { [iPay ? ME : id]: amt }, owed: { [iPay ? id : ME]: amt }, settle: true, ...(check && { pending: true }) })
+        if (check) mine.push({ gid: g.id, eid })
+      }
+      // The net is paid in full: groups where the balance runs the other way are cleared against it, so every group
+      // ends square. Settlements count as soon as they're recorded, so this holds whichever of you pays.
+      if (paise >= Math.abs(n)) for (const x of all.filter(x => (iPay ? x.n > 0 : x.n < 0))) {
         const amt = Math.abs(x.n)
-        x.g.expenses.push({ id: uid(), title: 'Settlement (netted across groups)', cat: 'check', date: today(), amount: amt, paid: { [ME]: amt }, owed: { [x.id]: amt }, settle: true })
+        x.g.expenses.push({ id: uid(), title: 'Settlement (netted across groups)', cat: 'check', date: today(), amount: amt,
+          paid: { [iPay ? x.id : ME]: amt }, owed: { [iPay ? ME : x.id]: amt }, settle: true })
         left += amt
       }
       for (const x of spots) {
@@ -349,6 +354,9 @@ export function FriendSettle({ s, k }: { s: State; k: string }) {
       const h = d.groups.find(y => y.id === home.g.id)
       if (left > 0 && h) pay(h, home.id, left)
     })
+    // ponytail: proof belongs to one settlement; a payment spread over several groups skips the sheet (no single amount
+    // would match the receipt). Proof per group can still be added from each payment's details.
+    if (mine.length === 1) return mine[0]
     history.length > 1 ? history.back() : go('/friends')
   }
   return <Settle s={s} g={home.g} from={iPay ? ME : home.id} to={iPay ? home.id : ME} amount={Math.abs(n)} onRecord={record} />

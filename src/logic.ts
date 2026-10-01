@@ -1,4 +1,4 @@
-import type { Snap } from './schema'
+import type { Proof, Snap } from './schema'
 // All money is integer paise. Never floats past the input box.
 import type { ThemeId as Theme } from './themes'
 export type { Theme }
@@ -32,9 +32,12 @@ export type Expense = {
   pending?: true // settlement not verified yet (payee or screenshot); it counts straight away, settling first like Splitwise
   rejected?: true // the payee says it hasn't arrived; doesn't move balances
   verifiedBy?: 'payee' | 'screenshot' // how a settlement was verified
+  proof?: Proof // how the payer says they paid, and what their receipt showed
+  utr?: string // the UPI transaction ID, typed by the payer or read off their receipt
   repeat?: { next: string; day: number } // monthly
   v?: number // the server version this copy is; edits send it so the server can spot stale ones
 }
+export type { Proof }
 export type Group = {
   id: Id
   name: string
@@ -115,6 +118,17 @@ export function pairwise(g: Group, a: Id, b: Id): number {
 
 /** A settlement asks the payee to verify it unless the payee recorded it or can't (a guest without an account). It counts either way. */
 export const needsConfirm = (g: Group, to: Id) => to !== ME && !!g.members.find(m => m.id === to)?.joined
+
+/** A settlement's quiet status: how it was verified, or that it hasn't been yet ('' for plain or rejected ones). */
+export const verifyLabel = (e: Expense) =>
+  e.rejected ? '' : e.verifiedBy === 'screenshot' ? 'Verified · screenshot' : e.verifiedBy ? 'Verified' : e.pending ? 'Not verified' : ''
+const CHECKS = { amount: 'amount', payee: 'recipient', time: 'time', fresh: 'used before' } as const
+/** The receipt checks that failed, in words: "amount / time". '' when there were none or all passed. */
+export const missedChecks = (p?: Proof) => (p?.checks ? (Object.keys(CHECKS) as (keyof typeof CHECKS)[]).filter(k => !p.checks![k]).map(k => CHECKS[k]).join(' / ') : '')
+/** A UPI transaction ID in full for the two people in the payment, the last 4 digits for everyone else. */
+export const showUtr = (utr: string, full: boolean) => (full ? utr : `•••• ${utr.slice(-4)}`)
+/** A settlement paid to me that I haven't said yes or no to. */
+export const toCheck = (e: Expense) => !!(e.settle && e.pending && !e.rejected && e.owed[ME] && !e.paid[ME])
 
 /** The fewest payments that settle everyone. The minimum is (people with a balance) − (the most groups they can be
  * split into that each sum to zero), and each such group settles in (its size − 1) payments. Finding that split is
