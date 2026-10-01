@@ -8,6 +8,7 @@ import { api, pull, syncNow } from './sync'
 import { Avatar, Denomination, LedgerRow, Plico, Screen, SectionHead, Settle, TONES, count, go, groupTitle, wa, SegPill } from './ui'
 export { groupTitle }
 import { Icon } from './icons'
+import { canPickContact, pickContact } from './contacts'
 
 export const emailOk = (v = '') => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
 /** "riya.sen@x.com" → "Riya Sen": a starting point for the name, which they can change. */
@@ -58,6 +59,20 @@ export function PeoplePicker({ s, value, onChange, taken = [], label = 'Add peop
   const add = (p: Person) => { onChange([...value, p]); setQ(''); setName(null) }
   const pick = (f: Friend) => add({ name: f.name, email: f.email, phone: f.phone, userId: f.uid })
   const addNew = () => { if (newName) add({ name: newName, ...(email ? { email } : { phone }) }) }
+  // Before typing: the people you split with most recently, one tap each.
+  const lastIn = (f: Friend) => f.spots.reduce((a, x) => x.g.expenses.reduce((b, e) => (e.date > b ? e.date : b), a), '')
+  const recent = lc ? [] : friends.filter(f => !isUsed(f)).map(f => ({ f, at: lastIn(f) })).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8).map(x => x.f)
+  const [pickErr, setPickErr] = useState('')
+  // The system's contact picker: only the one contact they choose is read, never the address book. Prefilled, they confirm it.
+  const fromContacts = async () => {
+    setPickErr('')
+    try {
+      const c = await pickContact()
+      if (!c) return
+      if (!c.phone && !c.email) return setPickErr(`${c.name ?? 'That contact'} has no phone number or email to invite them by.`)
+      setQ(c.phone ?? c.email!); setName(c.name ?? null)
+    } catch { setPickErr('Couldn’t open your contacts. Type their number instead.') }
+  }
   return (
     <div className="picker">
       {value.length > 0 && (
@@ -75,6 +90,13 @@ export function PeoplePicker({ s, value, onChange, taken = [], label = 'Add peop
         <input value={q} onChange={e => { setQ(e.target.value); setName(null) }} placeholder="Name, email or phone" autoCapitalize="none" autoComplete="off" spellCheck={false}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (fresh) addNew(); else if (hits[0]) pick(hits[0]) } }} />
       </label>
+      {recent.length > 0 && (
+        <div className="chips" aria-label="People you split with lately">
+          {recent.map(f => <button type="button" key={f.key} className="chip person-chip" onClick={() => pick(f)}><Avatar name={f.name} image={f.image} size={24} />{f.name.split(' ')[0]}</button>)}
+        </div>
+      )}
+      {!lc && canPickContact() && <button type="button" className="btn secondary" onClick={() => void fromContacts()}><Icon n="phone" size={18} />From contacts</button>}
+      {pickErr && <small className="error" role="alert">{pickErr}</small>}
       {hits.length > 0 && (
         <ul className="suggest">
           {hits.map(f => (
