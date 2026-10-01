@@ -88,6 +88,7 @@ export default function App() {
     if (r[2] === 'e' && r[3] && r[4] === 'history') return <ExpenseHistory s={s} g={g} eid={r[3]} />
     if (r[2] === 'e' && r[3]) return <ExpenseForm key={r[3]} s={s} gid={g.id} eid={r[3]} />
     if (r[2] === 'edit') return <GroupSettings s={s} g={g} />
+    if (r[2] === 'invite' && g.kind !== 'direct') return <GetEveryoneIn s={s} g={g} />
     if (r[2] === 'pay' && r[3] && r[4] && +r[5] > 0) {
       const [from, to] = [r[3], r[4]]
       const record = (p: number) => {
@@ -138,7 +139,7 @@ function NewGroup({ s, preset }: { s: State; preset?: string }) {
         members: [{ id: ME, name: 'Me' }, ...people.map(p => ({ id: uid(), name: p.name, email: p.email, phone: p.phone }))], expenses: [],
       })
     })
-    location.replace('#/g/' + id)
+    location.replace(`#/g/${id}/invite`) // invite first: a group is only useful once everyone's in
   }
   return (
     <Screen t={s.theme} back={preset ? true : () => setKind(null)} title={`New ${KINDS[kind].label.toLowerCase()} group`}>
@@ -604,13 +605,6 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
   const used = new Set(g.expenses.flatMap(e => [...Object.keys(e.paid), ...Object.keys(e.owed)]))
   const set = (fn: (x: Group) => void) => edit(g.id, fn)
   const direct = g.kind === 'direct'
-  const [adding, setAdding] = useState<Pick[]>([])
-  const [added, setAdded] = useState<Id[]>([]) // just added by phone: their WhatsApp invites, right here
-  const addAll = () => {
-    const ms = adding.map(p => ({ id: uid(), name: p.name, email: p.email, phone: p.phone }))
-    set(x => { x.members.push(...ms) }); setAdding([])
-    setAdded(ms.filter(m => m.phone && !m.email).map(m => m.id))
-  }
   return (
     <Screen t={s.theme} back title={direct ? `You and ${groupTitle(g)}` : 'Group settings'}>
       <div className="form">
@@ -631,9 +625,7 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
           <ul className="people">
             {g.members.map(m => <Person key={m.id} s={s} g={g} m={m} used={used.has(m.id)} />)}
           </ul>
-          <PeoplePicker s={s} value={adding} onChange={setAdding} taken={g.members.flatMap(m => [m.email ?? '', m.phone ?? '', m.uid ?? '']).filter(Boolean)} />
-          {adding.length > 0 && <button type="button" className="btn primary" onClick={addAll}>Add {count(adding.length, 'person', 'people')} to {g.name}</button>}
-          {g.members.filter(m => added.includes(m.id)).map(m => <WhatsAppInvite key={m.id} g={g} m={m} />)}
+          <AddPeople s={s} g={g} />
           <Invite g={g} />
         </>}
         <button type="button" className="link center-link" onClick={() => go(`/g/${g.id}/audit`)}><Icon n="log" size={18} />Audit log</button>
@@ -650,6 +642,43 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
 }
 
 // ---------- people + invites ----------
+/** Add people to a group; anyone added by phone alone gets their WhatsApp invite right here. */
+function AddPeople({ s, g, label }: { s: State; g: Group; label?: string }) {
+  const [adding, setAdding] = useState<Pick[]>([])
+  const [added, setAdded] = useState<Id[]>([])
+  const addAll = () => {
+    const ms = adding.map(p => ({ id: uid(), name: p.name, email: p.email, phone: p.phone }))
+    edit(g.id, x => { x.members.push(...ms) }); setAdding([])
+    setAdded(ms.filter(m => m.phone && !m.email).map(m => m.id))
+  }
+  return <>
+    <PeoplePicker s={s} value={adding} onChange={setAdding} label={label} taken={g.members.flatMap(m => [m.email ?? '', m.phone ?? '', m.uid ?? '']).filter(Boolean)} />
+    {adding.length > 0 && <button type="button" className="btn primary" onClick={addAll}>Add {count(adding.length, 'person', 'people')} to {g.name}</button>}
+    {g.members.filter(m => added.includes(m.id)).map(m => <WhatsAppInvite key={m.id} g={g} m={m} />)}
+  </>
+}
+
+/** Right after making a group: get everyone in before the first expense. The group's own link, dropped in the
+ * WhatsApp group you already have, is the quickest way; personal invites for anyone added by phone; or add more. */
+function GetEveryoneIn({ s, g }: { s: State; g: Group }) {
+  const done = () => location.replace('#/g/' + g.id)
+  const phones = g.members.filter(m => m.id !== ME && !m.joined && m.phone && !m.email)
+  return (
+    <Screen t={g.theme} title="Get everyone in" action={<button type="button" className="link" onClick={done}>Skip</button>}>
+      <div className="form">
+        <p className="muted-p">Everyone in {g.name} sees who paid what. The quickest way in: share the link in the WhatsApp group you already have. Friends open it, sign in, and pick which name is theirs.</p>
+        <Invite g={g} lead />
+        {phones.length > 0 && <>
+          <h2 className="form-h">Added by phone</h2>
+          {phones.map(m => <WhatsAppInvite key={m.id} g={g} m={m} />)}
+        </>}
+        <h2 className="form-h">Or add them yourself</h2>
+        <AddPeople s={s} g={g} label="Name, email or phone" />
+        <button type="button" className="btn secondary" onClick={done}>Done</button>
+      </div>
+    </Screen>
+  )
+}
 type M = Group['members'][number]
 const setMember = (g: Group, id: Id, fn: (m: M) => void) => edit(g.id, x => { const m = x.members.find(y => y.id === id); if (m) fn(m) })
 
@@ -721,18 +750,26 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
 }
 
 // ---------- group invite link ----------
-function Invite({ g }: { g: Group }) {
+function Invite({ g, lead }: { g: Group; lead?: boolean }) {
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')
-  useEffect(() => { api<{ code: string }>(`/api/groups/${g.id}/invite`).then(r => setCode(r.code), () => setErr('The invite link appears once this group has synced. Check your connection.')) }, [g.id])
+  useEffect(() => {
+    // A group made a moment ago may still be on its way to the server: a few tries before giving up.
+    let live = true
+    const get = (n: number): void => void api<{ code: string }>(`/api/groups/${g.id}/invite`).then(r => { if (live) setCode(r.code) },
+      () => { if (live && n) setTimeout(() => get(n - 1), 1500); else if (live) setErr('The invite link appears once this group has synced. Check your connection.') })
+    get(3)
+    return () => { live = false }
+  }, [g.id])
   const link = code ? `${PUBLIC}/#/join/${code}` : ''
   const qr = useQr(link)
   return <>
-    <h2 className="form-h">Invite people</h2>
+    {!lead && <h2 className="form-h">Invite people</h2>}
     {link ? <>
-      <p className="muted-p">Friends open this link, sign in, and pick which name in the group is theirs.</p>
-      {qr && <div className="qr-plate qr-sm"><img src={qr} alt={`QR code to join ${g.name}`} /></div>}
-      <a className="btn secondary" href={wa(`Join “${g.name}” on Plico so we can split and settle up: ${link}`)} target="_blank" rel="noopener"><Icon n="send" />Share invite on WhatsApp</a>
+      {!lead && <p className="muted-p">Friends open this link, sign in, and pick which name in the group is theirs.</p>}
+      {qr && !lead && <div className="qr-plate qr-sm"><img src={qr} alt={`QR code to join ${g.name}`} /></div>}
+      <a className={`btn ${lead ? 'primary' : 'secondary'}`} href={wa(`Join “${g.name}” on Plico so we can split and settle up: ${link}`)} target="_blank" rel="noopener"><Icon n="send" />{lead ? 'Share link in your WhatsApp group' : 'Share invite on WhatsApp'}</a>
+      {qr && lead && <div className="qr-plate qr-sm"><img src={qr} alt={`QR code to join ${g.name}`} /></div>}
       <button type="button" className="link center-link" onClick={() => navigator.clipboard?.writeText(link)}><Icon n="copy" size={18} />Copy invite link</button>
       <button type="button" className="link center-link" onClick={() => {
         if (confirm('Make a new invite link? The old one stops working, so anyone who has it can’t join with it.'))
