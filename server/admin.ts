@@ -72,7 +72,7 @@ let cache: { at: number; html: string } | undefined
 async function dashboard() {
   if (cache && Date.now() - cache.at < 60_000) return cache.html
   const now = Date.now(), ago = (d: number) => new Date(now - d * 86400_000)
-  const [users, new7, new30, active, groups, kinds, groups7, guests, spend, settled, pending, aiActs, aiActs7, invites, devices, waiting, sent24, ai] = await Promise.all([
+  const [users, new7, new30, active, groups, kinds, groups7, guests, spend, settled, pending, byShot, aiActs, aiActs7, invites, devices, waiting, sent24, ai] = await Promise.all([
     db.user.count(),
     db.user.count({ where: { createdAt: { gte: ago(7) } } }),
     db.user.count({ where: { createdAt: { gte: ago(30) } } }),
@@ -82,8 +82,10 @@ async function dashboard() {
     db.group.count({ where: { createdAt: { gte: ago(7) } } }),
     db.member.count({ where: { userId: null } }),
     db.expense.aggregate({ where: { deletedAt: null, settle: false }, _count: true, _sum: { amount: true } }),
-    db.expense.aggregate({ where: { deletedAt: null, settle: true, pending: false, rejected: false }, _count: true, _sum: { amount: true } }),
-    db.expense.count({ where: { deletedAt: null, settle: true, pending: true } }),
+    // Settlements count as soon as they're recorded (verified or not); only one the payee says never arrived doesn't.
+    db.expense.aggregate({ where: { deletedAt: null, settle: true, rejected: false }, _count: true, _sum: { amount: true } }),
+    db.expense.count({ where: { deletedAt: null, settle: true, pending: true, rejected: false } }),
+    db.expense.count({ where: { deletedAt: null, settle: true, verifiedBy: 'screenshot' } }),
     db.auditEvent.count({ where: { via: 'ai' } }),
     db.auditEvent.count({ where: { via: 'ai', at: { gte: ago(7) } } }),
     db.emailLog.count({ where: { at: { gte: ago(1) } } }),
@@ -98,7 +100,7 @@ async function dashboard() {
     <p class="muted">As of ${new Date(now).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST · refreshes at most once a minute</p>
     ${card('People', [['Accounts', users], ['New, 7 days', new7], ['New, 30 days', new30], ['Active, 7 days', active], ['Guests (no account)', guests]])}
     ${card('Groups', [['Groups', groups], ['New, 7 days', groups7], ...kinds.sort((a, b) => b._count - a._count).map(k => [cap(k.kind), k._count] as Row)])}
-    ${card('Money', [['Expenses', spend._count], ['Spent, total', inr(spend._sum.amount ?? 0)], ['Settlements', settled._count], ['Settled, total', inr(settled._sum.amount ?? 0)], ['Waiting for payee', pending]])}
+    ${card('Money', [['Expenses', spend._count], ['Spent, total', inr(spend._sum.amount ?? 0)], ['Settlements', settled._count], ['Settled, total', inr(settled._sum.amount ?? 0)], ['Not verified yet', pending], ['Verified by screenshot', byShot]])}
     ${card('AI (OpenRouter)', ai ? [['Today', usd(ai.usage_daily)], ['This week', usd(ai.usage_weekly)], ['This month', usd(ai.usage_monthly)], ['All time', usd(ai.usage)], ['Limit left', ai.limit == null ? 'no limit' : usd(ai.limit_remaining)], ['Ask Plico changes, all / 7 days', `${aiActs} / ${aiActs7}`]]
       : [['Spend', 'unavailable'], ['Ask Plico changes, all / 7 days', `${aiActs} / ${aiActs7}`]])}
     ${card('Push and email', [...devices.map(d => [`Devices, ${d.platform}`, d._count] as Row), ['Waiting to send', waiting], ['Sent, 24 h', sent24], ['Invite emails, 24 h', invites]])}

@@ -197,7 +197,7 @@ export async function nudge(at = new Date()) {
       JOIN "splittr"."expense_share" s ON s."memberId" = m."id"
       JOIN "splittr"."expense" e ON e."id" = s."expenseId"
       JOIN "splittr"."group" g ON g."id" = m."groupId"
-      WHERE m."userId" = ANY(${due}) AND e."deletedAt" IS NULL AND NOT e."pending" AND NOT e."rejected" AND NOT g."track"
+      WHERE m."userId" = ANY(${due}) AND e."deletedAt" IS NULL AND NOT e."rejected" AND NOT g."track"
       GROUP BY m."userId", m."groupId"
       HAVING SUM(s."paid" - s."owed") < 0 AND MIN(e."createdAt") < ${new Date(at.getTime() - 7 * 864e5)}`
     const by = new Map<string, { amount: number; groups: number }>()
