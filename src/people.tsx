@@ -1,8 +1,8 @@
 // People: everyone is an account, or an invited email or phone. Friends are everyone you share a group with (one per
 // person: see friendsIn), with the balance between the two of you across every group; direct expenses live in a two-person group.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence } from 'motion/react'
-import { ME, findFriend, friendsIn, inr, needsConfirm, pairwise, today, uid, type Friend, type Group, type Id } from './logic'
+import { ME, findFriend, friendsIn, inr, normPhone, needsConfirm, pairwise, today, uid, type Friend, type Group, type Id } from './logic'
 import { update, type State } from './store'
 import { api, pull, syncNow } from './sync'
 import { Avatar, Denomination, LedgerRow, Plico, Screen, SectionHead, Settle, TONES, count, go, groupTitle, wa, SegPill } from './ui'
@@ -39,42 +39,48 @@ export async function directWith(to: FriendTarget, name: string) {
   return r
 }
 
-// ---------- the people picker: friends as you type, or invite a new email ----------
-export type Person = { name: string; email: string }
+// ---------- the people picker: friends as you type, or invite a new email or phone ----------
+export type Person = { name: string; email?: string; phone?: string; userId?: string }
+const keyOf = (p: Person) => (p.userId ? 'u:' + p.userId : p.email ? 'e:' + p.email : 'p:' + p.phone)
 export function PeoplePicker({ s, value, onChange, taken = [], label = 'Add people' }: {
-  s: State; value: Person[]; onChange: (v: Person[]) => void; taken?: string[]; label?: string
+  s: State; value: Person[]; onChange: (v: Person[]) => void; taken?: string[]; label?: string // taken: emails, phones or account ids already in
 }) {
   const [q, setQ] = useState('')
   const [name, setName] = useState<string | null>(null)
-  const friends = friendsOf(s).filter((f): f is Friend & { email: string } => !!f.email)
-  const used = new Set([...taken, ...value.map(v => v.email), s.user?.email ?? ''].map(e => e.toLowerCase()))
-  const t = q.trim().toLowerCase()
-  const hits = t ? friends.filter(f => !used.has(f.email) && (f.name.toLowerCase().includes(t) || f.email.includes(t))).slice(0, 6) : []
-  const fresh = emailOk(t) && !used.has(t) && !friends.some(f => f.email === t)
-  const add = (p: Person) => { onChange([...value, { name: p.name.trim() || guessName(p.email), email: p.email.toLowerCase() }]); setQ(''); setName(null) }
+  const friends = friendsOf(s)
+  const used = new Set([...taken, ...value.flatMap(v => [v.email, v.phone, v.userId]), s.user?.email].filter(Boolean).map(x => x!.toLowerCase()))
+  const isUsed = (f: Friend) => [f.email, f.phone, f.uid].some(x => x && used.has(x.toLowerCase()))
+  const t = q.trim(), lc = t.toLowerCase()
+  const email = emailOk(t) ? lc : '', phone = email ? '' : normPhone(t) ?? '', contact = email || phone
+  const hits = lc ? friends.filter(f => !isUsed(f) && (f.name.toLowerCase().includes(lc) || contactOf(f).includes(lc) || (!!phone && f.phone === phone))).slice(0, 6) : []
+  const fresh = !!contact && !used.has(contact) && !friends.some(f => f.email === contact || f.phone === contact)
+  const newName = (name ?? (email ? guessName(email) : '')).trim() // a number says nothing about a name: they type it
+  const add = (p: Person) => { onChange([...value, p]); setQ(''); setName(null) }
+  const pick = (f: Friend) => add({ name: f.name, email: f.email, phone: f.phone, userId: f.uid })
+  const addNew = () => { if (newName) add({ name: newName, ...(email ? { email } : { phone }) }) }
   return (
     <div className="picker">
       {value.length > 0 && (
         <ul className="picked" aria-label="Added">
           {value.map(p => (
-            <li key={p.email}>
+            <li key={keyOf(p)}>
               <Avatar name={p.name} size={28} />
-              <span><strong>{p.name}</strong><small>{p.email}</small></span>
+              <span><strong>{p.name}</strong><small>{contactOf(p)}</small></span>
               <button type="button" className="iconbtn" aria-label={`Remove ${p.name}`} onClick={() => onChange(value.filter(v => v !== p))}><Icon n="close" size={18} /></button>
             </li>
           ))}
         </ul>
       )}
       <label className="field"><span>{label}</span>
-        <input value={q} onChange={e => { setQ(e.target.value); setName(null) }} placeholder="Name or email" autoCapitalize="none" autoComplete="off" spellCheck={false}
-          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (fresh) add({ name: name ?? guessName(t), email: t }); else if (hits[0]) add(hits[0]) } }} />
+        <input value={q} onChange={e => { setQ(e.target.value); setName(null) }} placeholder="Name, email or phone" autoCapitalize="none" autoComplete="off" spellCheck={false}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (fresh) addNew(); else if (hits[0]) pick(hits[0]) } }} />
       </label>
       {hits.length > 0 && (
         <ul className="suggest">
           {hits.map(f => (
-            <li key={f.key}><button type="button" onClick={() => add(f)}>
+            <li key={f.key}><button type="button" onClick={() => pick(f)}>
               <Avatar name={f.name} image={f.image} size={32} />
-              <span><strong>{f.name}</strong><small>{f.email}{f.joined ? '' : ' · invited'}</small></span>
+              <span><strong>{f.name}</strong><small>{contactOf(f)}{f.joined ? '' : ' · invited'}</small></span>
               <Icon n="plus" size={18} />
             </button></li>
           ))}
@@ -82,15 +88,39 @@ export function PeoplePicker({ s, value, onChange, taken = [], label = 'Add peop
       )}
       {fresh && (
         <div className="invite-new">
-          <label className="field"><span>Their name</span><input value={name ?? guessName(t)} onChange={e => setName(e.target.value)} maxLength={40} /></label>
-          <button type="button" className="btn secondary" onClick={() => add({ name: name ?? guessName(t), email: t })}><Icon n="send" size={18} />Invite {t}</button>
-          <small>They get an email invite. Their spot and their share wait for them until they join.</small>
+          <label className="field"><span>Their name</span><input value={name ?? newName} onChange={e => setName(e.target.value)} maxLength={40} required={!!phone}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addNew() } }} /></label>
+          <button type="button" className="btn secondary" disabled={!newName} onClick={addNew}><Icon n={email ? 'send' : 'plus'} size={18} />{email ? `Invite ${email}` : 'Add'}</button>
+          <small>{email ? 'They get an email invite.' : 'You can send them an invite on WhatsApp next.'} Their spot and their share wait for them until they join.</small>
         </div>
       )}
-      {t && !emailOk(t) && !hits.length && <small>No friend called that yet. Type their email to invite them: everyone in a group has Plico, so everyone sees who paid what.</small>}
-      {emailOk(t) && used.has(t) && <small>Already added.</small>}
+      {t && !contact && !hits.length && <small>No friend called that yet. Type their email or phone number to invite them: everyone in a group has Plico, so everyone sees who paid what.</small>}
+      {contact && !fresh && !hits.length && <small>Already added.</small>}
     </div>
   )
+}
+
+/** A spot's personal claim link. A spot added a moment ago may not have reached the server yet, so a few tries. */
+export function useInviteLink(gid: Id, mid: Id, on = true) {
+  const [link, setLink] = useState('')
+  useEffect(() => {
+    if (!on) return
+    let live = true
+    const get = (n: number): void => void api<{ link: string }>(`/api/groups/${gid}/members/${mid}/invite`, { method: 'POST', body: '{}' })
+      .then(r => { if (live) setLink(r.link) }, () => { if (live && n) setTimeout(() => get(n - 1), 1500) })
+    get(3)
+    return () => { live = false }
+  }, [gid, mid, on])
+  return link
+}
+const inviteText = (name: string, link: string, group?: string) =>
+  `Hi ${name.split(' ')[0]}! I added you ${group ? `to “${group}” ` : ''}on Plico so we can split and settle up. Join here: ${link}`
+/** Straight to their WhatsApp chat, with their own link: they join as the spot you made for them. */
+export function WhatsAppInvite({ g, m, className = 'btn secondary' }: { g: Group; m: Group['members'][number]; className?: string }) {
+  const link = useInviteLink(g.id, m.id, !m.joined && !!m.phone)
+  if (m.joined || !m.phone) return null
+  return link ? <a className={className} href={wa(inviteText(m.name, link, g.kind === 'direct' ? undefined : g.name), m.phone)} target="_blank" rel="noopener"><Icon n="send" size={18} />Send {m.name.split(' ')[0]} an invite on WhatsApp</a>
+    : <small>Getting {m.name.split(' ')[0]}’s invite link…</small>
 }
 
 // ---------- Friends tab ----------
@@ -113,7 +143,7 @@ export function Friends({ s }: { s: State }) {
         caption={collect && pay ? `${inr(collect)} to collect · ${inr(pay)} to pay` : undefined} />
       <SectionHead title={rows.length ? count(rows.length, 'friend', 'friends') : 'Friends'}
         action={<button className="link" aria-expanded={adding} onClick={() => setAdding(!adding)}>{adding ? 'Close' : 'Add a friend'}</button>} />
-      {adding && <AddFriend onDone={() => setAdding(false)} />}
+      {adding && <AddFriend s={s} onDone={() => setAdding(false)} />}
       {rows.length > 3 && (
         <div className="seg friend-filter" role="tablist" aria-label="Show">
           {([['all', 'All'], ['owed', 'Owe you'], ['owe', 'You owe'], ['even', 'Settled']] as [Filter, string][]).map(([id, label]) => (
@@ -146,25 +176,33 @@ export function Friends({ s }: { s: State }) {
   )
 }
 
-function AddFriend({ onDone }: { onDone: () => void }) {
-  const [email, setEmail] = useState('')
-  const [name, setName] = useState<string | null>(null)
+function AddFriend({ s, onDone }: { s: State; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const e = email.trim().toLowerCase()
-  const add = async () => {
+  const [sent, setSent] = useState<{ p: Person; link: string } | null>(null)
+  const open = (p: Person) => { onDone(); go('/f/' + encodeURIComponent(keyOf(p))) }
+  const add = async (p?: Person) => {
+    if (!p || busy) return
     setBusy(true); setErr('')
-    try { await directWith({ email: e }, (name ?? guessName(e)).trim()); onDone(); go('/f/' + encodeURIComponent('e:' + e)) }
-    catch (x) { setErr(navigator.onLine ? (x as Error).message : 'Adding a friend needs a connection.') } finally { setBusy(false) }
+    try {
+      const r = await directWith(targetOf(keyOf(p)), p.name)
+      if (r.link && p.phone && !p.email && !p.userId) setSent({ p, link: r.link }); else open(p)
+    } catch (x) { setErr(navigator.onLine ? (x as Error).message : 'Adding a friend needs a connection.') } finally { setBusy(false) }
   }
+  if (sent) return (
+    <div className="form add-friend">
+      <p className="notice" role="status">{sent.p.name} isn’t on Plico yet. Send them their invite, straight to their WhatsApp.</p>
+      <a className="btn primary" href={wa(inviteText(sent.p.name, sent.link), sent.p.phone)} target="_blank" rel="noopener"><Icon n="send" size={18} />Send invite on WhatsApp</a>
+      <button type="button" className="link center-link" onClick={() => open(sent.p)}>Done</button>
+    </div>
+  )
   return (
-    <form className="form add-friend" onSubmit={x => { x.preventDefault(); if (emailOk(e)) void add() }}>
-      <label className="field"><span>Their email</span><input type="email" value={email} onChange={x => { setEmail(x.target.value); setName(null) }} autoCapitalize="none" placeholder="friend@example.com" autoFocus /></label>
-      {emailOk(e) && <label className="field"><span>Their name</span><input value={name ?? guessName(e)} onChange={x => setName(x.target.value)} maxLength={40} /></label>}
+    <div className="form add-friend">
+      <PeoplePicker s={s} value={[]} onChange={v => void add(v[0])} label="Who?" />
+      {busy && <p className="muted-p" role="status">Adding…</p>}
       {err && <p className="error" role="alert">{err}</p>}
-      <button className="btn primary" disabled={!emailOk(e) || busy}>{busy ? 'Adding…' : 'Add friend'}</button>
       <small>Not on Plico yet? They get an invite, and expenses with them wait until they join.</small>
-    </form>
+    </div>
   )
 }
 
@@ -187,7 +225,8 @@ export function FriendPage({ s, k }: { s: State; k: string }) {
         <button className="btn primary" disabled={busy} onClick={() => void addExpense()}><Icon n="plus" size={18} />Add expense</button>
         {n !== 0 && <button className="btn secondary" onClick={() => go(`${friendPath(f)}/settle`)}>Settle up</button>}
       </div>
-      {n > 0 && <a className="link center-link" href={wa(nudge)} target="_blank" rel="noopener"><Icon n="bell" size={16} />Remind {f.name} on WhatsApp</a>}
+      {!f.joined && f.direct && <WhatsAppInvite g={f.direct} m={f.direct.members.find(m => m.id !== ME)!} className="link center-link" />}
+      {n > 0 && <a className="link center-link" href={wa(nudge, f.phone)} target="_blank" rel="noopener"><Icon n="bell" size={16} />Remind {f.name} on WhatsApp</a>}
       {err && <p className="error" role="alert">{err}</p>}
       {parts.length > 0 && <>
         <SectionHead title="Where it comes from" />

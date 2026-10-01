@@ -86,7 +86,8 @@ export const shareLink = (s: State, g: Group, t: Transfer) =>
   `${PUBLIC}/#/s/${encodeShare({ g: groupTitle(g), f: realName(s, g, t.from), t: realName(s, g, t.to), v: upiOf(s, g, t.to) || undefined, a: t.amount })}`
 export const reminder = (s: State, g: Group, t: Transfer) =>
   `${TONES[s.tone](inr(t.amount), realName(s, g, t.to), groupTitle(g))}\nPay here: ${shareLink(s, g, t)}`
-export const wa = (text: string) => 'https://wa.me/?text=' + encodeURIComponent(text)
+/** A WhatsApp message to share; with a phone (+<country><number>), straight to that person's chat. */
+export const wa = (text: string, phone?: string) => `https://wa.me/${phone?.replace(/\D/g, '') ?? ''}?text=` + encodeURIComponent(text)
 
 // ---------- ornaments (crisp vector geometry, not pictures) ----------
 const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)

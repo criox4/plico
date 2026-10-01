@@ -16,7 +16,7 @@ import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
 import { Search } from './search'
-import { FriendPage, FriendSettle, Friends, PeoplePicker, emailOk, friendBy, friendsOf, groupTitle, type Person as Pick } from './people'
+import { FriendPage, FriendSettle, Friends, PeoplePicker, WhatsAppInvite, emailOk, friendBy, useInviteLink, friendsOf, groupTitle, type Person as Pick } from './people'
 
 const back = () => (history.length > 1 ? history.back() : go('/'))
 const edit = (gid: Id, fn: (g: Group) => void) => update(d => { const g = d.groups.find(x => x.id === gid); if (g) fn(g) })
@@ -131,7 +131,7 @@ function NewGroup({ s, preset }: { s: State; preset?: string }) {
       d.me.name = me.trim()
       d.groups.unshift({
         id, name: name.trim() || KINDS[kind].hint, kind, theme: KINDS[kind].theme, track: kind === 'family' || undefined,
-        members: [{ id: ME, name: 'Me' }, ...people.map(p => ({ id: uid(), name: p.name, email: p.email }))], expenses: [],
+        members: [{ id: ME, name: 'Me' }, ...people.map(p => ({ id: uid(), name: p.name, email: p.email, phone: p.phone }))], expenses: [],
       })
     })
     location.replace('#/g/' + id)
@@ -148,7 +148,7 @@ function NewGroup({ s, preset }: { s: State; preset?: string }) {
           </label>
         )}
         <PeoplePicker s={s} value={people} onChange={setPeople} label="Who else is in?" />
-        <small>Friends you’ve split with before show up as you type. Anyone new gets an email invite, and sees the group as soon as they join. You can change the theme later in group settings.</small>
+        <small>Friends you’ve split with before show up as you type. Anyone new gets an invite by email or WhatsApp, and sees the group as soon as they join. You can change the theme later in group settings.</small>
         <button className="btn primary" disabled={!me.trim()}>{people.length ? `Create group with ${count(people.length, 'person', 'people')}` : 'Create group'}</button>
       </form>
     </Screen>
@@ -601,7 +601,12 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
   const set = (fn: (x: Group) => void) => edit(g.id, fn)
   const direct = g.kind === 'direct'
   const [adding, setAdding] = useState<Pick[]>([])
-  const addAll = () => { set(x => { x.members.push(...adding.map(p => ({ id: uid(), name: p.name, email: p.email }))) }); setAdding([]) }
+  const [added, setAdded] = useState<Id[]>([]) // just added by phone: their WhatsApp invites, right here
+  const addAll = () => {
+    const ms = adding.map(p => ({ id: uid(), name: p.name, email: p.email, phone: p.phone }))
+    set(x => { x.members.push(...ms) }); setAdding([])
+    setAdded(ms.filter(m => m.phone && !m.email).map(m => m.id))
+  }
   return (
     <Screen t={s.theme} back title={direct ? `You and ${groupTitle(g)}` : 'Group settings'}>
       <div className="form">
@@ -622,8 +627,9 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
           <ul className="people">
             {g.members.map(m => <Person key={m.id} s={s} g={g} m={m} used={used.has(m.id)} />)}
           </ul>
-          <PeoplePicker s={s} value={adding} onChange={setAdding} taken={g.members.map(m => m.email ?? '').filter(Boolean)} />
+          <PeoplePicker s={s} value={adding} onChange={setAdding} taken={g.members.flatMap(m => [m.email ?? '', m.phone ?? '', m.uid ?? '']).filter(Boolean)} />
           {adding.length > 0 && <button type="button" className="btn primary" onClick={addAll}>Add {count(adding.length, 'person', 'people')} to {g.name}</button>}
+          {g.members.filter(m => added.includes(m.id)).map(m => <WhatsAppInvite key={m.id} g={g} m={m} />)}
           <Invite g={g} />
         </>}
         <button type="button" className="link center-link" onClick={() => go(`/g/${g.id}/audit`)}><Icon n="log" size={18} />Audit log</button>
@@ -653,13 +659,8 @@ function CommitInput({ value, onCommit, ...rest }: { value: string; onCommit: (v
 
 function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) {
   const [open, setOpen] = useState(false)
-  const [link, setLink] = useState('')
   const [note, setNote] = useState('')
-  useEffect(() => {
-    if (!open || m.joined || m.id === ME) return
-    api<{ link: string }>(`/api/groups/${g.id}/members/${m.id}/invite`, { method: 'POST', body: '{}' })
-      .then(r => setLink(r.link), () => setLink(''))
-  }, [open, m.joined, m.id, g.id])
+  const link = useInviteLink(g.id, m.id, open && !m.joined && m.id !== ME)
   if (m.id === ME)
     return (
       <li className="person">
@@ -679,7 +680,7 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
     <li className={`person${open ? ' open' : ''}`}>
       <button type="button" className="person-head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Avatar name={m.name} image={m.image} size={40} />
-        <span className="grow"><strong>{m.name}</strong><small>{m.email}</small></span>
+        <span className="grow"><strong>{m.name}</strong><small>{m.email ?? m.phone}</small></span>
         <span className={`chip-state ${m.joined ? 'ok' : 'info'}`}>{status}</span>
       </button>
       {open && (
@@ -699,7 +700,7 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
             </>}
             <div className="person-actions">
               {m.email && emailOk(m.email) && <button type="button" className="btn-sm" onClick={() => void resend()}><Icon n="send" size={16} />{m.invited ? 'Resend email' : 'Email invite'}</button>}
-              {link && <a className="btn-sm" href={wa(msg)} target="_blank" rel="noopener"><Icon n="send" size={16} />WhatsApp</a>}
+              {link && <a className="btn-sm" href={wa(msg, m.phone)} target="_blank" rel="noopener"><Icon n="send" size={16} />WhatsApp</a>}
               {link && <button type="button" className="btn-sm ghost" onClick={() => { void navigator.clipboard?.writeText(link); setNote('Invite link copied.') }}><Icon n="copy" size={16} />Copy link</button>}
             </div>
             {!link && <small>Invite links appear once this person has synced. Check your connection.</small>}
