@@ -15,7 +15,7 @@ const EACH = 84000 // ₹840 in paise: a ₹3,360 dinner, four ways
 const STEPS: { id: string; title: string; body: string }[] = [
   { id: 'add', title: 'Add it the way you’d say it.', body: 'Type “Dinner 3360 split 4”, scan the bill, or share a UPI screenshot, and Plico works out who had what. Typing works even with no signal.' },
   { id: 'owe', title: 'See who owes whom. Plainly.', body: 'No spreadsheets, no “outstanding liability”. Rahul owes you ₹840, and Plico keeps it to the fewest payments.' },
-  { id: 'pay', title: 'Pay by UPI, to a name you can see.', body: 'Any UPI app, or the QR. The payee’s name and UPI ID sit above every payment, and they confirm it arrived.' },
+  { id: 'pay', title: 'Pay by UPI, to a name you can see.', body: 'Any UPI app, or the QR. The payee’s name and UPI ID sit above every payment. It counts straight away; they confirm it arrived, or your UPI receipt does.' },
   { id: 'sorted', title: 'Sorted.', body: 'When everyone’s even, the group snaps shut. Plico celebrates settling, never spending.' },
   { id: 'record', title: 'Every change, on the record.', body: 'Who added, changed or deleted what, and what it did to each balance. Sealed, so nobody can quietly rewrite it.' },
 ]
@@ -187,7 +187,7 @@ export function Landing() {
           <div className="lp-pin" ref={safety.pin}><div className="lp-pin-stage">
           <h2 id="safe">Safe by design.</h2>
           <ul className="lp-facts lp-rail" ref={safety.track}>
-            <Fact icon="lock" title="The name before the payment">Every payment shows who you’re paying and their UPI ID first, and the payee confirms it arrived.</Fact>
+            <Fact icon="lock" title="The name before the payment">Every payment shows who you’re paying and their UPI ID first. It counts straight away, and the payee or your UPI receipt verifies it.</Fact>
             <Fact icon="shield" title="A sealed record">Each group’s log is chained, change after change, and your phone checks the seal itself.</Fact>
             <Fact icon="home" title="Kept in India">Your ledger is stored in Mumbai, under India’s data protection law, with parental consent for teens.</Fact>
             <Fact icon="user" title="No ads, no trackers">Plico doesn’t sell attention: no ad networks, no analytics following you around.</Fact>
