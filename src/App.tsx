@@ -16,7 +16,7 @@ import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
 import { Search } from './search'
-import { FriendPage, FriendSettle, Friends, PeoplePicker, emailOk, friendsOf, groupTitle, type Person as Pick } from './people'
+import { FriendPage, FriendSettle, Friends, PeoplePicker, emailOk, friendBy, friendsOf, groupTitle, type Person as Pick } from './people'
 
 const back = () => (history.length > 1 ? history.back() : go('/'))
 const edit = (gid: Id, fn: (g: Group) => void) => update(d => { const g = d.groups.find(x => x.id === gid); if (g) fn(g) })
@@ -73,7 +73,7 @@ export default function App() {
   if (r[0] === 'friends') return <Friends s={s} />
   if (r[0] === 'activity' || r[0] === 'log') return <Activity s={s} />
   if (r[0] === 'search') return <Search s={s} />
-  if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} email={decodeURIComponent(r[1])} /> : <FriendPage s={s} email={decodeURIComponent(r[1])} />
+  if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} k={decodeURIComponent(r[1])} /> : <FriendPage s={s} k={decodeURIComponent(r[1])} />
   if (r[0] === 'new' || (r[0] === 'add' && !s.groups.length)) return <NewGroup key={r[1]} s={s} preset={r[0] === 'new' ? r[1] : undefined} />
   if (r[0] === 'add') return <ExpenseForm key={r.slice(1).join('/') || 'add'} s={s} shared={r[1] === 'shared'} friend={r[1] === 'f' && r[2] ? decodeURIComponent(r[2]) : undefined} />
   const g = r[0] === 'g' ? s.groups.find(x => x.id === r[1]) : undefined
@@ -166,14 +166,14 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
   // Who it's with: preset when you came from a group or a friend; from the + button, you choose.
   const [target, setTarget] = useState<Target | null>(() => {
     if (gid) return { kind: 'group', groupId: gid }
-    const f = friend ? friendsOf(s).find(x => x.email === friend) : undefined
-    return f ? { kind: 'friends', people: [{ email: f.email, name: f.name }] } : null
+    const f = friend ? friendBy(s, friend) : undefined
+    return f ? { kind: 'friends', people: [{ key: f.key, name: f.name }] } : null
   })
   const real = target?.kind === 'group' ? s.groups.find(x => x.id === target.groupId) : undefined
-  // Outside groups, the form works on a stand-in group: you and the friends, keyed by email.
+  // Outside groups, the form works on a stand-in group: you and the friends, keyed by friend key.
   const g: Group = real ?? { id: '', name: '', kind: 'direct', theme: s.theme, expenses: [],
-    members: [{ id: ME, name: 'Me' }, ...(target?.kind === 'friends' ? target.people.map(p => ({ id: p.email, name: p.name, email: p.email, joined: true })) : [])] }
-  const targetKey = target ? (target.kind === 'group' ? target.groupId : target.people.map(p => p.email).join()) : ''
+    members: [{ id: ME, name: 'Me' }, ...(target?.kind === 'friends' ? target.people.map(p => ({ id: p.key, name: p.name, joined: true })) : [])] }
+  const targetKey = target ? (target.kind === 'group' ? target.groupId : target.people.map(p => p.key).join()) : ''
   const old = eid ? g.expenses.find(e => e.id === eid) : undefined
   const flags = (grp: Group, on = '1') => Object.fromEntries(grp.members.map(m => [m.id, on]))
   const payers0 = old ? Object.keys(old.paid) : [ME]
@@ -529,7 +529,7 @@ function ImportSplitwise({ s }: { s: State }) {
   const [me, setMe] = useState(-1)
   const [kind, setKind] = useState<Kind>('friends')
   const [emails, setEmails] = useState<string[]>([])
-  const friends = new Map(friendsOf(s).map(f => [f.name.toLowerCase(), f.email]))
+  const friends = new Map(friendsOf(s).flatMap(f => (f.email ? [[f.name.toLowerCase(), f.email]] : [])))
   const read = async (f: File) => {
     setErr('')
     const r = parseSplitwise(await f.text())

@@ -1,21 +1,26 @@
 // An expense before it's saved: who it's with (a group, or friends outside any group), the amounts, and any items.
 // The Add screen and Ask Plico both build one; commitDraft() saves it the same way from either.
-import { ME, friendParts, runRecurring, uid, type Expense, type Group, type Id, type SplitMode } from './logic'
+import { ME, findFriend, friendParts, friendsIn, runRecurring, uid, type Expense, type Id, type SplitMode } from './logic'
 import { getState, update } from './store'
-import { directWith } from './people'
+import { directWith, targetOf } from './people'
 import { markAi } from './sync'
 import type { ChatCard } from './schema'
 
-export type Target = { kind: 'group'; groupId: Id } | { kind: 'friends'; people: { email: string; name: string }[] }
-/** Amount keys: the group's member ids (ME for you), or ME and friends' emails outside groups. */
+/** Friends outside groups go by their friend key (u:<account>, e:<email> or p:<phone>: see personKey). */
+export type Target = { kind: 'group'; groupId: Id } | { kind: 'friends'; people: { key: string; name: string }[] }
+/** Amount keys: the group's member ids (ME for you), or ME and friends' keys outside groups. */
 export type Draft = {
   target: Target; title: string; cat: string; date: string; amount: number
   paid: Record<string, number>; owed: Record<string, number>
   mode?: SplitMode; input?: Record<string, number>; receipt?: string; repeat?: boolean
 }
 
-const direct = (email: string) => getState().groups.find(g => g.kind === 'direct' && g.members.some(m => m.id !== ME && m.email?.toLowerCase() === email))
-const memberOf = (g: Group, email: string) => g.members.find(m => m.id !== ME && m.email?.toLowerCase() === email)!.id
+/** Your ledger with this friend, and their spot in it, if it exists yet. */
+const direct = (key: string) => {
+  const s = getState(), f = findFriend(friendsIn(s.groups, s.user ?? undefined), key)
+  const g = f?.direct
+  return g && { g, id: f.spots.find(x => x.g === g)!.id }
+}
 
 /** Where the saved expense lives, for going there after. */
 export type Saved = { groupId: Id; friend?: string }
@@ -39,21 +44,20 @@ export async function commitDraft(d: Draft, via?: 'ai'): Promise<Saved[]> {
   if ('error' in r) throw new Error(r.error)
   const out: Saved[] = []
   for (const p of r.parts) {
-    const email = p.email.toLowerCase()
-    let g = direct(email)
-    if (!g) {
-      const name = d.target.people.find(x => x.email.toLowerCase() === email)?.name ?? email
-      await directWith(email, name).catch(() => { throw new Error(navigator.onLine ? 'Couldn’t start your ledger with them. Try again.' : 'The first expense with a friend needs a connection.') })
-      g = direct(email)
-      if (!g) throw new Error('Couldn’t start your ledger with them. Try again.')
+    let to = direct(p.key)
+    if (!to) {
+      const name = d.target.people.find(x => x.key === p.key)?.name ?? p.key.slice(2)
+      await directWith(targetOf(p.key), name).catch(() => { throw new Error(navigator.onLine ? 'Couldn’t start your ledger with them. Try again.' : 'The first expense with a friend needs a connection.') })
+      to = direct(p.key)
+      if (!to) throw new Error('Couldn’t start your ledger with them. Try again.')
     }
-    const id = memberOf(g, email)
+    const { g, id } = to
     const key = (k: string) => (k === ME ? ME : id)
     const map = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [key(k), v]))
     // With several friends, each part is that friend's share; the title says it was part of something bigger.
     const title = r.parts.length > 1 ? `${d.title} (your share of ${r.parts.length + 1})`.slice(0, 120) : d.title
     put(g.id, { ...base, title, amount: p.amount, paid: map(p.paid), owed: map(p.owed), ...(r.parts.length === 1 && { mode: d.mode, input: d.input && map(d.input) }) })
-    out.push({ groupId: g.id, friend: email })
+    out.push({ groupId: g.id, friend: p.key })
   }
   return out
 }
@@ -67,7 +71,9 @@ const nextMonth = (date: string) => {
 /** A chat card's draft on this phone: the server's member ids map to your copy of the group (you are ME here). */
 export function fromCard(c: Extract<ChatCard, { type: 'expense' }>): Draft | { error: string } {
   const t = c.target
-  let key = (k: string) => (k === ME ? ME : k.toLowerCase())
+  // Outside groups the card names friends by email: use the key the friend has here (their account, once joined).
+  const s = getState(), fs = friendsIn(s.groups, s.user ?? undefined)
+  let key = (k: string) => (k === ME ? ME : findFriend(fs, k.toLowerCase())?.key ?? 'e:' + k.toLowerCase())
   if (t.kind === 'group') {
     const g = getState().groups.find(x => x.id === t.groupId)
     if (!g) return { error: 'That group isn’t on this phone yet. Give it a moment to sync, then ask again.' }
@@ -77,7 +83,7 @@ export function fromCard(c: Extract<ChatCard, { type: 'expense' }>): Draft | { e
   }
   const map = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [key(k), v]))
   return {
-    target: t.kind === 'group' ? { kind: 'group', groupId: t.groupId } : { kind: 'friends', people: t.people.map(p => ({ ...p, email: p.email.toLowerCase() })) },
+    target: t.kind === 'group' ? { kind: 'group', groupId: t.groupId } : { kind: 'friends', people: t.people.map(p => ({ key: key(p.email), name: p.name })) },
     title: c.title, cat: c.cat, date: c.date, amount: c.amount, paid: map(c.paid), owed: map(c.owed),
     mode: 'exact', input: Object.fromEntries(Object.entries(map(c.owed)).map(([k, v]) => [k, v / 100])), // editable later as exact amounts
   }

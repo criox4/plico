@@ -1,8 +1,8 @@
-// People: everyone is an account or an invited email. Friends are everyone you share a group with (keyed by
-// email), with the balance between the two of you across every group; direct expenses live in a two-person group.
+// People: everyone is an account, or an invited email or phone. Friends are everyone you share a group with (one per
+// person: see friendsIn), with the balance between the two of you across every group; direct expenses live in a two-person group.
 import { useState } from 'react'
 import { AnimatePresence } from 'motion/react'
-import { ME, inr, needsConfirm, pairwise, today, uid, type Group, type Id } from './logic'
+import { ME, findFriend, friendsIn, inr, needsConfirm, pairwise, today, uid, type Friend, type Group, type Id } from './logic'
 import { update, type State } from './store'
 import { api, pull, syncNow } from './sync'
 import { Avatar, Denomination, LedgerRow, Plico, Screen, SectionHead, Settle, TONES, count, go, groupTitle, wa, SegPill } from './ui'
@@ -14,29 +14,29 @@ export const emailOk = (v = '') => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
 export const guessName = (email: string) =>
   email.split('@')[0].split(/[._+-]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ').slice(0, 40) || 'Friend'
 
-export type Friend = { email: string; name: string; image?: string; joined: boolean; spots: { g: Group; id: Id }[]; direct?: Group }
-export function friendsOf(s: State): Friend[] {
-  const by = new Map<string, Friend>()
-  for (const g of s.groups) for (const m of g.members) {
-    if (m.id === ME || !m.email) continue
-    const f = by.get(m.email) ?? { email: m.email, name: m.name, joined: false, spots: [] }
-    f.spots.push({ g, id: m.id })
-    if (m.joined && !f.joined) { f.joined = true; f.name = m.name } // an account's own name wins over what someone typed
-    f.image ||= m.image
-    if (g.kind === 'direct') f.direct = g
-    by.set(m.email, f)
-  }
-  return [...by.values()].sort((a, b) => a.name.localeCompare(b.name))
-}
+export type { Friend }
+export const friendsOf = (s: State) => friendsIn(s.groups, s.user ?? undefined)
+/** The friend a /f/<key> address names (older links carry a bare email). */
+export const friendBy = (s: State, k: string) => findFriend(friendsOf(s), k)
+/** How a friend shows under their name: their email, else their phone. */
+export const contactOf = (f: { email?: string; phone?: string }) => f.email ?? f.phone ?? ''
+export const friendPath = (f: Friend) => '/f/' + encodeURIComponent(f.key)
 /** Positive: they owe you. Across every group you share, from the expenses themselves. */
 export const friendBalance = (f: Friend) => f.spots.reduce((a, x) => a + pairwise(x.g, ME, x.id), 0)
 const owesLine = (n: number) => (n > 0 ? `owes you ${inr(n)}` : n < 0 ? `you owe ${inr(n)}` : 'settled up')
 
-/** The two-person group for expenses with this friend outside any group (made on the server, once per pair). */
-export async function directWith(email: string, name: string) {
-  const { id } = await api<{ id: string }>('/api/friends', { method: 'POST', body: JSON.stringify({ email, name }) })
+/** Who POST /api/friends is about: their account once joined, else the email or phone they're invited by. */
+export type FriendTarget = { userId: string } | { email: string } | { phone: string }
+export const targetOf = (k: string): FriendTarget => {
+  const [, t, v] = /^([uep]):(.+)$/.exec(k) ?? [, 'e', k]
+  return t === 'u' ? { userId: v } : t === 'p' ? { phone: v } : { email: v }
+}
+/** The two-person group for expenses with this friend outside any group (made on the server, once per pair).
+ * `link`: their personal claim link, when they're a phone number not on Plico yet. */
+export async function directWith(to: FriendTarget, name: string) {
+  const r = await api<{ id: string; link?: string }>('/api/friends', { method: 'POST', body: JSON.stringify({ ...to, name }) })
   await syncNow(); await pull()
-  return id
+  return r
 }
 
 // ---------- the people picker: friends as you type, or invite a new email ----------
@@ -46,7 +46,7 @@ export function PeoplePicker({ s, value, onChange, taken = [], label = 'Add peop
 }) {
   const [q, setQ] = useState('')
   const [name, setName] = useState<string | null>(null)
-  const friends = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
+  const friends = friendsOf(s).filter((f): f is Friend & { email: string } => !!f.email)
   const used = new Set([...taken, ...value.map(v => v.email), s.user?.email ?? ''].map(e => e.toLowerCase()))
   const t = q.trim().toLowerCase()
   const hits = t ? friends.filter(f => !used.has(f.email) && (f.name.toLowerCase().includes(t) || f.email.includes(t))).slice(0, 6) : []
@@ -72,7 +72,7 @@ export function PeoplePicker({ s, value, onChange, taken = [], label = 'Add peop
       {hits.length > 0 && (
         <ul className="suggest">
           {hits.map(f => (
-            <li key={f.email}><button type="button" onClick={() => add(f)}>
+            <li key={f.key}><button type="button" onClick={() => add(f)}>
               <Avatar name={f.name} image={f.image} size={32} />
               <span><strong>{f.name}</strong><small>{f.email}{f.joined ? '' : ' · invited'}</small></span>
               <Icon n="plus" size={18} />
@@ -96,7 +96,7 @@ export function PeoplePicker({ s, value, onChange, taken = [], label = 'Add peop
 // ---------- Friends tab ----------
 type Filter = 'all' | 'owed' | 'owe' | 'even'
 export function Friends({ s }: { s: State }) {
-  const fs = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
+  const fs = friendsOf(s)
   const rows = fs.map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name))
   const total = rows.reduce((a, r) => a + r.n, 0)
   const collect = rows.reduce((a, r) => a + Math.max(r.n, 0), 0), pay = rows.reduce((a, r) => a + Math.max(-r.n, 0), 0)
@@ -105,7 +105,7 @@ export function Friends({ s }: { s: State }) {
   const [adding, setAdding] = useState(location.hash.endsWith('/friends/add'))
   const t = q.trim().toLowerCase()
   const shown = rows.filter(({ f, n }) => (filter === 'all' || (filter === 'owed' ? n > 0 : filter === 'owe' ? n < 0 : !n))
-    && (!t || f.name.toLowerCase().includes(t) || f.email.includes(t)))
+    && (!t || f.name.toLowerCase().includes(t) || contactOf(f).includes(t)))
   const counts = { all: rows.length, owed: rows.filter(r => r.n > 0).length, owe: rows.filter(r => r.n < 0).length, even: rows.filter(r => !r.n).length }
   return (
     <Screen t={s.theme} fab="/add" title="Friends">
@@ -129,7 +129,7 @@ export function Friends({ s }: { s: State }) {
         shown.length ? (
           <ol className="friends">
             {shown.map(({ f, n }) => (
-              <li key={f.email}><button className="friend-row" onClick={() => go('/f/' + encodeURIComponent(f.email))}>
+              <li key={f.key}><button className="friend-row" onClick={() => go(friendPath(f))}>
                 <Avatar name={f.name} image={f.image} size={44} />
                 <span className="grow"><strong>{f.name}</strong>
                   <small>{f.joined ? (f.spots.some(x => x.g.kind !== 'direct') ? `In ${count(f.spots.filter(x => x.g.kind !== 'direct').length, 'group', 'groups')}` : 'Just the two of you') : <span className="tag-invited">Invited</span>}</small></span>
@@ -154,7 +154,7 @@ function AddFriend({ onDone }: { onDone: () => void }) {
   const e = email.trim().toLowerCase()
   const add = async () => {
     setBusy(true); setErr('')
-    try { await directWith(e, (name ?? guessName(e)).trim()); onDone(); go('/f/' + encodeURIComponent(e)) }
+    try { await directWith({ email: e }, (name ?? guessName(e)).trim()); onDone(); go('/f/' + encodeURIComponent('e:' + e)) }
     catch (x) { setErr(navigator.onLine ? (x as Error).message : 'Adding a friend needs a connection.') } finally { setBusy(false) }
   }
   return (
@@ -169,23 +169,23 @@ function AddFriend({ onDone }: { onDone: () => void }) {
 }
 
 // ---------- one friend ----------
-export function FriendPage({ s, email }: { s: State; email: string }) {
-  const f = friendsOf(s).find(x => x.email === email)
+export function FriendPage({ s, k }: { s: State; k: string }) {
+  const f = friendBy(s, k)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   if (!f) return <Screen t={s.theme} back title="Friend"><p className="empty">Not found. They may have left your groups.</p></Screen>
   const n = friendBalance(f)
   const parts = f.spots.map(x => ({ ...x, n: pairwise(x.g, ME, x.id) })).filter(x => x.n)
-  const addExpense = () => go(`/add/f/${encodeURIComponent(f.email)}`) // the ledger with them is made on save if it doesn't exist yet
+  const addExpense = () => go(`/add/f/${encodeURIComponent(f.key)}`) // the ledger with them is made on save if it doesn't exist yet
   const nudge = `${TONES[s.tone](inr(n), s.me.name || 'me', 'Plico')}${s.me.upi ? `\nUPI: ${s.me.upi}` : ''}`
   const list = (f.direct?.expenses ?? []).map((e, i) => ({ e, i })).sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
   return (
     <Screen t={s.theme} back title={f.name}>
-      <div className="friend-head"><Avatar name={f.name} image={f.image} size={56} /><p><strong>{f.name}</strong><small>{f.email} · {f.joined ? 'On Plico' : 'Invited, hasn’t joined yet'}</small></p></div>
+      <div className="friend-head"><Avatar name={f.name} image={f.image} size={56} /><p><strong>{f.name}</strong><small>{contactOf(f)} · {f.joined ? 'On Plico' : 'Invited, hasn’t joined yet'}</small></p></div>
       <Denomination t={s.theme} amount={n} line={n > 0 ? `${f.name} owes you` : n < 0 ? `You owe ${f.name}` : 'All square'} />
       <div className="row friend-actions">
         <button className="btn primary" disabled={busy} onClick={() => void addExpense()}><Icon n="plus" size={18} />Add expense</button>
-        {n !== 0 && <button className="btn secondary" onClick={() => go(`/f/${encodeURIComponent(f.email)}/settle`)}>Settle up</button>}
+        {n !== 0 && <button className="btn secondary" onClick={() => go(`${friendPath(f)}/settle`)}>Settle up</button>}
       </div>
       {n > 0 && <a className="link center-link" href={wa(nudge)} target="_blank" rel="noopener"><Icon n="bell" size={16} />Remind {f.name} on WhatsApp</a>}
       {err && <p className="error" role="alert">{err}</p>}
@@ -212,8 +212,8 @@ export function FriendPage({ s, email }: { s: State; email: string }) {
  * Settle everything with a friend in one UPI payment. It's recorded as one settlement in each group that has a
  * balance between you (largest first), so every group stays right; anything left over goes to your direct balance.
  */
-export function FriendSettle({ s, email }: { s: State; email: string }) {
-  const f = friendsOf(s).find(x => x.email === email)
+export function FriendSettle({ s, k }: { s: State; k: string }) {
+  const f = friendBy(s, k)
   if (!f) return <Screen t={s.theme} back title="Settle up"><p className="empty">Not found.</p></Screen>
   const n = friendBalance(f)
   const home = f.direct ? { g: f.direct, id: f.spots.find(x => x.g === f.direct)!.id } : f.spots[0]
