@@ -6,7 +6,7 @@ import { sign } from 'node:crypto'
 import webpush from 'web-push'
 import { Prisma } from './generated/prisma/client.ts'
 import { db } from './db.ts'
-import { BATCHED, BATCH_MS, DAILY_CAP, URGENT, compose, local, prefFor, prefsOf, pushesFor, quietUntil, urlFor, type Change } from './push-text.ts'
+import { BATCHED, BATCH_MS, DAILY_CAP, LATER, URGENT, compose, local, prefFor, prefsOf, pushesFor, quietUntil, urlFor, type Change } from './push-text.ts'
 
 type Tx = Prisma.TransactionClient
 const env = process.env
@@ -36,7 +36,7 @@ export async function queuePush(tx: Tx, groupId: string, e: Change) {
   const ok = new Set((await tx.pushDevice.findMany({ where: { userId: { in: rows.map(r => r.userId) } }, select: { userId: true } })).map(d => d.userId))
   const now = Date.now()
   await tx.notification.createMany({ data: rows.filter(r => ok.has(r.userId)).map(r => ({
-    userId: r.userId, kind: r.kind, data: r.data as Prisma.InputJsonValue, groupId, byId: e.byId ?? null, dueAt: new Date(BATCHED.has(r.kind) ? now + BATCH_MS : now),
+    userId: r.userId, kind: r.kind, data: r.data as Prisma.InputJsonValue, groupId, byId: e.byId ?? null, dueAt: new Date(now + (LATER[r.kind] ?? (BATCHED.has(r.kind) ? BATCH_MS : 0))),
   })) })
 }
 
@@ -146,9 +146,15 @@ export async function flush() {
   })).map(x => [x.userId, x._count]))
 
   const skip = new Map<string, string>(), later = new Map<string, Date>()
+  // A day-later "did it arrive?" only while the payment is still unverified, not rejected and not deleted.
+  const asks = rows.filter(r => r.kind === 'payment.unverified')
+  if (asks.length) {
+    const open = new Set((await db.expense.findMany({ where: { id: { in: asks.map(r => String(r.data.expenseId)) }, pending: true, rejected: false, deletedAt: null }, select: { id: true } })).map(e => e.id))
+    for (const r of asks) if (!open.has(String(r.data.expenseId))) skip.set(r.id, 'stale')
+  }
   let sent = 0
   for (const u of users) {
-    const mine = rows.filter(r => r.userId === u.id)
+    const mine = rows.filter(r => r.userId === u.id && !skip.has(r.id))
     const prefs = prefsOf(u.notify)
     // Units: each group's batched rows together; everything else on its own.
     const units = new Map<string, Row[]>()

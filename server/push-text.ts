@@ -3,9 +3,9 @@
 import { inr } from '../src/logic.ts'
 
 type Share = { memberId: string; paid: number; owed: number }
-type Snap = { title: string; amount: number; settle?: boolean; pending?: boolean; rejected?: boolean; shares: Share[] }
+type Snap = { title: string; amount: number; settle?: boolean; pending?: boolean; rejected?: boolean; verifiedBy?: string | null; shares: Share[] }
 export type Change = {
-  kind: string; byId?: string | null; byName: string
+  kind: string; byId?: string | null; byName: string; expenseId?: string | null
   before?: unknown; after?: unknown; effect: Record<string, number>
 }
 export type Person = { id: string; userId: string | null }
@@ -20,6 +20,9 @@ export const prefsOf = (v: unknown): Prefs => ({ ...PREFS, ...(v && typeof v ===
 export const URGENT = new Set(['payment.claimed', 'payment.confirmed', 'payment.rejected'])
 /** Rows of these kinds for the same person and group are merged into one push. */
 export const BATCHED = new Set(['expense.created', 'expense.changed', 'member.joined'])
+/** Rows of these kinds wait this long before they're due. The worker drops a reminder whose payment was verified,
+ *  rejected or deleted by then (push.ts). */
+export const LATER: Record<string, number> = { 'payment.unverified': 864e5 }
 export const prefFor = (kind: string): keyof Prefs =>
   kind.startsWith('payment.') ? 'payments' : kind === 'remind' ? 'reminders' : kind === 'nudge' ? 'nudge' : 'activity'
 
@@ -41,10 +44,12 @@ export function pushesFor(e: Change, people: Person[]): Push[] {
       const payer = s.shares.find(x => x.paid > 0)?.memberId, payee = s.shares.find(x => x.owed > 0)?.memberId
       const d = { by: e.byName, amount: s.amount }
       if (e.kind === 'expense.created') {
-        if (a?.pending) return to(payee, 'payment.claimed', d)
+        // Counted already; the payee is asked whether it arrived, and asked once more a day later if they haven't said.
+        if (a?.pending) return [...to(payee, 'payment.claimed', d), ...to(payee, 'payment.unverified', { ...d, expenseId: e.expenseId })]
         return [...to(payer, 'payment.recorded', d), ...to(payee, 'payment.recorded', d)]
       }
-      if (e.kind === 'expense.edited' && b?.pending && !a?.pending && !a?.rejected) return to(payer, 'payment.confirmed', d)
+      if (e.kind === 'expense.edited' && b?.pending && !a?.pending && !a?.rejected)
+        return a?.verifiedBy === 'screenshot' ? to(payee, 'payment.verified', d) : to(payer, 'payment.confirmed', d)
       if (e.kind === 'expense.edited' && !b?.rejected && a?.rejected) return to(payer, 'payment.rejected', d)
       return [] // other settlement changes are in Activity
     }
@@ -77,9 +82,12 @@ export function compose(rows: Row[], group: string | null, amounts: boolean): { 
   const d = r.data as Record<string, string & number>
   const amt = (p: unknown) => money(p, amounts)
   const sp = (p: unknown) => (amounts ? ` ${amt(p)}` : '')
+  const where = group ? ` in ${group}` : ''
   if (rows.length === 1) {
     switch (r.kind) {
-      case 'payment.claimed': return { title, body: `${d.by} marked${sp(d.amount)} as paid to you. Did it arrive?` }
+      case 'payment.claimed': return { title, body: `${d.by} says they paid you${sp(d.amount)}${where}. Did you get it?` }
+      case 'payment.unverified': return { title, body: `Did ${d.by}’s${sp(d.amount)} payment arrive? It already counts, so say if it didn’t.` }
+      case 'payment.verified': return { title, body: `${d.by} paid you${sp(d.amount)}${where} · checked from their UPI receipt` }
       case 'payment.confirmed': return { title, body: `${d.by} confirmed your${sp(d.amount)} payment. All square on that one.` }
       case 'payment.rejected': return { title, body: `${d.by} says your${sp(d.amount)} payment hasn’t arrived yet.` }
       case 'payment.recorded': return { title, body: `${d.by} recorded a${sp(d.amount)} payment with you.` }
