@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { bodyLimit } from 'hono/body-limit'
 import * as z from 'zod/mini'
-import { AgeIn, AiConsentIn, ChatIn, ExpenseIn, FileName, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, NotifyIn, ParentConsentIn, PushDeviceIn, PushTokenIn, ReadIn, RemindIn, SeenIn, Token } from '../src/schema.ts'
+import { AgeIn, AiConsentIn, ChatIn, ExpenseIn, FileName, FriendCode, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, NotifyIn, ParentConsentIn, PushDeviceIn, PushTokenIn, ReadIn, RemindIn, SeenIn, Token } from '../src/schema.ts'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
 import { mail } from './email.ts'
@@ -14,7 +14,7 @@ import { prefsOf } from './push-text.ts'
 import { chat } from './chat.ts'
 import { clientIp, limiter } from './ip.ts'
 import { count } from './otel.ts'
-import { createHash } from 'node:crypto'
+import { createHash, randomInt } from 'node:crypto'
 import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
 
@@ -70,6 +70,13 @@ publicApi.get('/public/claim/:token', async c => {
   // The token was emailed to this address, so whoever holds it can see it: it pre-fills their sign-up.
   const mask = m.email ? m.email.replace(/^(.{1,2})[^@]*/, '$1***') : null
   return c.json({ group: { name: m.group.name, kind: m.group.kind, theme: m.group.theme }, invitedBy: await inviterOf(m.group.id, m.id), name: m.name, email: mask, prefill: m.email })
+})
+// A personal friend link: who you'd be adding, a name and a face, nothing else.
+publicApi.get('/public/u/:code', async c => {
+  if (peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
+  const code = FriendCode.safeParse(c.req.param('code'))
+  const u = code.success ? await db.user.findUnique({ where: { friendCode: code.data }, select: { name: true, image: true } }) : null
+  return u ? c.json(u) : c.json({ error: 'This link is no longer valid' }, 404)
 })
 
 export const api = new Hono<Env>()
@@ -773,6 +780,40 @@ api.post('/friends', async c => {
   if (email === me.email.toLowerCase()) return c.json({ error: 'That’s your own email.' }, 400)
   const g = await directWith(me, { name: b.name, email })
   if (g.made) await inviteByEmail(g.id, g.made, email, { id: me.id, name: me.name })
+  return c.json({ id: g.id })
+})
+
+// ---------- personal friend links: whoever opens /#/u/<code> becomes your friend ----------
+const ALNUM = 'abcdefghijklmnopqrstuvwxyz0123456789'
+/** A fresh code (or, unless `replace`, the one they already have). Retries the rare clash with someone else's. */
+async function friendCode(uid: string, replace: boolean) {
+  for (let i = 0; ; i++) {
+    try {
+      await db.user.updateMany({ where: { id: uid, ...(!replace && { friendCode: null }) }, data: { friendCode: Array.from({ length: 10 }, () => ALNUM[randomInt(36)]).join('') } })
+      return (await db.user.findUniqueOrThrow({ where: { id: uid }, select: { friendCode: true } })).friendCode!
+    } catch (e) {
+      if (i < 3 && e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') continue
+      throw e
+    }
+  }
+}
+api.get('/me/friend-code', async c => {
+  const u = await db.user.findUniqueOrThrow({ where: { id: c.get('userId') }, select: { friendCode: true } })
+  return c.json({ code: u.friendCode ?? await friendCode(c.get('userId'), false) })
+})
+// A leaked link lets anyone add you: a new one retires it at once.
+api.post('/me/friend-code/reset', async c => c.json({ code: await friendCode(c.get('userId'), true) }))
+
+api.post('/friends/code/:code', async c => {
+  const code = FriendCode.safeParse(c.req.param('code'))
+  const them = code.success ? await db.user.findUnique({ where: { friendCode: code.data }, select: { id: true, name: true, email: true } }) : null
+  if (!them) return c.json({ error: 'This link is no longer valid' }, 404)
+  const me = await meFor(c.get('userId'))
+  if (them.id === me.id) return c.json({ error: 'That’s your own link.' }, 400)
+  const g = await directWith(me, { name: them.name, userId: them.id, email: them.email.toLowerCase() })
+  // They shared the link, so they'll want to know it worked. Like other pushes, only for people with a device.
+  if (g.made && await db.pushDevice.count({ where: { userId: them.id } }))
+    await db.notification.create({ data: { userId: them.id, kind: 'friend.added', groupId: g.id, byId: me.id, data: { by: me.name } } })
   return c.json({ id: g.id })
 })
 

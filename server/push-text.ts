@@ -85,6 +85,7 @@ export function compose(rows: Row[], group: string | null, amounts: boolean): { 
       case 'payment.recorded': return { title, body: `${d.by} recorded a${sp(d.amount)} payment with you.` }
       case 'member.added': return { title, body: `${d.by} added you to ${group ?? 'a group'}.` }
       case 'member.joined': return { title, body: `${d.by} joined.` }
+      case 'friend.added': return { title, body: `${d.by} added you as a friend.` }
       case 'remind': return { title, body: `${d.by} sent a reminder: ${amounts ? `${amt(d.amount)} ` : ''}to settle up.` }
       case 'nudge': return { title: 'Plico', body: amounts ? `You owe ${amt(d.amount)} across ${d.groups === 1 ? '1 group' : `${d.groups} groups`}. Settle up in a tap.` : 'You have payments waiting. Settle up in a tap.' }
       case 'expense.created': return { title, body: `${d.by} added “${d.title}”${amounts && d.share ? ` · your share ${amt(d.share)}` : ''}` }

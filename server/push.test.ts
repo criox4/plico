@@ -44,6 +44,8 @@ assert.equal(quietUntil('Asia/Kolkata', ist(7, 45))!.getTime(), ist(8).getTime()
 assert.equal(quietUntil('Not/AZone', ist(14)), null) // falls back to India
 assert.equal(local('Asia/Kolkata', ist(11)).day, 0) // 2026-09-27 is a Sunday
 
+assert.equal(compose([{ kind: 'friend.added', data: { by: 'Bala' } }], null, true).body, 'Bala added you as a friend.')
+
 // Preferences: missing means on; each kind maps to one switch.
 assert.deepEqual(prefsOf({ nudge: false }), { payments: true, activity: true, reminders: true, nudge: false, quiet: true, amounts: true })
 assert.deepEqual(['payment.claimed', 'remind', 'nudge', 'expense.created', 'member.joined'].map(prefFor), ['payments', 'reminders', 'nudge', 'activity', 'activity'])
