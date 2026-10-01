@@ -14,9 +14,11 @@ assert.equal(p[0].data.share, 30000)
 p = pushesFor({ kind: 'expense.edited', byId: 'B', byName: 'Bala', before: snap({}), after: snap({}), effect: { mA: 0, mB: 0, mC: -5000 } }, people)
 assert.deepEqual(p.map(x => [x.userId, x.kind, x.data.delta]), [['C', 'expense.changed', -5000]])
 
-// Settlements: claimed → payee; confirmed and rejected → payer.
+// Settlements: claimed → payee (now, and a day later); confirmed and rejected → payer; verified by receipt → payee.
 const pay = (o: object) => ({ title: 'Settlement', amount: 30000, settle: true, shares: [{ memberId: 'mB', paid: 30000, owed: 0 }, { memberId: 'mA', paid: 0, owed: 30000 }], ...o })
-assert.deepEqual(pushesFor({ kind: 'expense.created', byId: 'B', byName: 'Bala', after: pay({ pending: true }), effect: {} }, people).map(x => [x.userId, x.kind]), [['A', 'payment.claimed']])
+assert.deepEqual(pushesFor({ kind: 'expense.created', byId: 'B', byName: 'Bala', expenseId: 'e1', after: pay({ pending: true }), effect: {} }, people).map(x => [x.userId, x.kind, x.data.expenseId]), [['A', 'payment.claimed', undefined], ['A', 'payment.unverified', 'e1']])
+assert.deepEqual(pushesFor({ kind: 'expense.created', byId: 'A', byName: 'Asha', after: pay({ verifiedBy: 'payee' }), effect: {} }, people).map(x => [x.userId, x.kind]), [['B', 'payment.recorded']])
+assert.deepEqual(pushesFor({ kind: 'expense.edited', byId: 'B', byName: 'Bala', before: pay({ pending: true }), after: pay({ verifiedBy: 'screenshot' }), effect: {} }, people).map(x => [x.userId, x.kind]), [['A', 'payment.verified']])
 assert.deepEqual(pushesFor({ kind: 'expense.edited', byId: 'A', byName: 'Asha', before: pay({ pending: true }), after: pay({}), effect: {} }, people).map(x => [x.userId, x.kind]), [['B', 'payment.confirmed']])
 assert.deepEqual(pushesFor({ kind: 'expense.edited', byId: 'A', byName: 'Asha', before: pay({ pending: true }), after: pay({ rejected: true }), effect: {} }, people).map(x => [x.userId, x.kind]), [['B', 'payment.rejected']])
 
@@ -27,7 +29,10 @@ assert.deepEqual(pushesFor({ kind: 'member.joined', byId: 'C', byName: 'Chitra',
 
 // Text: one row is specific; a batch says how many, from whom, and the net effect; amounts can be hidden.
 assert.equal(compose([{ kind: 'expense.created', data: { by: 'Bala', title: 'Scooters', share: 60000, delta: -60000 } }], 'Goa ’26', true).body, 'Bala added “Scooters” · your share ₹600')
-assert.equal(compose([{ kind: 'payment.claimed', data: { by: 'Bala', amount: 84000 } }], 'Goa ’26', false).body, 'Bala marked as paid to you. Did it arrive?')
+assert.equal(compose([{ kind: 'payment.claimed', data: { by: 'Bala', amount: 84000 } }], 'Goa ’26', true).body, 'Bala says they paid you ₹840 in Goa ’26. Did you get it?')
+assert.equal(compose([{ kind: 'payment.claimed', data: { by: 'Bala', amount: 84000 } }], null, false).body, 'Bala says they paid you. Did you get it?')
+assert.equal(compose([{ kind: 'payment.unverified', data: { by: 'Bala', amount: 84000 } }], 'Goa ’26', true).body, 'Did Bala’s ₹840 payment arrive? It already counts, so say if it didn’t.')
+assert.equal(compose([{ kind: 'payment.verified', data: { by: 'Bala', amount: 84000 } }], 'Goa ’26', true).body, 'Bala paid you ₹840 in Goa ’26 · checked from their UPI receipt')
 const batch = compose([
   { kind: 'expense.created', data: { by: 'Bala', title: 'A', share: 10000, delta: -10000 } },
   { kind: 'expense.created', data: { by: 'Chitra', title: 'B', share: 20000, delta: -20000 } },
@@ -48,5 +53,5 @@ assert.equal(compose([{ kind: 'friend.added', data: { by: 'Bala' } }], null, tru
 
 // Preferences: missing means on; each kind maps to one switch.
 assert.deepEqual(prefsOf({ nudge: false }), { payments: true, activity: true, reminders: true, nudge: false, quiet: true, amounts: true })
-assert.deepEqual(['payment.claimed', 'remind', 'nudge', 'expense.created', 'member.joined'].map(prefFor), ['payments', 'reminders', 'nudge', 'activity', 'activity'])
+assert.deepEqual(['payment.claimed', 'payment.unverified', 'remind', 'nudge', 'expense.created', 'member.joined'].map(prefFor), ['payments', 'payments', 'reminders', 'nudge', 'activity', 'activity'])
 console.log('push ok')

@@ -88,8 +88,8 @@ export const mail = {
     const amt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: paise % 100 ? 2 : 0 }).format(paise / 100)
     return sendEmail({
       to, subject: `${payer} says they paid you ${amt}`,
-      html: layout(`${payer} paid you ${amt}?`, `${esc(payer)} marked ${amt} as paid to you in <strong>${esc(group)}</strong>. Check your UPI app, then confirm in Plico so everyone’s even.`, { label: 'Confirm in Plico', url: `${APP}/#/` }),
-      text: `${payer} marked ${amt} as paid to you in “${group}”. Check your UPI app, then confirm in Plico: ${APP}/#/`,
+      html: layout(`${payer} paid you ${amt}?`, `${esc(payer)} marked ${amt} as paid to you in <strong>${esc(group)}</strong>. It already counts in Plico. Check your UPI app, then tell Plico whether it arrived.`, { label: 'Open Plico', url: `${APP}/#/` }),
+      text: `${payer} marked ${amt} as paid to you in “${group}”. It already counts in Plico. Check your UPI app, then tell Plico whether it arrived: ${APP}/#/`,
     })
   },
   notReceived: (to: string, payee: string, group: string, paise: number) => {

@@ -49,7 +49,8 @@ function friends(w: World) {
   }
   return [...by.values()]
 }
-const live = (e: Expense) => !e.pending && !e.rejected
+// Settlements count as soon as they're recorded; only one the payee says never arrived doesn't.
+const live = (e: Expense) => !e.rejected
 
 // ---------- the tools ----------
 type Args = Record<string, unknown>
@@ -64,9 +65,9 @@ export type Card =
       names: Record<string, string>; items?: { name: string; amount: number; who: string[]; unsure?: boolean }[]; extras?: number; summary: string }
   | { type: 'settle'; groupId: string; group: string; from: string; to: string; amount: number; summary: string }
   | { type: 'remind'; groupId: string; group: string; memberId: string; name: string; amount: number; summary: string }
-  /** Record a payment. `confirm`: the payee has to confirm it arrived before it counts. */
+  /** Record a payment. It counts at once; `confirm`: the payee is asked to verify it arrived. */
   | { type: 'pay'; groupId: string; group: string; from: string; to: string; amount: number; confirm: boolean; summary: string }
-  /** The person is the payee of a payment waiting for them: Got it / Not yet. */
+  /** The person is the payee of a payment not verified yet: Got it (verify) / Not yet (stops it counting). */
   | { type: 'confirm'; groupId: string; group: string; expenseId: string; amount: number; from: string; summary: string }
   /** Before → after of one expense, at the version it was drafted from. */
   | { type: 'edit'; groupId: string; group: string; expenseId: string; version: number; before: Shot; after: Shot; names: Record<string, string>; changes: string[]; summary: string }
@@ -294,7 +295,7 @@ function spotsOf(w: World, name: string, group?: string): Found<{ name: string; 
   return { ok: { name: f.ok.name, spots } }
 }
 /** One expense's share of what b owes a (from the expense itself; positive: b owes a). */
-const pairOf = (e: Expense, a: string, b: string) => (e.pending || e.rejected || !e.amount ? 0 : Math.round(((e.owed[b] ?? 0) * (e.paid[a] ?? 0) - (e.owed[a] ?? 0) * (e.paid[b] ?? 0)) / e.amount))
+const pairOf = (e: Expense, a: string, b: string) => (!live(e) || !e.amount ? 0 : Math.round(((e.owed[b] ?? 0) * (e.paid[a] ?? 0) - (e.owed[a] ?? 0) * (e.paid[b] ?? 0)) / e.amount))
 const findExpense = (w: World, id: string): Found<{ g: WGroup; e: Expense }> => {
   for (const g of w.groups) { const e = g.expenses.find(x => x.id === id); if (e) return { ok: { g, e } } }
   return { error: 'No expense with that id in your groups. Search with find_expenses and use the id it returns.' }
@@ -329,10 +330,10 @@ const MORE: Record<string, (w: World, a: Args) => Out> = {
     const rows = w.groups.flatMap(g => g.expenses.filter(e => e.settle && (e.pending || e.rejected)).map(e => {
       const from = Object.keys(e.paid)[0], to = Object.keys(e.owed)[0]
       const what = e.rejected ? (from === g.meId ? `${who(g, to)} says your ${rs(e.amount)} hasn’t arrived` : `you said ${who(g, from)}’s ${rs(e.amount)} hasn’t arrived`)
-        : to === g.meId ? `${who(g, from)} says they paid you ${rs(e.amount)}: waiting for you to confirm` : from === g.meId ? `waiting for ${who(g, to)} to confirm your ${rs(e.amount)}` : `${who(g, from)} → ${who(g, to)} ${rs(e.amount)}, waiting for ${who(g, to)}`
+        : to === g.meId ? `${who(g, from)} says they paid you ${rs(e.amount)}: it counts already; check it arrived and verify it` : from === g.meId ? `your ${rs(e.amount)} to ${who(g, to)} counts already; ${who(g, to)} hasn’t verified it yet` : `${who(g, from)} → ${who(g, to)} ${rs(e.amount)}, counts already, not verified by ${who(g, to)} yet`
       return { id: e.id, group: gname(g), date: e.date, what, you_can_confirm: !e.rejected && to === g.meId }
     }))
-    return { result: rows.length ? { payments: rows } : { payments: [], note: 'No payments are waiting on anyone.' } }
+    return { result: rows.length ? { payments: rows } : { payments: [], note: 'Every payment is verified, and none was marked as not arrived.' } }
   },
 
   confirm_payment: (w, a) => {
@@ -342,10 +343,10 @@ const MORE: Record<string, (w: World, a: Args) => Out> = {
     if (str(a.group)) { const f = findGroup(w, str(a.group)); if ('error' in f) return { result: f }; hits = hits.filter(x => x.g.id === f.ok.id) }
     if (str(a.person)) hits = hits.filter(x => norm(who(x.g, Object.keys(x.e.paid)[0])).includes(norm(str(a.person))))
     if (num(a.amount)) hits = hits.filter(x => x.e.amount === Math.round(num(a.amount)! * 100))
-    if (!hits.length) return { result: { error: all.length ? 'No payment waiting for you matches that. Use pending to list them.' : 'No payments are waiting for you to confirm.' } }
+    if (!hits.length) return { result: { error: all.length ? 'No payment to you that’s waiting to be verified matches that. Use pending to list them.' : 'No payments to you are waiting to be verified.' } }
     if (hits.length > 1) return { result: { error: 'More than one payment matches. Ask which.', payments: hits.slice(0, 8).map(({ g, e }) => ({ id: e.id, group: gname(g), from: who(g, Object.keys(e.paid)[0]), amount: rs(e.amount), date: e.date })) } }
     const { g, e } = hits[0], from = Object.keys(e.paid)[0]
-    const summary = `Did ${who(g, from)}’s ${rs(e.amount)} in ${gname(g)} arrive? Check your UPI app first.`
+    const summary = `Did ${who(g, from)}’s ${rs(e.amount)} in ${gname(g)} arrive? It counts already; check your UPI app, then verify it or say it hasn’t arrived.`
     return { result: { drafted: summary, next: 'Shown as a card with Got it and Not yet.' }, card: { type: 'confirm', groupId: g.id, group: gname(g), expenseId: e.id, amount: e.amount, from: who(g, from), summary } }
   },
 
@@ -371,7 +372,7 @@ const MORE: Record<string, (w: World, a: Args) => Out> = {
     const amount = want ?? Math.abs(n)
     const [from, to] = inward ? [id, g.meId] : [g.meId, id]
     const confirm = !inward && !!g.people.find(p => p.id === id)?.joined
-    const summary = `${inward ? `${who(g, id)} paid you` : `You paid ${who(g, id)}`} ${rs(amount)} in ${gname(g)}.${confirm ? ` It counts once ${who(g, id)} confirms it arrived.` : ''}`
+    const summary = `${inward ? `${who(g, id)} paid you` : `You paid ${who(g, id)}`} ${rs(amount)} in ${gname(g)}.${confirm ? ` It counts straight away; ${who(g, id)} verifies it arrived.` : ''}`
     return { result: { drafted: summary, ...(n && amount !== Math.abs(n) && { note: `The settle-up plan says ${rs(Math.abs(n))}; this records ${rs(amount)}.` }), next: 'Shown as a card; recorded only when the person taps Record.' },
       card: { type: 'pay', groupId: g.id, group: gname(g), from, to, amount, confirm, summary } }
   },
@@ -467,8 +468,8 @@ export const TOOL_DEFS = [
   ['draft_settlement', 'Prepare settling up between the person and someone. Opens the settle-up screen when tapped.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
   ['draft_reminder', 'Prepare a reminder to someone who owes the person money. Sent only when tapped.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
   ['explain_balance', 'Why the person and someone owe what they do: the balance from the expenses themselves, group by group, the entries that moved it most, and the group’s settle-up plan when that differs.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
-  ['pending', 'Payments waiting for someone to confirm they arrived, and ones marked as not arrived, with ids.', S('No arguments.')],
-  ['confirm_payment', 'Prepare confirming a payment someone says they made to the person (only payments to the person). A card with Got it / Not yet.', S('', { person: s('Who paid'), group: GROUP, amount: n('Rupees'), expense_id: s('Id from pending') })],
+  ['pending', 'Payments their payee hasn’t verified yet (they already count in balances), and ones marked as not arrived (those don’t count), with ids.', S('No arguments.')],
+  ['confirm_payment', 'Prepare verifying a payment someone says they made to the person (only payments to the person). It already counts; a card with Got it (verifies it) / Not yet (stops it counting).', S('', { person: s('Who paid'), group: GROUP, amount: n('Rupees'), expense_id: s('Id from pending') })],
   ['mark_paid', 'Prepare recording a payment between the person and someone (money already paid, e.g. by UPI or cash). Defaults to what the group’s settle-up plan says. This is how to bring a balance to zero; there is no other way to change a balance.', S('', {
     person: s('Their name'), group: GROUP, amount: n('Rupees; omit for the full amount owed'),
     direction: { type: 'string', enum: ['they_paid_me', 'i_paid_them'], description: 'Omit to follow who owes whom' },
