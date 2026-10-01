@@ -2,7 +2,7 @@
 // The server validates requests with these; the app takes its types from them (z.infer) and checks the responses
 // that could corrupt its local copy (sync, conflicts, the audit log). zod/mini keeps the phone bundle small.
 import * as z from 'zod/mini'
-import { isVpa } from './logic'
+import { isVpa, normPhone } from './logic'
 import { THEMES, type ThemeId } from './themes'
 
 // ---------- building blocks ----------
@@ -18,7 +18,9 @@ export const FileName = z.string().check(z.regex(/^[0-9a-f-]{36}\.(jpg|png|webp)
 const isEmail = (v: string) => z.email().safeParse(v).success
 const Upi = z.nullish(z.string().check(z.trim(), z.maxLength(256), z.refine(v => !v || isVpa(v), 'Not a valid UPI ID')))
 const Email = z.nullish(z.string().check(z.trim(), z.toLowerCase(), z.maxLength(254), z.refine(v => !v || isEmail(v), 'Not a valid email')))
-const Phone = z.nullish(z.string().check(z.trim(), z.maxLength(20), z.refine(v => !v || /^\+?[0-9 ()-]{7,20}$/.test(v), 'Not a valid phone number')))
+/** Stored as +<country><number> (normPhone); a bare 10-digit number is taken as Indian. */
+export const PhoneNumber = z.pipe(z.string().check(z.maxLength(24), z.refine(v => !!normPhone(v), 'Not a valid phone number')), z.transform(v => normPhone(v)!))
+const Phone = z.nullish(z.string().check(z.trim(), z.maxLength(24), z.refine(v => !v || !!normPhone(v), 'Not a valid phone number'), z.overwrite(v => (v && normPhone(v)) || v)))
 export const GuardianEmail = z.string().check(z.trim(), z.toLowerCase(), z.maxLength(254), z.refine(isEmail, 'Enter your parent’s email'))
 /** JSON dates arrive as ISO strings. */
 const When = z.string()
@@ -51,7 +53,16 @@ export const GuardianIn = z.object({ email: z.optional(GuardianEmail) })
 export const ParentConsentIn = z.object({ consent: z.boolean(), name: z.optional(text(80, 2)), adult: z.optional(z.boolean()) })
 export const AiConsentIn = z.object({ consent: z.boolean() })
 export const InviteResendIn = z.object({ email: z.optional(z.boolean()) })
-export const FriendIn = z.object({ email: z.email().check(z.maxLength(254)), name: text(60) })
+/** A friend by exactly one of: their email, their phone, or (someone you already share a group with) their account. */
+export const FriendIn = z.object({ name: text(60), email: z.optional(z.email().check(z.maxLength(254))), phone: z.optional(PhoneNumber), userId: z.optional(Id) })
+/** Your personal "add me on Plico" code (/#/u/<code>). */
+export const FriendCode = z.string().check(z.regex(/^[a-z0-9]{10}$/))
+export const FriendCodeOut = z.object({ code: FriendCode })
+/** What a friend link shows before you add them: just a name and a face. */
+export const FriendCardOut = z.object({ name: z.string(), image: z.nullable(z.string()) })
+/** Phone verification over WhatsApp (Phase 2): the code the person sends, and where things stand. */
+export const PhoneStartOut = z.object({ code: z.string(), link: z.string(), expiresAt: When })
+export const PhoneStatusOut = z.object({ available: z.boolean(), phone: z.nullable(z.string()), verifiedAt: z.nullable(When), pending: z.boolean() })
 export const SeenIn = z.object({ at: z.iso.datetime() })
 /** Web Push endpoints must belong to a browser's push service: the server POSTs to them. */
 const PUSH_HOSTS = /^https:\/\/([\w-]+\.)*(fcm\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)\//

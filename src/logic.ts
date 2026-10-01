@@ -182,6 +182,14 @@ export function runRecurring(g: Group, now = today()): boolean {
 export const upiLink = (vpa: string, name: string, paise: number, note: string) =>
   'upi://pay?' + new URLSearchParams({ pa: vpa, pn: name, am: (paise / 100).toFixed(2), cu: 'INR', tn: note.slice(0, 50) })
 
+/** A phone number as +<country><number>, or null. Bare Indian mobiles (98765 43210, 098…, 91…) get +91. */
+export function normPhone(s = ''): string | null {
+  const t = s.trim(), d = t.replace(/[\s().-]/g, '')
+  if (!/^\+?\d+$/.test(d)) return null
+  if (d.startsWith('+')) return /^\+[1-9]\d{7,14}$/.test(d) ? d : null
+  const n = d.replace(/^0(?=[6-9]\d{9}$)/, '').replace(/^91(?=[6-9]\d{9}$)/, '')
+  return /^[6-9]\d{9}$/.test(n) ? '+91' + n : null
+}
 export const isVpa = (s = '') => /^[\w.-]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,64}$/.test(s)
 
 // Share payload lives in the URL hash: no server ever sees it.

@@ -714,6 +714,7 @@ api.post('/invites/:code/join', async c => {
 const directKey = (a: string, b: string) => createHash('sha256').update([a.toLowerCase(), b.toLowerCase()].sort().join('\n')).digest('hex')
 api.post('/friends', async c => {
   const b = FriendIn.parse(await c.req.json())
+  if (!b.email) return c.json({ error: 'Add their email.' }, 400)
   const uid = c.get('userId'), email = b.email.trim().toLowerCase()
   const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, name: true } })
   if (email === me.email.toLowerCase()) return c.json({ error: 'That’s your own email.' }, 400)

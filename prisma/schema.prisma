@@ -23,6 +23,9 @@ model User {
   upi           String?
   upi2          String? /// backup UPI ID, for when the first bank's UPI is down
   phone         String?
+  verifiedPhone   String?   @unique /// +<country><number>, proven by a WhatsApp message from it; links spots added under it
+  phoneVerifiedAt DateTime?
+  friendCode      String?   @unique /// personal "add me on Plico" link (/#/u/<code>); made on first use, resettable
   onboardedAt   DateTime? /// finished the first-run profile (name, face, UPI IDs)
   theme         String?   @default("classic")
   tone          String?   @default("gentle")
@@ -132,7 +135,7 @@ model Member {
   upi         String?
   upi2        String? /// backup UPI ID
   email       String? /// invite target; auto-links when a user with this verified email exists or signs up
-  phone       String? /// invite target via WhatsApp link (never auto-linked: phones aren't verified)
+  phone       String? /// invite target, +<country><number>; links only to an account that verified this number
   inviteToken String?        @unique /// one-time claim link sent to this person
   invitedAt   DateTime?
   addedById   String? /// who added this person: until they join, only that member may change their UPI IDs or email
@@ -144,6 +147,7 @@ model Member {
   @@unique([groupId, userId])
   @@index([userId])
   @@index([email])
+  @@index([phone])
   @@map("member")
   @@schema("splittr")
 }

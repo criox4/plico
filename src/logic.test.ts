@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -219,3 +219,13 @@ console.log('simplify ok')
   assert.equal(scrub('A.B@Mail.Example.IN').toString(), '[email]')
   console.log('crash report scrubbing ok')
 }
+
+// Phone numbers: one form everywhere, so the same person typed two ways is one person.
+assert.equal(normPhone('98765 43210'), '+919876543210')
+assert.equal(normPhone('098765-43210'), '+919876543210')
+assert.equal(normPhone('919876543210'), '+919876543210')
+assert.equal(normPhone('+91 (98765) 43210'), '+919876543210')
+assert.equal(normPhone('+1 415 555 0100'), '+14155550100')
+assert.equal(normPhone('12345'), null)
+assert.equal(normPhone('5876543210'), null) // Indian mobiles start 6-9
+assert.equal(normPhone('riya@x.com'), null)
