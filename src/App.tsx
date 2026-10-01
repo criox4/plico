@@ -7,7 +7,7 @@ import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, pars
 import { getState, update, useStore, type State } from './store'
 import { API } from './auth-client'
 import { FriendCardOut } from './schema'
-import { api, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
+import { addProof, api, photoData, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
@@ -229,10 +229,16 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
     setPayer(ME); setMulti(false); setPaidIn({}); setMode('equal'); setInp(flags(g)); setItems(null)
     if (!real) setReceipt(undefined)
   }, [targetKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A screenshot shared in right after you paid someone is most likely that payment's receipt: ask before reading it as a bill.
+  const [proofAsk, setProofAsk] = useState<{ g: Group; e: Expense; image: Blob } | null>(null)
   useEffect(() => {
     if (!shared) return
     void takeShared().then(p => {
-      if (p?.image) scan(p.image)
+      const since = new Date(Date.now() - 3 * 864e5).toLocaleDateString('en-CA')
+      const own = p?.image && s.groups.flatMap(g => g.expenses.filter(e => e.settle && e.pending && !e.rejected && e.paid[ME] && e.date >= since).map(e => ({ g, e })))
+        .sort((a, b) => b.e.date.localeCompare(a.e.date))[0]
+      if (own) setProofAsk({ ...own, image: p.image! })
+      else if (p?.image) scan(p.image)
       else if (p?.text) { setQuick(p.text.slice(0, 200)); void typeIt(p.text.slice(0, 200)) }
     })
   }, [shared]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -297,6 +303,26 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
       if (!r.amount && !r.items.length) setCapErr('Couldn’t find an amount in that photo. Type it in instead.')
       fromRead(r)
     } catch (e) { setCapErr((e as Error).message) } finally { setReading(false) }
+  }
+  if (proofAsk) {
+    const { g: pg, e: pe, image } = proofAsk
+    const asProof = async () => {
+      setReading(true); setCapErr('')
+      try { await addProof(pg.id, pe.id, { method: 'upi', image: await photoData(image) }); location.replace(`#/g/${pg.id}/e/${pe.id}`) } // its details show how the check went
+      catch (x) { setCapErr((x as Error).message) } finally { setReading(false) }
+    }
+    return (
+      <Screen t={s.theme} back title="Shared screenshot">
+        <div className="confirm" role="group" aria-label="Use as payment proof">
+          <p>Use this as proof for {inr(pe.amount)} to {who(pg, Object.keys(pe.owed)[0])}?</p>
+          {capErr && <p className="error" role="alert">{capErr}</p>}
+          <div className="row">
+            <button className="btn primary" disabled={reading} onClick={() => void asProof()}>{reading ? 'Checking…' : 'Yes'}</button>
+            <button className="btn secondary" disabled={reading} onClick={() => { setProofAsk(null); setCapErr(''); scan(image) }}>No, add an expense</button>
+          </div>
+        </div>
+      </Screen>
+    )
   }
   const useItems = () => {
     if (!items) return
