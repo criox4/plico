@@ -696,8 +696,10 @@ api.post('/invites/:code/join', async c => {
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
   const uid = c.get('userId')
   if (g.members.some(m => m.userId === uid)) return c.json({ id: g.id })
-  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, emailVerified: true, name: true } })
-  const spot = me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined
+  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, emailVerified: true, name: true, verifiedPhone: true } })
+  // Their spot by verified email, else by the number they proved on WhatsApp.
+  const spot = (me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined)
+    ?? (me.verifiedPhone ? g.members.find(m => !m.userId && m.phone === me.verifiedPhone) : undefined)
   await db.$transaction(async tx => {
     if (spot) {
       const { count } = await tx.member.updateMany({ where: { id: spot.id, userId: null }, data: { userId: uid, inviteToken: null, name: me.name } })
