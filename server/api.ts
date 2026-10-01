@@ -367,10 +367,10 @@ api.put('/groups/:gid/members/:mid', async c => {
   // Someone with an account owns their details. Letting others edit a joined person's UPI ID would let them
   // redirect that person's incoming payments, so those edits are ignored (not errors: they may be stale outbox ops).
   if (m?.userId && m.userId !== uid) return c.json({ ok: true, ignored: true })
-  const email = b.email?.toLowerCase() || null
-  const data = { name: b.name, upi: b.upi || null, upi2: b.upi2 || null, email: m?.userId ? m.email : email, phone: b.phone || null }
-  // Everyone in a group is a real person: an account, or an email that becomes one when they join.
-  if (!m?.userId && !email) return c.json({ error: 'Add their email so they can join Plico and see this group.' }, 400)
+  const email = b.email?.toLowerCase() || null, phone = b.phone || null
+  const data = { name: b.name, upi: b.upi || null, upi2: b.upi2 || null, email: m?.userId ? m.email : email, phone }
+  // Everyone in a group is a real person: an account, or an email or phone number that becomes one when they join.
+  if (!m?.userId && !email && !phone) return c.json({ error: 'Add their phone number or email so they can join.' }, 400)
   if (!m) {
     const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { kind: true } })
     if (g.kind === 'direct') return c.json({ error: 'A friends balance is just the two of you. Make a group to add more people.' }, 400)
@@ -379,22 +379,26 @@ api.put('/groups/:gid/members/:mid', async c => {
     const dup = await db.member.findFirst({ where: { groupId: gid, id: { not: mid }, OR: [{ email: { equals: email, mode: 'insensitive' } }, { user: { email: { equals: email, mode: 'insensitive' } } }] } })
     if (dup) return c.json({ error: `${dup.name} is already in this group with that email.` }, 409)
   }
-  // Until someone joins, their UPI IDs and email belong to whoever added them. Anyone else changing them could send
-  // everyone's "Pay Riya" to their own UPI ID, or move Riya's invite (and spot) to an address they control.
-  if (m && !m.userId && m.addedById && m.addedById !== uid && (data.upi !== m.upi || data.upi2 !== m.upi2 || data.email !== m.email)) {
+  if (phone && phone !== m?.phone) {
+    const dup = await db.member.findFirst({ where: { groupId: gid, id: { not: mid }, OR: [{ phone }, { user: { verifiedPhone: phone } }] } })
+    if (dup) return c.json({ error: `${dup.name} is already in this group with that number.` }, 409)
+  }
+  // Until someone joins, their UPI IDs, phone and email belong to whoever added them. Anyone else changing them could send
+  // everyone's "Pay Riya" to their own UPI ID, or move Riya's invite (and spot: a verified phone claims it) to one they control.
+  if (m && !m.userId && m.addedById && m.addedById !== uid && (data.upi !== m.upi || data.upi2 !== m.upi2 || data.email !== m.email || data.phone !== m.phone)) {
     const adder = await db.member.findFirst({ where: { groupId: gid, userId: m.addedById }, select: { name: true } })
-    if (adder) return c.json({ error: `Only ${adder.name}, who added ${m.name}, can change their UPI ID or email.`, code: 'not-yours' }, 403)
+    if (adder) return c.json({ error: `Only ${adder.name}, who added ${m.name}, can change their UPI ID, phone or email.`, code: 'not-yours' }, 403)
   }
   if (!m) {
     await db.$transaction(async tx => {
       await tx.member.create({ data: { id: mid, groupId: gid, addedById: uid, ...data } })
-      await audit(tx, gid, { kind: 'member.invited', memberId: mid, ...by, after: { name: data.name, email } })
+      await audit(tx, gid, { kind: 'member.invited', memberId: mid, ...by, after: { name: data.name, email, ...(phone && { phone }) } })
     })
   } else {
     const diff = changed({ name: m.name, upi: m.upi, upi2: m.upi2, email: m.email, phone: m.phone }, data)
     if (!diff) return c.json({ ok: true })
-    // A corrected email retires the old personal link: it may have gone to the wrong person.
-    const retire = !m.userId && email !== m.email ? { inviteToken: null, invitedAt: null } : {}
+    // A corrected email or phone retires the old personal link: it may have gone to the wrong person.
+    const retire = !m.userId && (email !== m.email || phone !== m.phone) ? { inviteToken: null, invitedAt: null } : {}
     await db.$transaction(async tx => {
       await tx.member.update({ where: { id: mid }, data: { ...data, ...retire } })
       await audit(tx, gid, { kind: 'member.edited', memberId: mid, ...by, ...diff })
