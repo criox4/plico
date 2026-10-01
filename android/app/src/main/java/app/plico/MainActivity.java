@@ -1,6 +1,7 @@
 package app.plico;
 
 import android.content.Intent;
+import android.os.Bundle;
 import android.util.Log;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
@@ -11,6 +12,12 @@ import ee.forgr.capacitor.social.login.SocialLoginPlugin;
 
 // Google sign-in (SocialLogin plugin) hands its authorization result back through this activity.
 public class MainActivity extends BridgeActivity implements ModifiedMainActivityForSocialLoginPlugin {
+
+  @Override
+  public void onCreate(Bundle savedInstanceState) {
+    registerPlugin(ContactPickerPlugin.class); // local plugins must be registered before the bridge starts
+    super.onCreate(savedInstanceState);
+  }
 
   @Override
   public void onPause() {
