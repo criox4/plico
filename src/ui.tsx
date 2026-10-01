@@ -954,5 +954,74 @@ export function SettlementProof({ g, e }: { g: Group; e: Expense }) {
     {p?.file && <a className="receipt-img" href={shot.url || undefined} target="_blank" rel="noopener">{shot.url ? <img src={shot.url} alt="Payment screenshot" /> : <span>{shot.failed ? 'Couldn’t load the screenshot.' : 'Loading screenshot…'}</span>}</a>}
     {from === ME && e.pending && !e.rejected && <button className="btn secondary" onClick={() => setAdding(true)}><Icon n="plus" />{e.proof ? 'Update proof' : 'Add proof'}</button>}
     {adding && <ProofSheet gid={g.id} eid={e.id} payee={who(g, to)} onClose={() => setAdding(false)} />}
+    {toCheck(e) && <div className="row">
+      <button className="btn primary" onClick={() => setPending(g.id, e.id, true)}><Icon n="check" />Got it</button>
+      <button className="btn secondary" onClick={() => setPending(g.id, e.id, false)}>Not received</button>
+    </div>}
   </>
+}
+
+// The payee's "Did you get these?": each payment at most once a day, after a sync. Remembered on this device only.
+const ASKED_PAID = 'plico-asked-paid'
+const askedToday = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(ASKED_PAID) ?? '{}') } catch { return {} } }
+const markAsked = (ids: Id[]) => {
+  try {
+    const d = today(), m = Object.fromEntries(Object.entries(askedToday()).filter(([, v]) => v === d)) // older days drop off
+    for (const id of ids) m[id] = d
+    localStorage.setItem(ASKED_PAID, JSON.stringify(m))
+  } catch { /* a convenience: worst case it asks again */ }
+}
+/** A push about a group was tapped: ask about that group's payments to you, asked today or not. */
+export const askPaid = (gid: Id) => dispatchEvent(new CustomEvent('plico:paid', { detail: gid }))
+
+/** Payments to you that you haven't said yes or no to. They already count; this never blocks anything. */
+export function PaidCheck() {
+  const s = useStore()
+  const sync = useSync()
+  const [ids, setIds] = useState<Id[]>([])
+  const [want, setWant] = useState<Id | null>(null) // a tapped push's group, held until the sync after it lands
+  const all = s.groups.flatMap(g => g.expenses.filter(toCheck).map(e => ({ g, e })))
+  const key = all.map(x => x.e.id).join()
+  const rows = all.filter(x => ids.includes(x.e.id))
+  const ready = sync.authed && sync.synced && !!s.user?.ageGroup && !(s.user.ageGroup === 'teen' && !s.user.guardianConsent) && s.user.onboarded !== false
+  useEffect(() => {
+    const f = (ev: Event) => { const gid = (ev as CustomEvent<Id>).detail; void pull().finally(() => setWant(gid)) }
+    addEventListener('plico:paid', f)
+    return () => removeEventListener('plico:paid', f)
+  }, [])
+  useEffect(() => {
+    if (!ready || (rows.length && !want)) return
+    const d = today(), m = askedToday()
+    const due = all.filter(x => (want ? x.g.id === want : m[x.e.id] !== d)).map(x => x.e.id)
+    setWant(null)
+    if (due.length) { markAsked(due); setIds(due) }
+  }, [ready, key, want]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <Sheet open={rows.length > 0} onClose={() => setIds([])} label="Did you get these payments?">
+      <h2>Did you get {rows.length > 1 ? 'these' : 'this'}?</h2>
+      <p className="muted-p">{rows.length > 1 ? 'They already count' : 'It already counts'}. Check your UPI app or bank, then tell Plico.</p>
+      <ol className="debts"><AnimatePresence initial={false}>{rows.map(({ g, e }) => <PaidRow key={e.id} g={g} e={e} />)}</AnimatePresence></ol>
+      <button className="btn secondary" onClick={() => setIds([])}>Later</button>
+    </Sheet>
+  )
+}
+
+function PaidRow({ g, e }: { g: Group; e: Expense }) {
+  const { from } = ends(e)
+  const shot = useGroupImage(g.id, e.proof?.file)
+  const utr = e.utr ?? e.proof?.read?.utr
+  const how = [e.proof && METHODS[e.proof.method], utr && `UTR ${utr}`, e.proof?.note].filter(Boolean).join(' · ')
+  return (
+    <m.li className="confirm-card" {...ROW}>
+      <div className="paid-head">
+        <Avatar name={who(g, from)} image={g.members.find(x => x.id === from)?.image} size={40} />
+        <p><strong>{who(g, from)} paid you <span className="money">{inr(e.amount)}</span></strong><small>{groupTitle(g)}{how ? ` · ${how}` : ''}</small></p>
+        {shot.url && <a href={shot.url} target="_blank" rel="noopener"><img className="proof-thumb" src={shot.url} alt="Their payment screenshot" /></a>}
+      </div>
+      <span className="debt-actions">
+        <button className="btn-sm" onClick={() => setPending(g.id, e.id, true)}><Icon n="check" size={16} />Got it</button>
+        <button className="btn-sm ghost" onClick={() => setPending(g.id, e.id, false)}>Not received</button>
+      </span>
+    </m.li>
+  )
 }

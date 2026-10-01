@@ -11,7 +11,7 @@ import { api, pull, readExpense, refreshUser, uploadImage, useSync, type Read } 
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, go, useQr, useRoute, wa, who, SegPill } from './ui'
+import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
@@ -29,7 +29,19 @@ const num = (v?: string) => parseFloat((v ?? '').replace(/,/g, '')) || 0
 const Gallery = import.meta.env.DEV ? lazy(() => import('./Gallery')) : null
 const OgImage = import.meta.env.DEV ? lazy(() => import('./OgImage')) : null
 
+/** A tapped push opens where it points; one about a group also asks about payments to you there (a payment's own
+ *  page, #/g/<id>/e/<id>, has its own Got it / Not received). */
+const openPush = (url: string) => {
+  go(url)
+  const gid = /^#\/g\/([^/]+)$/.exec(url)?.[1]
+  if (gid) askPaid(gid)
+}
+
 export default function App() {
+  return <><Page /><PaidCheck /></>
+}
+
+function Page() {
   const s = useStore()
   const r = useRoute()
   const sync = useSync()
@@ -42,7 +54,7 @@ export default function App() {
     addEventListener('keydown', k)
     return () => removeEventListener('keydown', k)
   }, [sync.authed])
-  useEffect(() => { if (sync.authed && !sync.booting) void resumePush(sync.push, go) }, [sync.authed, sync.booting, sync.push])
+  useEffect(() => { if (sync.authed && !sync.booting) void resumePush(sync.push, openPush) }, [sync.authed, sync.booting, sync.push])
   useEffect(() => {
     ensureFonts([s.theme, ...s.groups.map(g => g.theme)])
     document.body.style.background = theme(s.theme).c.bg
