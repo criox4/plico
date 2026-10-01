@@ -144,3 +144,34 @@ whatsapp.post('/', bodyLimit({ maxSize: 1 << 20 }), async c => {
   for (const m of inbound(body)) void handle(m).catch(e => console.error(`WhatsApp webhook failed: ${(e as Error).name}`))
   return c.text('ok')
 })
+
+// ---------- the account side, under /api/me/phone (signed in) ----------
+export const mePhone = new Hono<{ Variables: { userId: string } }>()
+const starts = limiter(3600_000, 5)
+
+mePhone.get('/', async c => {
+  const uid = c.get('userId')
+  const [u, waiting] = await Promise.all([
+    db.user.findUniqueOrThrow({ where: { id: uid }, select: { verifiedPhone: true, phoneVerifiedAt: true } }),
+    db.verification.count({ where: { ...mine(uid), expiresAt: { gt: new Date() } } }),
+  ])
+  return c.json({ available: waReady(), phone: u.verifiedPhone, verifiedAt: u.phoneVerifiedAt?.toISOString() ?? null, pending: waiting > 0 })
+})
+
+mePhone.post('/start', async c => {
+  if (!waReady()) return c.json({ error: 'Not found' }, 404)
+  const uid = c.get('userId')
+  if (starts.full(uid)) return c.json({ error: 'Too many tries. Wait an hour, then start again.' }, 429)
+  starts.hit(uid)
+  // This person's older codes go, and anyone's expired ones with them.
+  await db.verification.deleteMany({ where: { OR: [mine(uid), { identifier: { startsWith: 'wa:' }, expiresAt: { lt: new Date() } }] } })
+  const code = newCode(), expiresAt = new Date(Date.now() + TTL)
+  await db.verification.create({ data: { id: crypto.randomUUID(), identifier: `wa:${code}`, value: JSON.stringify({ userId: uid }), expiresAt } })
+  // The code rides in the prefilled message, so the person only has to tap send.
+  return c.json({ code, link: `https://wa.me/${NUMBER}?text=${encodeURIComponent(`Verify PLICO-${code}`)}`, expiresAt: expiresAt.toISOString() })
+})
+
+mePhone.delete('/', async c => {
+  await db.user.update({ where: { id: c.get('userId') }, data: { verifiedPhone: null, phoneVerifiedAt: null } })
+  return c.json({ ok: true })
+})

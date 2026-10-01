@@ -12,6 +12,7 @@ import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
 import { prefsOf } from './push-text.ts'
 import { chat } from './chat.ts'
+import { mePhone } from './whatsapp.ts'
 import { clientIp, limiter } from './ip.ts'
 import { count } from './otel.ts'
 import { createHash } from 'node:crypto'
@@ -93,6 +94,8 @@ api.use('*', async (c, next) => {
   if (!open && u.ageGroup === 'teen' && !u.guardianConsentAt) return c.json({ error: 'Waiting for a parent’s consent', code: 'guardian' }, 403)
   await next()
 })
+
+api.route('/me/phone', mePhone) // verifying a phone number over WhatsApp (server/whatsapp.ts)
 
 // ---------- age, parental consent, AI consent, data export ----------
 async function askGuardian(uid: string) {
