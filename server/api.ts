@@ -715,31 +715,64 @@ api.post('/invites/:code/join', async c => {
 })
 
 // ---------- friends: a two-person group per pair, for expenses outside any group ----------
-const directKey = (a: string, b: string) => createHash('sha256').update([a.toLowerCase(), b.toLowerCase()].sort().join('\n')).digest('hex')
+type Me = { id: string; name: string; email: string }
+/** Who the friend is: an account (joined from the start), or an email or phone number they'll join with. */
+type Friend = { name: string; userId?: string; email?: string; phone?: string }
+const directKey = (a: string, b: string) => createHash('sha256').update([a, b].sort().join('\n')).digest('hex')
+const meFor = (uid: string) => db.user.findUniqueOrThrow({ where: { id: uid }, select: { id: true, email: true, name: true, verifiedPhone: true } })
+/** The friends group with this person, made if there isn't one yet. `made` is the friend's new spot. */
+async function directWith(me: Me, f: Friend): Promise<{ id: string; made?: string }> {
+  // Found by membership, not by key: older email-keyed groups, and spots that have since joined, still match.
+  const them: Prisma.MemberWhereInput = f.userId ? { userId: f.userId }
+    : f.email ? { OR: [{ email: { equals: f.email, mode: 'insensitive' } }, { user: { email: { equals: f.email, mode: 'insensitive' } } }] }
+    : { OR: [{ phone: f.phone }, { user: { verifiedPhone: f.phone } }] }
+  const found = await db.group.findFirst({ where: { kind: 'direct', AND: [{ members: { some: { userId: me.id } } }, { members: { some: them } }] }, select: { id: true } })
+  if (found) return found
+  // ponytail: the key only stops the same add racing itself. Two people adding each other at the same moment by
+  // different identifiers (my email, their phone) can make two friends balances. Merge when that's reported.
+  const key = directKey(`u:${me.id}`, f.userId ? `u:${f.userId}` : f.email ? `e:${f.email}` : `p:${f.phone}`)
+  const id = crypto.randomUUID(), selfId = crypto.randomUUID(), friendId = crypto.randomUUID()
+  const by = { byId: me.id, byName: me.name }
+  const friend = { id: friendId, name: f.name, email: f.email ?? null, phone: f.phone ?? null, ...(f.userId ? { userId: f.userId } : { addedById: me.id }) }
+  try {
+    await db.$transaction(async tx => {
+      await tx.group.create({ data: { id, name: f.name, kind: 'direct', theme: 'classic', directKey: key, inviteCode: inviteCode(), createdById: me.id,
+        members: { create: [{ id: selfId, name: me.name, userId: me.id, email: me.email.toLowerCase() }, friend] } } })
+      await audit(tx, id, { kind: 'group.created', memberId: selfId, ...by, after: { kind: 'direct' } })
+      await audit(tx, id, { kind: 'member.invited', memberId: friendId, ...by, after: { name: f.name, ...(f.email && { email: f.email }), ...(f.phone && { phone: f.phone }) } })
+    })
+  } catch (e) {
+    // The same add twice at the same moment (two taps, two phones): the other request made it first.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return db.group.findUniqueOrThrow({ where: { directKey: key }, select: { id: true } })
+    throw e
+  }
+  return { id, made: friendId }
+}
+
+// A friend by exactly one of: email, phone, or (someone you already share a group with) their account.
 api.post('/friends', async c => {
   const b = FriendIn.parse(await c.req.json())
-  if (!b.email) return c.json({ error: 'Add their email.' }, 400)
-  const uid = c.get('userId'), email = b.email.trim().toLowerCase()
-  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, name: true } })
+  if ([b.email, b.phone, b.userId].filter(Boolean).length !== 1) return c.json({ error: 'Add their phone number or email.' }, 400)
+  const me = await meFor(c.get('userId'))
+  if (b.userId) {
+    // Only people you already split with: anyone else would be a lookup of who's on Plico.
+    const them = b.userId === me.id ? null
+      : await db.user.findFirst({ where: { id: b.userId, members: { some: { group: { members: { some: { userId: me.id } } } } } }, select: { id: true, name: true, email: true } })
+    if (!them) return c.json(notFound, 404)
+    return c.json({ id: (await directWith(me, { name: them.name, userId: them.id, email: them.email.toLowerCase() })).id })
+  }
+  if (b.phone) {
+    // Never matched to an account here: that would tell anyone whether a number is on Plico, and whose it is.
+    if (b.phone === me.verifiedPhone) return c.json({ error: 'That’s your own number.' }, 400)
+    const g = await directWith(me, { name: b.name, phone: b.phone })
+    // Still waiting for them: their personal link, so the app can open WhatsApp straight to them.
+    const spot = await db.member.findFirst({ where: { groupId: g.id, userId: null, phone: b.phone }, select: { id: true } })
+    return c.json({ id: g.id, ...(spot && { link: claimUrl(await ensureToken(spot.id)) }) })
+  }
+  const email = b.email!.trim().toLowerCase()
   if (email === me.email.toLowerCase()) return c.json({ error: 'That’s your own email.' }, 400)
-  // ponytail: keyed by both emails; if someone changes their email a second friends balance can appear. Merge when that's reported.
-  const key = directKey(me.email, email)
-  const found = await db.group.findUnique({ where: { directKey: key }, select: { id: true } })
-  if (found) return c.json({ id: found.id })
-  const id = crypto.randomUUID(), selfId = crypto.randomUUID(), friendId = crypto.randomUUID()
-  const by = { byId: uid, byName: me.name }
-  await db.$transaction(async tx => {
-    await tx.group.create({ data: { id, name: b.name, kind: 'direct', theme: 'classic', directKey: key, inviteCode: inviteCode(), createdById: uid,
-      members: { create: [{ id: selfId, name: me.name, userId: uid, email: me.email.toLowerCase() }, { id: friendId, name: b.name, email, addedById: uid }] } } })
-    await audit(tx, id, { kind: 'group.created', memberId: selfId, ...by, after: { kind: 'direct' } })
-    await audit(tx, id, { kind: 'member.invited', memberId: friendId, ...by, after: { name: b.name, email } })
-  }).catch(async e => {
-    // Both added each other at the same moment: the other request made it first.
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return
-    throw e
-  })
-  const g = await db.group.findUniqueOrThrow({ where: { directKey: key }, select: { id: true } })
-  if (g.id === id) await inviteByEmail(id, friendId, email, { id: uid, name: me.name })
+  const g = await directWith(me, { name: b.name, email })
+  if (g.made) await inviteByEmail(g.id, g.made, email, { id: me.id, name: me.name })
   return c.json({ id: g.id })
 })
 
