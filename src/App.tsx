@@ -4,7 +4,9 @@ import { commitDraft, type Target } from './draft'
 import { Suspense, lazy, useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
-import { update, useStore, type State } from './store'
+import { getState, update, useStore, type State } from './store'
+import { API } from './auth-client'
+import { FriendCardOut } from './schema'
 import { api, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
@@ -16,7 +18,7 @@ import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
 import { Search } from './search'
-import { FriendPage, FriendSettle, Friends, PeoplePicker, emailOk, friendsOf, groupTitle, type Person as Pick } from './people'
+import { FriendPage, FriendSettle, Friends, PeoplePicker, WhatsAppInvite, emailOk, friendBy, friendPath, ownCode, useInviteLink, friendsOf, groupTitle, type Person as Pick } from './people'
 
 const back = () => (history.length > 1 ? history.back() : go('/'))
 const edit = (gid: Id, fn: (g: Group) => void) => update(d => { const g = d.groups.find(x => x.id === gid); if (g) fn(g) })
@@ -53,6 +55,7 @@ export default function App() {
   if (r[0] === 'guardian' && r[1]) return <GuardianConsent token={r[1]} />
   if (sync.booting) return <Splash />
   if (!sync.authed && (r[0] === 'join' || r[0] === 'claim') && r[1]) return <InvitePreview s={s} kind={r[0]} code={r[1]} />
+  if (!sync.authed && r[0] === 'u' && r[1]) return <FriendLink s={s} code={r[1]} />
   // plico.space, signed out, first visit on the web: the front door. Phone apps and returning people go straight to sign-in.
   if (!sync.authed && !Capacitor.isNativePlatform() && !s.user && !r[0]) return <Landing />
   if (!sync.authed && r[0] === 'signin') return <AuthFlow s={s} start="signin" />
@@ -64,6 +67,7 @@ export default function App() {
   if (r[0] === 'claim' && r[1]) return <Claim s={s} token={r[1]} />
   if (r[0] === 'delete' && r[1]) return <DeleteConfirm s={s} token={r[1]} />
   if (r[0] === 'join' && r[1]) return <JoinGroup s={s} code={r[1]} />
+  if (r[0] === 'u' && r[1]) return <FriendLink s={s} code={r[1]} />
   if (r[0] === 'me') {
     const Page = { profile: ProfilePage, theme: AppearancePage, tone: NotificationsPage, notify: NotificationsPage, security: SecurityPage, devices: DevicesPage, delete: DeletePage, privacy: PrivacyPage }[r[1] ?? '']
     return Page ? <Page key={r[1]} s={s} /> : <AccountHub s={s} />
@@ -73,7 +77,7 @@ export default function App() {
   if (r[0] === 'friends') return <Friends s={s} />
   if (r[0] === 'activity' || r[0] === 'log') return <Activity s={s} />
   if (r[0] === 'search') return <Search s={s} />
-  if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} email={decodeURIComponent(r[1])} /> : <FriendPage s={s} email={decodeURIComponent(r[1])} />
+  if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} k={decodeURIComponent(r[1])} /> : <FriendPage s={s} k={decodeURIComponent(r[1])} />
   if (r[0] === 'new' || (r[0] === 'add' && !s.groups.length)) return <NewGroup key={r[1]} s={s} preset={r[0] === 'new' ? r[1] : undefined} />
   if (r[0] === 'add') return <ExpenseForm key={r.slice(1).join('/') || 'add'} s={s} shared={r[1] === 'shared'} friend={r[1] === 'f' && r[2] ? decodeURIComponent(r[2]) : undefined} />
   const g = r[0] === 'g' ? s.groups.find(x => x.id === r[1]) : undefined
@@ -84,6 +88,7 @@ export default function App() {
     if (r[2] === 'e' && r[3] && r[4] === 'history') return <ExpenseHistory s={s} g={g} eid={r[3]} />
     if (r[2] === 'e' && r[3]) return <ExpenseForm key={r[3]} s={s} gid={g.id} eid={r[3]} />
     if (r[2] === 'edit') return <GroupSettings s={s} g={g} />
+    if (r[2] === 'invite' && g.kind !== 'direct') return <GetEveryoneIn s={s} g={g} />
     if (r[2] === 'pay' && r[3] && r[4] && +r[5] > 0) {
       const [from, to] = [r[3], r[4]]
       const record = (p: number) => {
@@ -131,10 +136,10 @@ function NewGroup({ s, preset }: { s: State; preset?: string }) {
       d.me.name = me.trim()
       d.groups.unshift({
         id, name: name.trim() || KINDS[kind].hint, kind, theme: KINDS[kind].theme, track: kind === 'family' || undefined,
-        members: [{ id: ME, name: 'Me' }, ...people.map(p => ({ id: uid(), name: p.name, email: p.email }))], expenses: [],
+        members: [{ id: ME, name: 'Me' }, ...people.map(p => ({ id: uid(), name: p.name, email: p.email, phone: p.phone }))], expenses: [],
       })
     })
-    location.replace('#/g/' + id)
+    location.replace(`#/g/${id}/invite`) // invite first: a group is only useful once everyone's in
   }
   return (
     <Screen t={s.theme} back={preset ? true : () => setKind(null)} title={`New ${KINDS[kind].label.toLowerCase()} group`}>
@@ -148,7 +153,7 @@ function NewGroup({ s, preset }: { s: State; preset?: string }) {
           </label>
         )}
         <PeoplePicker s={s} value={people} onChange={setPeople} label="Who else is in?" />
-        <small>Friends you’ve split with before show up as you type. Anyone new gets an email invite, and sees the group as soon as they join. You can change the theme later in group settings.</small>
+        <small>Friends you’ve split with before show up as you type. Anyone new gets an invite by email or WhatsApp, and sees the group as soon as they join. You can change the theme later in group settings.</small>
         <button className="btn primary" disabled={!me.trim()}>{people.length ? `Create group with ${count(people.length, 'person', 'people')}` : 'Create group'}</button>
       </form>
     </Screen>
@@ -166,14 +171,14 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
   // Who it's with: preset when you came from a group or a friend; from the + button, you choose.
   const [target, setTarget] = useState<Target | null>(() => {
     if (gid) return { kind: 'group', groupId: gid }
-    const f = friend ? friendsOf(s).find(x => x.email === friend) : undefined
-    return f ? { kind: 'friends', people: [{ email: f.email, name: f.name }] } : null
+    const f = friend ? friendBy(s, friend) : undefined
+    return f ? { kind: 'friends', people: [{ key: f.key, name: f.name }] } : null
   })
   const real = target?.kind === 'group' ? s.groups.find(x => x.id === target.groupId) : undefined
-  // Outside groups, the form works on a stand-in group: you and the friends, keyed by email.
+  // Outside groups, the form works on a stand-in group: you and the friends, keyed by friend key.
   const g: Group = real ?? { id: '', name: '', kind: 'direct', theme: s.theme, expenses: [],
-    members: [{ id: ME, name: 'Me' }, ...(target?.kind === 'friends' ? target.people.map(p => ({ id: p.email, name: p.name, email: p.email, joined: true })) : [])] }
-  const targetKey = target ? (target.kind === 'group' ? target.groupId : target.people.map(p => p.email).join()) : ''
+    members: [{ id: ME, name: 'Me' }, ...(target?.kind === 'friends' ? target.people.map(p => ({ id: p.key, name: p.name, joined: true })) : [])] }
+  const targetKey = target ? (target.kind === 'group' ? target.groupId : target.people.map(p => p.key).join()) : ''
   const old = eid ? g.expenses.find(e => e.id === eid) : undefined
   const flags = (grp: Group, on = '1') => Object.fromEntries(grp.members.map(m => [m.id, on]))
   const payers0 = old ? Object.keys(old.paid) : [ME]
@@ -529,7 +534,7 @@ function ImportSplitwise({ s }: { s: State }) {
   const [me, setMe] = useState(-1)
   const [kind, setKind] = useState<Kind>('friends')
   const [emails, setEmails] = useState<string[]>([])
-  const friends = new Map(friendsOf(s).map(f => [f.name.toLowerCase(), f.email]))
+  const friends = new Map(friendsOf(s).flatMap(f => (f.email ? [[f.name.toLowerCase(), f.email]] : [])))
   const read = async (f: File) => {
     setErr('')
     const r = parseSplitwise(await f.text())
@@ -600,8 +605,6 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
   const used = new Set(g.expenses.flatMap(e => [...Object.keys(e.paid), ...Object.keys(e.owed)]))
   const set = (fn: (x: Group) => void) => edit(g.id, fn)
   const direct = g.kind === 'direct'
-  const [adding, setAdding] = useState<Pick[]>([])
-  const addAll = () => { set(x => { x.members.push(...adding.map(p => ({ id: uid(), name: p.name, email: p.email }))) }); setAdding([]) }
   return (
     <Screen t={s.theme} back title={direct ? `You and ${groupTitle(g)}` : 'Group settings'}>
       <div className="form">
@@ -622,8 +625,7 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
           <ul className="people">
             {g.members.map(m => <Person key={m.id} s={s} g={g} m={m} used={used.has(m.id)} />)}
           </ul>
-          <PeoplePicker s={s} value={adding} onChange={setAdding} taken={g.members.map(m => m.email ?? '').filter(Boolean)} />
-          {adding.length > 0 && <button type="button" className="btn primary" onClick={addAll}>Add {count(adding.length, 'person', 'people')} to {g.name}</button>}
+          <AddPeople s={s} g={g} />
           <Invite g={g} />
         </>}
         <button type="button" className="link center-link" onClick={() => go(`/g/${g.id}/audit`)}><Icon n="log" size={18} />Audit log</button>
@@ -640,6 +642,43 @@ function GroupSettings({ s, g }: { s: State; g: Group }) {
 }
 
 // ---------- people + invites ----------
+/** Add people to a group; anyone added by phone alone gets their WhatsApp invite right here. */
+function AddPeople({ s, g, label }: { s: State; g: Group; label?: string }) {
+  const [adding, setAdding] = useState<Pick[]>([])
+  const [added, setAdded] = useState<Id[]>([])
+  const addAll = () => {
+    const ms = adding.map(p => ({ id: uid(), name: p.name, email: p.email, phone: p.phone }))
+    edit(g.id, x => { x.members.push(...ms) }); setAdding([])
+    setAdded(ms.filter(m => m.phone && !m.email).map(m => m.id))
+  }
+  return <>
+    <PeoplePicker s={s} value={adding} onChange={setAdding} label={label} taken={g.members.flatMap(m => [m.email ?? '', m.phone ?? '', m.uid ?? '']).filter(Boolean)} />
+    {adding.length > 0 && <button type="button" className="btn primary" onClick={addAll}>Add {count(adding.length, 'person', 'people')} to {g.name}</button>}
+    {g.members.filter(m => added.includes(m.id)).map(m => <WhatsAppInvite key={m.id} g={g} m={m} />)}
+  </>
+}
+
+/** Right after making a group: get everyone in before the first expense. The group's own link, dropped in the
+ * WhatsApp group you already have, is the quickest way; personal invites for anyone added by phone; or add more. */
+function GetEveryoneIn({ s, g }: { s: State; g: Group }) {
+  const done = () => location.replace('#/g/' + g.id)
+  const phones = g.members.filter(m => m.id !== ME && !m.joined && m.phone && !m.email)
+  return (
+    <Screen t={g.theme} title="Get everyone in" action={<button type="button" className="link" onClick={done}>Skip</button>}>
+      <div className="form">
+        <p className="muted-p">Everyone in {g.name} sees who paid what. The quickest way in: share the link in the WhatsApp group you already have. Friends open it, sign in, and pick which name is theirs.</p>
+        <Invite g={g} lead />
+        {phones.length > 0 && <>
+          <h2 className="form-h">Added by phone</h2>
+          {phones.map(m => <WhatsAppInvite key={m.id} g={g} m={m} />)}
+        </>}
+        <h2 className="form-h">Or add them yourself</h2>
+        <AddPeople s={s} g={g} label="Name, email or phone" />
+        <button type="button" className="btn secondary" onClick={done}>Done</button>
+      </div>
+    </Screen>
+  )
+}
 type M = Group['members'][number]
 const setMember = (g: Group, id: Id, fn: (m: M) => void) => edit(g.id, x => { const m = x.members.find(y => y.id === id); if (m) fn(m) })
 
@@ -653,13 +692,8 @@ function CommitInput({ value, onCommit, ...rest }: { value: string; onCommit: (v
 
 function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) {
   const [open, setOpen] = useState(false)
-  const [link, setLink] = useState('')
   const [note, setNote] = useState('')
-  useEffect(() => {
-    if (!open || m.joined || m.id === ME) return
-    api<{ link: string }>(`/api/groups/${g.id}/members/${m.id}/invite`, { method: 'POST', body: '{}' })
-      .then(r => setLink(r.link), () => setLink(''))
-  }, [open, m.joined, m.id, g.id])
+  const link = useInviteLink(g.id, m.id, open && !m.joined && m.id !== ME)
   if (m.id === ME)
     return (
       <li className="person">
@@ -679,7 +713,7 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
     <li className={`person${open ? ' open' : ''}`}>
       <button type="button" className="person-head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Avatar name={m.name} image={m.image} size={40} />
-        <span className="grow"><strong>{m.name}</strong><small>{m.email}</small></span>
+        <span className="grow"><strong>{m.name}</strong><small>{m.email ?? m.phone}</small></span>
         <span className={`chip-state ${m.joined ? 'ok' : 'info'}`}>{status}</span>
       </button>
       {open && (
@@ -699,7 +733,7 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
             </>}
             <div className="person-actions">
               {m.email && emailOk(m.email) && <button type="button" className="btn-sm" onClick={() => void resend()}><Icon n="send" size={16} />{m.invited ? 'Resend email' : 'Email invite'}</button>}
-              {link && <a className="btn-sm" href={wa(msg)} target="_blank" rel="noopener"><Icon n="send" size={16} />WhatsApp</a>}
+              {link && <a className="btn-sm" href={wa(msg, m.phone)} target="_blank" rel="noopener"><Icon n="send" size={16} />WhatsApp</a>}
               {link && <button type="button" className="btn-sm ghost" onClick={() => { void navigator.clipboard?.writeText(link); setNote('Invite link copied.') }}><Icon n="copy" size={16} />Copy link</button>}
             </div>
             {!link && <small>Invite links appear once this person has synced. Check your connection.</small>}
@@ -716,18 +750,26 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
 }
 
 // ---------- group invite link ----------
-function Invite({ g }: { g: Group }) {
+function Invite({ g, lead }: { g: Group; lead?: boolean }) {
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')
-  useEffect(() => { api<{ code: string }>(`/api/groups/${g.id}/invite`).then(r => setCode(r.code), () => setErr('The invite link appears once this group has synced. Check your connection.')) }, [g.id])
+  useEffect(() => {
+    // A group made a moment ago may still be on its way to the server: a few tries before giving up.
+    let live = true
+    const get = (n: number): void => void api<{ code: string }>(`/api/groups/${g.id}/invite`).then(r => { if (live) setCode(r.code) },
+      () => { if (live && n) setTimeout(() => get(n - 1), 1500); else if (live) setErr('The invite link appears once this group has synced. Check your connection.') })
+    get(3)
+    return () => { live = false }
+  }, [g.id])
   const link = code ? `${PUBLIC}/#/join/${code}` : ''
   const qr = useQr(link)
   return <>
-    <h2 className="form-h">Invite people</h2>
+    {!lead && <h2 className="form-h">Invite people</h2>}
     {link ? <>
-      <p className="muted-p">Friends open this link, sign in, and pick which name in the group is theirs.</p>
-      {qr && <div className="qr-plate qr-sm"><img src={qr} alt={`QR code to join ${g.name}`} /></div>}
-      <a className="btn secondary" href={wa(`Join “${g.name}” on Plico so we can split and settle up: ${link}`)} target="_blank" rel="noopener"><Icon n="send" />Share invite on WhatsApp</a>
+      {!lead && <p className="muted-p">Friends open this link, sign in, and pick which name in the group is theirs.</p>}
+      {qr && !lead && <div className="qr-plate qr-sm"><img src={qr} alt={`QR code to join ${g.name}`} /></div>}
+      <a className={`btn ${lead ? 'primary' : 'secondary'}`} href={wa(`Join “${g.name}” on Plico so we can split and settle up: ${link}`)} target="_blank" rel="noopener"><Icon n="send" />{lead ? 'Share link in your WhatsApp group' : 'Share invite on WhatsApp'}</a>
+      {qr && lead && <div className="qr-plate qr-sm"><img src={qr} alt={`QR code to join ${g.name}`} /></div>}
       <button type="button" className="link center-link" onClick={() => navigator.clipboard?.writeText(link)}><Icon n="copy" size={18} />Copy invite link</button>
       <button type="button" className="link center-link" onClick={() => {
         if (confirm('Make a new invite link? The old one stops working, so anyone who has it can’t join with it.'))
@@ -763,6 +805,48 @@ function JoinGroup({ s, code }: { s: State; code: string }) {
           <h1 className="q">{inv.name}</h1>
           <p className="muted-p">{count(inv.people, 'person is', 'people are')} splitting here. If someone added you by email, you get that spot and its balance.</p>
           <button className="btn primary" disabled={busy} onClick={() => void join()}>Join as {s.me.name || 'me'}</button>
+          {err && <p className="error" role="alert">{err}</p>}
+        </div>
+      )}
+    </Screen>
+  )
+}
+
+/** Someone's "add me" link (#/u/<code>). Signed out: who it is, then sign in, and the link carries on after it,
+ * just like a group invite. Signed in: add them, and land on your page with them. */
+function FriendLink({ s, code }: { s: State; code: string }) {
+  const sync = useSync()
+  const [p, setP] = useState<{ name: string; image: string | null } | null>(null)
+  const [err, setErr] = useState('')
+  const [ready, setReady] = useState(false)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    fetch(`${API}/api/public/u/${code}`).then(async r => {
+      const j: unknown = await r.json().catch(() => ({}))
+      const out = FriendCardOut.safeParse(j)
+      if (r.ok && out.success) setP(out.data); else setErr((j as { error?: string }).error ?? 'This link is no longer valid. Ask them for a fresh one.')
+    }, () => setErr('Can’t reach Plico. Check your connection and try again.'))
+  }, [code])
+  if (!sync.authed && (ready || err)) return <AuthFlow s={s} notice={p ? `Sign in or create your account to add ${p.name}.` : `${err.replace(/\.?$/, '.')} You can still sign in.`} />
+  if (!sync.authed && !p) return <Splash />
+  const own = code === ownCode(s)
+  const add = async () => {
+    setBusy(true); setErr('')
+    try {
+      const r = await api<{ id: string }>(`/api/friends/code/${code}`, { method: 'POST', body: '{}' })
+      await pull()
+      const f = friendsOf(getState()).find(x => x.direct?.id === r.id)
+      location.replace('#' + (f ? friendPath(f) : '/friends'))
+    } catch (e) { setErr((e as Error).message); setBusy(false) }
+  }
+  return (
+    <Screen t={s.theme} back={sync.authed} title="Add a friend">
+      {!p ? <p className="empty">{err || 'Opening link…'}</p> : (
+        <div className="form">
+          <div className="friend-head"><Avatar name={p.name} image={p.image} size={72} /><p><strong>{p.name}</strong><small>{own ? 'This is your own link' : 'wants to split and settle up with you on Plico'}</small></p></div>
+          {own ? <p className="muted-p">Share it with friends: when they open it and add you, you’re friends here, ready to split.</p>
+            : sync.authed ? <button className="btn primary" disabled={busy} onClick={() => void add()}>{busy ? 'Adding…' : `Add ${p.name} as a friend`}</button>
+            : <button className="btn primary" onClick={() => setReady(true)}>Sign in to add {p.name}</button>}
           {err && <p className="error" role="alert">{err}</p>}
         </div>
       )}

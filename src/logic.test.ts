@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, friendsIn, findFriend, personKey, type Group } from './logic.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -161,9 +161,9 @@ assert.equal(auditPayload(ent), auditPayload({ ...ent, effect: { a: 1, b: -1 } }
 console.log('friends + audit ok')
 
 // expenses with friends outside groups: one friend whole; several only when you paid, one part per friend ledger
-assert.deepEqual(friendParts(900, { [ME]: 900 }, { [ME]: 450, 'b@x.in': 450 }), { parts: [{ email: 'b@x.in', amount: 900, paid: { [ME]: 900 }, owed: { [ME]: 450, 'b@x.in': 450 } }] })
-assert.deepEqual(friendParts(900, { 'b@x.in': 900 }, { [ME]: 900 }), { parts: [{ email: 'b@x.in', amount: 900, paid: { 'b@x.in': 900 }, owed: { [ME]: 900 } }] })
-assert.deepEqual(friendParts(900, { [ME]: 900 }, { [ME]: 300, 'b@x.in': 300, 'r@x.in': 300 }).parts?.map(p => [p.email, p.amount, p.owed]),
+assert.deepEqual(friendParts(900, { [ME]: 900 }, { [ME]: 450, 'b@x.in': 450 }), { parts: [{ key: 'b@x.in', amount: 900, paid: { [ME]: 900 }, owed: { [ME]: 450, 'b@x.in': 450 } }] })
+assert.deepEqual(friendParts(900, { 'b@x.in': 900 }, { [ME]: 900 }), { parts: [{ key: 'b@x.in', amount: 900, paid: { 'b@x.in': 900 }, owed: { [ME]: 900 } }] })
+assert.deepEqual(friendParts(900, { [ME]: 900 }, { [ME]: 300, 'b@x.in': 300, 'r@x.in': 300 }).parts?.map(p => [p.key, p.amount, p.owed]),
   [['b@x.in', 300, { 'b@x.in': 300 }], ['r@x.in', 300, { 'r@x.in': 300 }]])
 assert.match((friendParts(900, { 'b@x.in': 900 }, { [ME]: 300, 'b@x.in': 300, 'r@x.in': 300 }) as { error: string }).error, /make it a group/)
 assert.match((friendParts(900, { [ME]: 900 }, { [ME]: 900 }) as { error: string }).error, /Pick who/)
@@ -218,6 +218,7 @@ console.log('simplify ok')
   assert.deepEqual(scrub(['#/u/ab12cd34ef', '/api/public/u/ab12cd34ef', '/api/friends/code/ab12cd34ef', '/api/friends']), ['#/u/[hidden]', '/api/public/u/[hidden]', '/api/friends/code/[hidden]', '/api/friends'])
   assert.equal(scrub({ release: 'plico@0.1.0' }).release, 'plico@0.1.0', 'a release name is not an email')
   assert.equal(scrub('A.B@Mail.Example.IN').toString(), '[email]')
+  assert.equal(scrub('#/u/abc123xyz0 /api/public/u/abc123xyz0'), '#/u/[hidden] /api/public/u/[hidden]', 'friend links are secrets too')
   console.log('crash report scrubbing ok')
 }
 
@@ -230,3 +231,20 @@ assert.equal(normPhone('+1 415 555 0100'), '+14155550100')
 assert.equal(normPhone('12345'), null)
 assert.equal(normPhone('5876543210'), null) // Indian mobiles start 6-9
 assert.equal(normPhone('riya@x.com'), null)
+
+// People: one friend per person, whichever way each group knows them.
+{
+  const grp = (id: string, members: Group['members'], kind: Group['kind'] = 'trip'): Group => ({ id, name: id, kind, theme: 'classic', members: [{ id: ME, name: 'Me' }, ...members], expenses: [] })
+  const fs = friendsIn([
+    grp('a', [{ id: 'm1', name: 'Bala K', email: 'bala@x.in', joined: true, uid: 'U1' }, { id: 'm2', name: 'Riya', phone: '+919876543210' }]),
+    grp('b', [{ id: 'm3', name: 'Bala', email: 'bala@x.in' }, { id: 'm4', name: 'Me again', email: 'me@x.in' }]), // a placeholder Bala's account already has
+    grp('c', [{ id: 'm5', name: 'Riya S', phone: '+919876543210' }], 'direct'),
+  ], { id: 'U0', email: 'Me@x.in' })
+  assert.deepEqual(fs.map(f => [f.key, f.name, f.spots.map(x => x.id)]), [['u:U1', 'Bala K', ['m1', 'm3']], ['p:+919876543210', 'Riya', ['m2', 'm5']]])
+  assert.equal(fs[1].direct?.id, 'c')
+  assert.equal(findFriend(fs, 'bala@x.in')?.key, 'u:U1', 'old /f/<email> links still open the friend')
+  assert.equal(findFriend(fs, 'e:bala@x.in')?.key, 'u:U1')
+  assert.equal(findFriend(fs, 'p:+919876543210')?.name, 'Riya')
+  assert.equal(personKey({ id: 'x', name: 'Nobody' }), undefined)
+  console.log('friends ok')
+}

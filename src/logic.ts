@@ -10,8 +10,9 @@ export type Tone = 'gentle' | 'normal' | 'shameless'
 export type Member = {
   id: Id; name: string; upi?: string
   upi2?: string // backup UPI ID
-  email?: string; phone?: string // invite targets for people without the app
+  email?: string; phone?: string // invite targets for people without the app (joined: the account's own email)
   joined?: boolean // linked to an account
+  uid?: string // that account's id
   invited?: boolean // an invite has gone out
   addedBy?: string // not joined yet and added by someone else: only they can change the UPI IDs and email (their name)
   image?: string // their account's profile picture (photo path, emoji:…, plico:…)
@@ -383,18 +384,51 @@ export function itemSplit(items: Item[], extras: number): { owed: Record<Id, num
   return { owed: Object.fromEntries(Object.keys(sub).map(id => [id, sub[id] + (ex[id] ?? 0)])) }
 }
 
+// ---------- people: one identity each, across every group ----------
+/** Who a spot is: their account once they've joined, else the email or phone they were invited by. */
+export const personKey = (m: Member) => m.uid ? 'u:' + m.uid : m.email ? 'e:' + m.email.toLowerCase() : m.phone ? 'p:' + m.phone : undefined
+export type Friend = { key: string; name: string; email?: string; phone?: string; uid?: string; image?: string; joined: boolean; spots: { g: Group; id: Id }[]; direct?: Group }
+/** Everyone you share a group with, once each. `me`: your own account and email, never a friend of yours. */
+export function friendsIn(groups: Group[], me?: { id: string; email: string }): Friend[] {
+  const by = new Map<string, Friend>()
+  for (const g of groups) for (const m of g.members) {
+    const k = personKey(m)
+    if (m.id === ME || !k || (me && (m.uid === me.id || m.email?.toLowerCase() === me.email.toLowerCase()))) continue
+    const f = by.get(k) ?? { key: k, name: m.name, joined: false, spots: [] }
+    f.spots.push({ g, id: m.id })
+    if (m.joined && !f.joined) { f.joined = true; f.name = m.name } // an account's own name wins over what someone typed
+    f.email ||= m.email?.toLowerCase(); f.phone ||= m.phone; f.uid ||= m.uid; f.image ||= m.image
+    if (g.kind === 'direct') f.direct = g
+    by.set(k, f)
+  }
+  // A spot still waiting under an email or phone that a friend's account already has is that friend.
+  for (const f of by.values()) {
+    if (f.joined) continue
+    const to = [...by.values()].find(x => x.joined && ((f.email && x.email === f.email) || (f.phone && x.phone === f.phone)))
+    if (!to) continue
+    to.spots.push(...f.spots); to.direct ||= f.direct
+    by.delete(f.key)
+  }
+  return [...by.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
+/** A friend by key, or by a bare email (older /f/<email> links) or the email/phone/account a key names. */
+export function findFriend(fs: Friend[], k: string): Friend | undefined {
+  const [, t, v] = /^([uep]):(.+)$/.exec(k) ?? [, 'e', k.toLowerCase()]
+  return fs.find(f => f.key === k) ?? fs.find(f => (t === 'u' ? f.uid : t === 'p' ? f.phone : f.email) === v)
+}
+
 // ---------- expenses with friends, outside any group ----------
 /** Each pair of friends has its own two-person ledger. An expense with one friend goes there whole. With several
  * friends and no group, it can only be recorded when you paid: each friend's share goes on your ledger with them.
  * (If a friend paid for you and a third person, that third person would owe them on a ledger you're not part of.)
- * Keys: ME, or a friend's email. Returns one expense per friend ledger, keyed the same way. */
-export type PairPart = { email: string; amount: number; paid: Record<string, number>; owed: Record<string, number> }
+ * Keys: ME, or a friend's key. Returns one expense per friend ledger, keyed the same way. */
+export type PairPart = { key: string; amount: number; paid: Record<string, number>; owed: Record<string, number> }
 export function friendParts(amount: number, paid: Record<string, number>, owed: Record<string, number>): { parts: PairPart[] } | { error: string } {
   const friends = [...new Set([...Object.keys(paid), ...Object.keys(owed)])].filter(k => k !== ME)
   if (!friends.length) return { error: 'Pick who this is with.' }
-  if (friends.length === 1) return { parts: [{ email: friends[0], amount, paid, owed }] }
+  if (friends.length === 1) return { parts: [{ key: friends[0], amount, paid, owed }] }
   if (Object.keys(paid).some(k => k !== ME && paid[k] > 0)) return { error: 'When a friend pays for several people, make it a group so everyone sees the same balances.' }
-  const parts = friends.filter(f => (owed[f] ?? 0) > 0).map(f => ({ email: f, amount: owed[f], paid: { [ME]: owed[f] }, owed: { [f]: owed[f] } }))
+  const parts = friends.filter(f => (owed[f] ?? 0) > 0).map(f => ({ key: f, amount: owed[f], paid: { [ME]: owed[f] }, owed: { [f]: owed[f] } }))
   return parts.length ? { parts } : { error: 'Nobody else owes anything on this one.' }
 }
 

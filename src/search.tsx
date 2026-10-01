@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { inr, ME, balances } from './logic'
 import type { State } from './store'
-import { friendBalance, friendsOf } from './people'
+import { contactOf, friendBalance, friendPath, friendsOf } from './people'
 import { Avatar, LedgerRow, Screen, SectionHead, go } from './ui'
 import { Icon } from './icons'
 import { theme } from './themes'
@@ -12,7 +12,7 @@ export function Search({ s }: { s: State }) {
   const t = q.trim().toLowerCase()
   const digits = t.replace(/[₹,\s]/g, '')
   const groups = t ? s.groups.filter(g => g.kind !== 'direct' && g.name.toLowerCase().includes(t)) : []
-  const friends = t ? friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase() && (f.name.toLowerCase().includes(t) || f.email.includes(t))) : []
+  const friends = t ? friendsOf(s).filter(f => f.name.toLowerCase().includes(t) || contactOf(f).includes(t)) : []
   const expenses = t ? s.groups.flatMap(g => g.expenses.map((e, i) => ({ g, e, i })))
     .filter(({ e }) => e.title.toLowerCase().includes(t) || (/^\d+(\.\d+)?$/.test(digits) && String(e.amount / 100).startsWith(digits)))
     .sort((a, b) => b.e.date.localeCompare(a.e.date)).slice(0, 30) : []
@@ -38,9 +38,9 @@ export function Search({ s }: { s: State }) {
       {friends.length > 0 && <>
         <SectionHead title="Friends" />
         <ul className="friends">{friends.map(f => { const n = friendBalance(f); return (
-          <li key={f.email}><button className="friend-row" onClick={() => go('/f/' + encodeURIComponent(f.email))}>
+          <li key={f.key}><button className="friend-row" onClick={() => go(friendPath(f))}>
             <Avatar name={f.name} image={f.image} size={40} />
-            <span className="grow"><strong>{f.name}</strong><small>{f.email}</small></span>
+            <span className="grow"><strong>{f.name}</strong><small>{contactOf(f)}</small></span>
             <span className={`money ${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}`}>{n ? inr(n) : 'settled'}</span>
           </button></li>) })}</ul>
       </>}

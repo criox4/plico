@@ -1,11 +1,11 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
-import { ME, balances, pairwise, simplify, today, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
+import { ME, balances, personKey, pairwise, simplify, today, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import { update, useStore, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { IssuesBanner } from './history'
-import { friendBalance, friendsOf } from './people'
+import { friendBalance, friendPath, friendsOf } from './people'
 import { API } from './auth-client'
 import { api, fileUrl, useSync } from './sync'
 import { enablePush, mayAsk, notNow, pushState, type PushState } from './push'
@@ -86,7 +86,8 @@ export const shareLink = (s: State, g: Group, t: Transfer) =>
   `${PUBLIC}/#/s/${encodeShare({ g: groupTitle(g), f: realName(s, g, t.from), t: realName(s, g, t.to), v: upiOf(s, g, t.to) || undefined, a: t.amount })}`
 export const reminder = (s: State, g: Group, t: Transfer) =>
   `${TONES[s.tone](inr(t.amount), realName(s, g, t.to), groupTitle(g))}\nPay here: ${shareLink(s, g, t)}`
-export const wa = (text: string) => 'https://wa.me/?text=' + encodeURIComponent(text)
+/** A WhatsApp message to share; with a phone (+<country><number>), straight to that person's chat. */
+export const wa = (text: string, phone?: string) => `https://wa.me/${phone?.replace(/\D/g, '') ?? ''}?text=` + encodeURIComponent(text)
 
 // ---------- ornaments (crisp vector geometry, not pictures) ----------
 const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
@@ -531,13 +532,13 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
   // nothing to pay. Collect is derived so the tiles always add up to the total.
   const each = new Map<string, number>()
   for (const { g } of live) for (const m of g.members) if (m.id !== ME) {
-    const k = m.email?.toLowerCase() ?? `${g.id}:${m.id}`
+    const k = personKey(m) ?? `${g.id}:${m.id}`
     each.set(k, (each.get(k) ?? 0) + pairwise(g, ME, m.id))
   }
   const pay = [...each.values()].reduce((a, n) => a + Math.max(-n, 0), 0)
   const collect = total + pay
   const open = rows.filter(r => r.net && !r.g.track).length
-  const people = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
+  const people = friendsOf(s)
     .map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name)).slice(0, 6)
   const recent = s.groups
     .flatMap(g => g.expenses.map((e, i) => ({ g, e, i })))
@@ -603,7 +604,7 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
             <SectionHead title="People" id="d-people" action={<button className="link" onClick={() => go('/friends')}>All friends</button>} />
             <ol className="d-list">
               {people.map(({ f, n }) => (
-                <li key={f.email}><button className="d-row" onClick={() => go('/f/' + encodeURIComponent(f.email))}>
+                <li key={f.key}><button className="d-row" onClick={() => go(friendPath(f))}>
                   <Avatar name={f.name} image={f.image} size={36} />
                   <span className="grow"><strong>{f.name}</strong><small>{n > 0 ? 'owes you' : n < 0 ? 'you owe' : 'settled up'}</small></span>
                   {n ? <span className={`money ${tone(n)}`}>{inr(Math.abs(n))}</span> : <Icon n="check" size={18} />}
@@ -667,7 +668,7 @@ function DashNeeds({ s }: { s: State }) {
   const groups = s.groups
   const cards = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup />),
     ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup />)])
-  const owe = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase())
+  const owe = friendsOf(s)
     .map(f => {
       const live = f.spots.filter(x => !x.g.track)
       const n = live.reduce((a, x) => a + pairwise(x.g, ME, x.id), 0)
@@ -683,10 +684,10 @@ function DashNeeds({ s }: { s: State }) {
       {cards.length || owe.length ? <m.ol key="list" className="debts" {...FADE}><AnimatePresence initial={false}>
         {cards}
         {owe.map(({ f, n, where }) => (
-          <m.li className="debt" key={f.email} {...ROW}>
+          <m.li className="debt" key={f.key} {...ROW}>
             <span className="grow"><strong>You owe {f.name}</strong><small>{where.length > 1 ? `Net across ${count(where.length, 'group', 'groups')}` : where[0]?.g.kind === 'direct' ? 'Outside groups' : where[0] ? groupTitle(where[0].g) : ''}</small></span>
             <span className="money neg">{inr(-n)}</span>
-            <span className="debt-actions"><button className="btn-sm" onClick={() => go(`/f/${encodeURIComponent(f.email)}/settle`)}>Settle</button></span>
+            <span className="debt-actions"><button className="btn-sm" onClick={() => go(`${friendPath(f)}/settle`)}>Settle</button></span>
           </m.li>
         ))}
       </AnimatePresence></m.ol> : <m.p key="clear" className="d-clear" {...FADE}><Icon n="check" size={18} />Nothing needs you right now.</m.p>}
@@ -761,9 +762,9 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
               )}
               {!g.track && d.from === ME && (() => {
                 // They owe you more elsewhere: settle the net once instead of paying here.
-                const f = friends.find(x => x.email === g.members.find(m => m.id === d.to)?.email?.toLowerCase())
+                const f = friends.find(x => x.spots.some(y => y.g.id === g.id && y.id === d.to))
                 const n = f ? friendBalance(f) : 0
-                return f && n >= 0 && <small className="debt-wait">{f.name} {n > 0 ? `owes you ${inr(n)} overall` : 'and you are square overall'}, counting your other groups. <button className="link" onClick={() => go(`/f/${encodeURIComponent(f.email)}${n > 0 ? '/settle' : ''}`)}>{n > 0 ? 'Settle the net' : 'See why'}</button></small>
+                return f && n >= 0 && <small className="debt-wait">{f.name} {n > 0 ? `owes you ${inr(n)} overall` : 'and you are square overall'}, counting your other groups. <button className="link" onClick={() => go(`${friendPath(f)}${n > 0 ? '/settle' : ''}`)}>{n > 0 ? 'Settle the net' : 'See why'}</button></small>
               })()}
             </m.li>
           ))}

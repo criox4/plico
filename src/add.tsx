@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react'
 import type { Group } from './logic'
 import type { State } from './store'
 import type { Target } from './draft'
-import { friendsOf } from './people'
+import { contactOf, friendPath, friendsOf } from './people'
 import { useSync } from './sync'
 import { Chat, ASK_ADD } from './chat'
 import { Avatar, Screen, count, go, groupTitle, SegPill } from './ui'
@@ -34,7 +34,7 @@ export function AddScreen({ s, form, back }: { s: State; form: ReactNode; back?:
         ? <div className="add-chat" role="tabpanel"><Chat suggestions={ASK_ADD} hint="Auto 250 with Bala, or attach a bill" onSaved={saved => {
             const [x] = saved
             if (!x) return
-            go(saved.length > 1 ? '/friends' : x.friend ? `/f/${encodeURIComponent(x.friend)}` : `/g/${x.groupId}`)
+            go(saved.length > 1 ? '/friends' : x.friend ? '/f/' + encodeURIComponent(x.friend) : `/g/${x.groupId}`)
           }} /></div>
         : <div role="tabpanel">{form}</div>}
     </Screen>
@@ -47,12 +47,12 @@ export function WithPicker({ s, value, onChange, locked }: { s: State; value: Ta
   const [q, setQ] = useState('')
   const t = q.trim().toLowerCase()
   const groups = s.groups.filter(g => g.kind !== 'direct' && (!t || g.name.toLowerCase().includes(t))).sort((a, b) => last(b).localeCompare(last(a)))
-  const friends = friendsOf(s).filter(f => f.email !== s.user?.email?.toLowerCase() && (!t || f.name.toLowerCase().includes(t) || f.email.includes(t)))
+  const friends = friendsOf(s).filter(f => !t || f.name.toLowerCase().includes(t) || contactOf(f).includes(t))
     .sort((a, b) => Math.max(0, ...b.spots.map(x => +new Date(last(x.g) || 0))) - Math.max(0, ...a.spots.map(x => +new Date(last(x.g) || 0))) || a.name.localeCompare(b.name))
-  const picked = value?.kind === 'friends' ? value.people.map(p => p.email) : []
-  const toggle = (email: string, name: string) => {
+  const picked = value?.kind === 'friends' ? value.people.map(p => p.key) : []
+  const toggle = (key: string, name: string) => {
     const people = value?.kind === 'friends' ? value.people : []
-    const next = picked.includes(email) ? people.filter(p => p.email !== email) : [...people, { email, name }]
+    const next = picked.includes(key) ? people.filter(p => p.key !== key) : [...people, { key, name }]
     if (next.length) onChange({ kind: 'friends', people: next })
   }
   const g = value?.kind === 'group' ? s.groups.find(x => x.id === value.groupId) : undefined
@@ -60,7 +60,7 @@ export function WithPicker({ s, value, onChange, locked }: { s: State; value: Ta
     <section className={`with${open ? ' open' : ''}`} aria-label="Who it’s with">
       <button type="button" className="with-now" aria-expanded={open} disabled={locked} onClick={() => setOpen(!open)}>
         {g ? <span className="slip-kind with-tile" style={{ background: theme(g.theme).c.accent, color: theme(g.theme).c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} size={20} />}</span>
-          : value?.kind === 'friends' ? <span className="with-faces">{value.people.slice(0, 3).map(p => <Avatar key={p.email} name={p.name} image={friendsOf(s).find(f => f.email === p.email)?.image} size={32} />)}</span>
+          : value?.kind === 'friends' ? <span className="with-faces">{value.people.slice(0, 3).map(p => <Avatar key={p.key} name={p.name} image={friends.find(f => f.key === p.key)?.image} size={32} />)}</span>
           : <span className="with-tile empty"><Icon n="friends" size={20} /></span>}
         <span className="with-what">
           <small>{value ? 'With' : 'Start here'}</small>
@@ -91,10 +91,10 @@ export function WithPicker({ s, value, onChange, locked }: { s: State; value: Ta
             <h3 className="with-h">Friends <small>no group needed · pick one or more</small></h3>
             <ul className="with-list">
               {friends.map(f => (
-                <li key={f.email}><label className={`with-row${picked.includes(f.email) ? ' on' : ''}`}>
+                <li key={f.key}><label className={`with-row${picked.includes(f.key) ? ' on' : ''}`}>
                   <Avatar name={f.name} image={f.image} size={36} />
-                  <span className="grow"><strong>{f.name}</strong><small>{f.email}</small></span>
-                  <input type="checkbox" checked={picked.includes(f.email)} onChange={() => toggle(f.email, f.name)} />
+                  <span className="grow"><strong>{f.name}</strong><small>{contactOf(f)}</small></span>
+                  <input type="checkbox" checked={picked.includes(f.key)} onChange={() => toggle(f.key, f.name)} />
                 </label></li>
               ))}
             </ul>

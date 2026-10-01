@@ -6,7 +6,7 @@
 import { useSyncExternalStore } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
-import { ME, enqueue, isVpa, rebase, runRecurring, uid, type Expense, type Group, type Op, type Theme, type Tone } from './logic'
+import { ME, enqueue, isVpa, normPhone, rebase, runRecurring, uid, type Expense, type Group, type Op, type Theme, type Tone } from './logic'
 import { ConflictOut, GroupsOut, ReadOut, SavedOut, UnreadOut, type ExpenseInput, type Read, type ServerExpense, type ServerGroup, type Snap, type SnapFull } from './schema'
 export type { Read, ServerExpense }
 import { blank, getState, onLocalChange, setRemote, update, type State } from './store'
@@ -78,7 +78,7 @@ const selfBody = (s: State) => ({ name: s.me.name.trim() || 'Me', upi: isVpa(s.m
 const memberBody = (m: Group['members'][number]) => ({
   name: m.name.trim() || 'Someone', upi: m.upi && isVpa(m.upi) ? m.upi : null, upi2: m.upi2 && isVpa(m.upi2) ? m.upi2 : null,
   email: m.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email) ? m.email.trim().toLowerCase() : null,
-  phone: m.phone && /^\+?[0-9 ()-]{7,20}$/.test(m.phone) ? m.phone.trim() : null,
+  phone: (m.phone && normPhone(m.phone)) || null,
 })
 const expenseBody = (g: Group, e: Expense): ExpenseInput => ({
   title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid: mapKeys(g, e.paid)!, owed: mapKeys(g, e.owed)!,
@@ -257,8 +257,9 @@ export function toClient(sg: ServerGroup, userId: string): Group {
   return {
     id: sg.id, name: sg.name, kind: sg.kind, theme: sg.theme, track: sg.track || undefined, emoji: sg.emoji ?? undefined, cover: sg.cover ?? undefined, selfId: self?.id, mine: sg.createdById === userId,
     members: sg.members.map(m => (m.id === self?.id ? { id: ME, name: 'Me' } : {
-      id: m.id, name: m.name, upi: m.upi ?? undefined, upi2: m.upi2 ?? undefined, email: (m.email ?? m.user?.email)?.toLowerCase() || undefined, phone: m.phone ?? undefined,
-      joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined, image: m.user?.image ?? undefined,
+      id: m.id, name: m.name, upi: m.upi ?? undefined, upi2: m.upi2 ?? undefined, phone: m.phone ?? undefined,
+      // Joined: the account's own email (the one they were invited by may differ), so one person is one friend.
+      email: ((m.userId && m.user?.email) || m.email)?.toLowerCase() || undefined, uid: m.userId ?? undefined, joined: !!m.userId || undefined, invited: !!m.invitedAt || undefined, image: m.user?.image ?? undefined,
       addedBy: !m.userId && m.addedById && m.addedById !== userId ? sg.members.find(x => x.userId === m.addedById)?.name : undefined,
     })),
     expenses: sg.expenses.filter(e => !e.deletedAt).map(e => expenseFromServer(e, self?.id)),
