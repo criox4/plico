@@ -245,7 +245,7 @@ export function expenseFromServer(e: Omit<ServerExpense, 'version' | 'deletedAt'
     id: e.id, title: e.title, cat: e.cat, date: e.date, amount: e.amount, paid, owed,
     mode: e.mode ?? undefined, input: e.input ? Object.fromEntries(Object.entries(e.input).map(([k, v]) => [id(k), v])) : undefined,
     settle: e.settle || undefined, pending: e.pending || undefined, rejected: e.rejected || undefined, receipt: e.receipt ?? undefined,
-    verifiedBy: e.verifiedBy ?? undefined, proof: e.proof ?? undefined,
+    verifiedBy: e.verifiedBy ?? undefined, proof: e.proof ?? undefined, utr: e.utr ?? undefined,
     repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay } : undefined, v: e.version,
   }
 }
@@ -382,7 +382,12 @@ export async function addProof(gid: string, eid: string, body: z.input<typeof Pr
     await new Promise(r => setTimeout(r, 300)) // another flush may hold it on the wire
   }
   const out = ProofOut.parse(await api(`/api/groups/${gid}/expenses/${eid}/proof`, { method: 'POST', body: JSON.stringify(ok.data) }))
-  patch(gid, eid, e => { e.proof = out.proof; if (out.verifiedBy) { e.verifiedBy = out.verifiedBy; delete e.pending } })
+  patch(gid, eid, e => {
+    e.proof = out.proof
+    e.utr = ok.data.utr ?? out.proof.read?.utr ?? e.utr
+    if (out.version !== undefined) e.v = out.version
+    if (out.verifiedBy) { e.verifiedBy = out.verifiedBy; delete e.pending }
+  })
   void pull()
   return out
 }

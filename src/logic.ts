@@ -1,4 +1,4 @@
-import type { ServerExpense, Snap } from './schema'
+import type { Proof, Snap } from './schema'
 // All money is integer paise. Never floats past the input box.
 import type { ThemeId as Theme } from './themes'
 export type { Theme }
@@ -33,10 +33,11 @@ export type Expense = {
   rejected?: true // the payee says it hasn't arrived; doesn't move balances
   verifiedBy?: 'payee' | 'screenshot' // how a settlement was verified
   proof?: Proof // how the payer says they paid, and what their receipt showed
+  utr?: string // the UPI transaction ID, typed by the payer or read off their receipt
   repeat?: { next: string; day: number } // monthly
   v?: number // the server version this copy is; edits send it so the server can spot stale ones
 }
-export type Proof = NonNullable<ServerExpense['proof']>
+export type { Proof }
 export type Group = {
   id: Id
   name: string

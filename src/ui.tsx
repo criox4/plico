@@ -936,11 +936,22 @@ export function ProofSheet({ gid, eid, payee, method: m0 = 'upi', onClose }: { g
   )
 }
 
-/** A settlement's details: the payer can add proof while it isn't verified. */
+/** A settlement's details: how sure we are it arrived, and the payer's proof (they can add it while it isn't verified).
+ *  Everyone in the group sees the payment; its UPI transaction ID in full is only for the two people in it. */
 export function SettlementProof({ g, e }: { g: Group; e: Expense }) {
   const { from, to } = ends(e)
   const [adding, setAdding] = useState(false)
+  const p = e.proof, utr = e.utr ?? p?.read?.utr, miss = missedChecks(p), label = verifyLabel(e)
+  const shot = useGroupImage(g.id, p?.file)
   return <>
+    {(label || p) && <ul className="rows">
+      {label && <li className="row-in"><span className="grow">Status</span><span className={`chip-state${e.verifiedBy ? ' ok' : ''}`}>{label}</span></li>}
+      {p && <li className="row-in"><span className="grow">Paid by</span>{METHODS[p.method]}</li>}
+      {utr && <li className="row-in"><span className="grow">UPI transaction ID</span><code>{showUtr(utr, from === ME || to === ME)}</code></li>}
+      {p?.note && <li className="row-in"><span className="grow">Note</span>{p.note}</li>}
+    </ul>}
+    {miss && !e.verifiedBy && <p className="note"><Icon n="help" size={18} /><span>The receipt didn’t match ({miss}), so {to === ME ? 'it’s up to you to check' : `${who(g, to)} is asked to check`}.</span></p>}
+    {p?.file && <a className="receipt-img" href={shot.url || undefined} target="_blank" rel="noopener">{shot.url ? <img src={shot.url} alt="Payment screenshot" /> : <span>{shot.failed ? 'Couldn’t load the screenshot.' : 'Loading screenshot…'}</span>}</a>}
     {from === ME && e.pending && !e.rejected && <button className="btn secondary" onClick={() => setAdding(true)}><Icon n="plus" />{e.proof ? 'Update proof' : 'Add proof'}</button>}
     {adding && <ProofSheet gid={g.id} eid={e.id} payee={who(g, to)} onClose={() => setAdding(false)} />}
   </>
