@@ -803,7 +803,7 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .person-chip { padding-left: 6px; }
 .picked, .suggest, .friends { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .picked li { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 10px; border-radius: var(--radius-sm); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
-.picked li > span, .suggest button > span { flex: 1; min-width: 0; display: grid; }
+.picked li > span:not(.avatar), .suggest button > span:not(.avatar) { flex: 1; min-width: 0; display: grid; }
 .picked small, .suggest small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .suggest button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-height: 52px; text-align: left; border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--elev); }
 .invite-new { display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }

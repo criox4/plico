@@ -821,6 +821,9 @@ export function Settle({ s, g, from, to, amount, t = s.theme, onRecord }: {
   /** Returns the settlement to offer proof for (yours, to someone who'll check it); otherwise it moves on by itself. */
   onRecord?: (paise: number, vpa: string) => { gid: Id; eid: Id } | void
 }) {
+  // Once recorded, the balance behind these props is square (or flips): keep showing the payment that was made.
+  const [paid, setPaid] = useState<{ from: Id; to: Id; amount: number } | null>(null)
+  if (paid) ({ from, to, amount } = paid)
   const payee = realName(s, g, to)
   const [backup, setBackup] = useState(false)
   const m = g.members.find(x => x.id === to)
@@ -831,7 +834,7 @@ export function Settle({ s, g, from, to, amount, t = s.theme, onRecord }: {
   const link = isVpa(vpa) ? upiLink(vpa, payee, amount, note) : ''
   const qr = useQr(link)
   const [proof, setProof] = useState<{ gid: Id; eid: Id; method: Method } | null>(null)
-  const record = (method: Method) => { const x = onRecord?.(amount, vpa); if (x) setProof({ ...x, method }) }
+  const record = (method: Method) => { const x = onRecord?.(amount, vpa); if (x) { setPaid({ from, to, amount }); setProof({ ...x, method }) } }
   return (
     <Screen t={t} back title="Settle up">
       <section className="pay" aria-label="Payment details">
