@@ -212,7 +212,7 @@ export function Landing() {
         </section>
 
         <section className="lp-close" aria-labelledby="close">
-          <Plico mood="settled" size={96} />
+          <Plico mood="settled" size={96} watch boop="Boop Plico" />
           <h2 id="close">Hi. I’m Plico.</h2>
           <p>I keep track of the awkward money stuff, so trips, rent and dinners stay fun.</p>
           <div className="lp-actions center">

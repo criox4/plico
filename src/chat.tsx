@@ -45,7 +45,7 @@ export function ChatButton() {
   // Released after a real pull or a quick flick: close; otherwise the sheet springs back.
   const release = (_: PointerEvent, i: PanInfo) => { if (i.offset.y > 120 || i.velocity.y > 600) close() }
   return <>
-    <button ref={btn} className="chat-fab" aria-label="Ask Plico" aria-expanded={open} onClick={() => setOpen(true)}><Plico mood="idle" size={34} /></button>
+    <button ref={btn} className="chat-fab" aria-label="Ask Plico" aria-expanded={open} onClick={() => setOpen(true)}><Plico mood="idle" size={34} watch /></button>
     <AnimatePresence>
       {open && (
         <M.div key="chat" className="chat-scrim" onClick={e => { if (e.target === e.currentTarget) close() }}

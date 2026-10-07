@@ -1,5 +1,5 @@
 // Account: splash, welcome + sign-in flows, password reset, verification, the account hub and its pages, claim links.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { inr, isVpa, type Kind, type Tone } from './logic'
 import { update, type State } from './store'
@@ -199,7 +199,7 @@ export function Onboarding({ s }: { s: State }) {
           {steps.map((x, i) => <li key={x} className={i < step ? 'done' : i === step ? 'on' : ''} aria-current={i === step ? 'step' : undefined}><span>{x}</span></li>)}
         </ol>
         {step === 0 && <>
-          <div className="hello"><Plico mood="idle" size={56} /><p><strong>Hi{first ? `, ${first}` : ''}! Let’s get you set up.</strong>Three quick things, so your friends know it’s you and can pay you back.</p></div>
+          <div className="hello"><Plico mood="idle" size={56} watch boop="Boop Plico" /><p><strong>Hi{first ? `, ${first}` : ''}! Let’s get you set up.</strong>Three quick things, so your friends know it’s you and can pay you back.</p></div>
           <label className="field"><span>What should friends call you?</span>
             <input value={s.me.name} maxLength={40} autoComplete="name" autoFocus required onChange={e => update(d => { d.me.name = e.target.value })} /></label>
           <label className="field"><span>Phone <em>optional</em></span>
@@ -208,13 +208,13 @@ export function Onboarding({ s }: { s: State }) {
           <button className="btn primary" disabled={!s.me.name.trim() || (!!s.me.phone && !isPhone(s.me.phone))}>Continue</button>
         </>}
         {step === 1 && <>
-          <div className="hello"><Plico mood="owed" size={56} /><p><strong>Pick your face.</strong>A photo, an emoji or a Plico. It’s how you show up in groups and on reminders.</p></div>
+          <div className="hello"><Plico mood="owed" size={56} watch boop="Boop Plico" /><p><strong>Pick your face.</strong>A photo, an emoji or a Plico. It’s how you show up in groups and on reminders.</p></div>
           <AvatarPicker s={s} />
           <button className="btn primary">Continue</button>
           <button type="button" className="link center-link" onClick={() => setStep(0)}>Back</button>
         </>}
         {step === 2 && <>
-          <div className="hello"><Plico mood="settled" size={56} /><p><strong>Where do friends pay you?</strong>Your UPI ID goes on your pay links and QR codes. Plico shows your name above it, so nobody pays the wrong person.</p></div>
+          <div className="hello"><Plico mood="settled" size={56} watch boop="Boop Plico" /><p><strong>Where do friends pay you?</strong>Your UPI ID goes on your pay links and QR codes. Plico shows your name above it, so nobody pays the wrong person.</p></div>
           <label className="field"><span>UPI ID</span>
             <input value={s.me.upi} placeholder="name@okhdfcbank" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus
               aria-invalid={upiBad} onChange={e => update(d => { d.me.upi = e.target.value.trim() })} />
@@ -365,6 +365,15 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
   const [guardian, setGuardian] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(sync.error)
+  // Plico at the top of the form reads along in the email field and covers its eyes while you type a password.
+  const [field, setField] = useState<'email' | 'password' | null>(null)
+  const emailIn = useRef<HTMLInputElement>(null)
+  const caret = () => {
+    const el = emailIn.current
+    if (!el) return null
+    const b = el.getBoundingClientRect()
+    return { x: b.left + 14 + Math.min(email.length * 8.5, b.width - 28), y: b.top + b.height / 2 }
+  }
   const invited = /^#\/(claim|join)\//.test(location.hash)
 
   const run = async (fn: () => Promise<void>) => {
@@ -408,7 +417,7 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
         <div className="welcome-top">
           <Wordmark />
           <h1>Hisaab sorted.</h1>
-          <div className="hello"><Plico mood="idle" size={52} /><p><strong>Hi. I’m Plico.</strong>I keep track of the awkward money stuff, so trips, rent and dinners stay fun.</p></div>
+          <div className="hello"><Plico mood="idle" size={52} watch boop="Boop Plico" /><p><strong>Hi. I’m Plico.</strong>I keep track of the awkward money stuff, so trips, rent and dinners stay fun.</p></div>
           {(notice || invited) && <p className="notice" role="status">{notice || 'You’ve been invited to a group. Create an account or sign in to join it.'}</p>}
           <Showcase />
           <ul className="points">
@@ -431,6 +440,7 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
   return (
     <Screen t="classic" back={() => to(returning && step === 'signin' ? 'signin' : 'welcome')} title={title}>
       <div className="auth">
+        {step !== 'sent' && <div className="auth-plico"><Plico mood="idle" size={64} watch boop="Boop Plico" look={field === 'email' ? caret : undefined} cover={field === 'password'} /></div>}
         {notice && <p className="notice" role="status">{notice}</p>}
         {step === 'sent' ? <>
           <p className="muted-p">If <strong>{email}</strong> has a Plico account, a link to choose a new password is on its way. It works for one hour.</p>
@@ -446,12 +456,14 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
               <label className="field"><span>Your name</span><input value={name} onChange={e => setName(e.target.value)} autoComplete="name" required maxLength={40} /></label>
             )}
             <label className="field"><span>Email</span>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" autoCapitalize="none" required />
+              <input ref={emailIn} type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" autoCapitalize="none" required
+                onFocus={() => setField('email')} onBlur={() => setField(null)} />
               {step === 'signup' && <small>Use the email friends know you by. Groups they add it to appear once you verify it.</small>}
             </label>
             {step !== 'forgot' && (
               <label className="field"><span>Password</span>
                 <input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required
+                  onFocus={() => setField('password')} onBlur={() => setField(null)}
                   autoComplete={step === 'signup' ? 'new-password' : 'current-password'} />
                 {step === 'signup' && <small>At least 8 characters.</small>}
               </label>
