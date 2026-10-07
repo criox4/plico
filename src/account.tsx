@@ -9,6 +9,7 @@ import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, SegPill } from './ui'
 import { crashReportsOn, setCrashReports } from './sentry'
+import { lingers } from './anim'
 import { disablePush, enablePush, pushState, type PushState } from './push'
 import { ClaimPreviewOut, InvitePreviewOut, NotifyOut, PhoneStartOut, PhoneStatusOut, type NotifyPrefs, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
 import type { z } from 'zod/mini'
@@ -64,13 +65,39 @@ export function InvitePreview({ s, kind, code }: { s: State; kind: 'join' | 'cla
 }
 
 // ---------- splash ----------
-export function Splash() {
+export function Splash({ out }: { out?: boolean }) {
   return (
-    <div className="splash" role="status" aria-label="Plico is starting">
+    <div className={`splash${out ? ' out' : ''}`} role="status" aria-label="Plico is starting">
       <Plico mood="settled" size={112} />
       <span className="splash-word">plico</span>
     </div>
   )
+}
+
+// The splash over everything at start: up while Plico boots, held for a full second on a fresh open after an hour
+// away (lingers), then it fades and the app, already drawn underneath, shows through.
+const SEEN = 'plico-last-seen'
+const HOLD = (() => {
+  let last: number | null = null
+  try { last = Number(localStorage.getItem(SEEN)) || null } catch { /* storage blocked: treat as a first visit */ }
+  const nav = (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type
+  return lingers(nav, last, Date.now())
+})()
+const seen = () => { try { localStorage.setItem(SEEN, String(Date.now())) } catch { /* fine */ } }
+seen()
+addEventListener('pagehide', seen)
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') seen() })
+
+export function SplashGate() {
+  const sync = useSync()
+  const [hold, setHold] = useState(HOLD)
+  const [gone, setGone] = useState(false)
+  useEffect(() => { if (hold) { const t = setTimeout(() => setHold(false), 1000); return () => clearTimeout(t) } }, [])
+  const up = sync.booting || hold
+  useEffect(() => { if (!up) { const t = setTimeout(() => setGone(true), calm() ? 0 : 260); return () => clearTimeout(t) } }, [up])
+  // Pay links, password resets, consent links and the dev pages never had a splash; they open straight away.
+  if (gone || /^#\/(s|reset|guardian|themes|og)(\/|$)/.test(location.hash)) return null
+  return <Splash out={!up} />
 }
 
 // ---------- Google and Apple: sign in, or connect to the signed-in account ----------

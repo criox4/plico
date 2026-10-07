@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, friendsIn, findFriend, personKey, verifyLabel, missedChecks, showUtr, toCheck, type Group } from './logic.ts'
-import { gaze } from './anim.ts'
+import { gaze, lingers } from './anim.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -102,6 +102,15 @@ assert.deepEqual(gaze(500, 0, 40), [1.6, 0, 4])
 assert.deepEqual(gaze(0, -500, 40), [0, -1.6, 0])
 assert.deepEqual(gaze(-120, 0, 40), [-0.8, 0, -2])
 { const [x, y, t] = gaze(300, 400, 40); assert.ok(Math.hypot(x, y) <= 1.6 + 1e-9 && x > 0 && y > 0 && t <= 4) }
+
+// splash: holds on a fresh open after an hour away or the first ever, never on reload or back/forward
+const H = 3_600_000, T = 10 * H
+assert.equal(lingers('navigate', null, T), true)
+assert.equal(lingers('navigate', T - H, T), true)
+assert.equal(lingers('navigate', T - H + 1, T), false)
+assert.equal(lingers('reload', null, T), false)
+assert.equal(lingers('back_forward', T - 5 * H, T), false)
+assert.equal(lingers(undefined, null, T), false)
 
 // item split: extras follow item subtotals, totals add up exactly
 const is = itemSplit([{ name: 'Burger', amount: 42000, who: [ME] }, { name: 'Pasta', amount: 58000, who: ['r'] }, { name: 'Beer x3', amount: 90000, who: [ME, 'r', 'k'] }], 10800)

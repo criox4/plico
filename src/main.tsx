@@ -3,6 +3,7 @@ import { ErrorBoundary, start as startCrashReports } from './sentry'
 import { LazyMotion, MotionConfig } from 'motion/react'
 import { Capacitor } from '@capacitor/core'
 import App from './App'
+import { SplashGate } from './account'
 import { startSync } from './sync'
 import { hydrate } from './store'
 import { startShareIntake } from './share'
@@ -20,7 +21,7 @@ void hydrate().then(() => {
   createRoot(document.getElementById('root')!).render(
     <LazyMotion features={() => import('./motion-features').then(r => r.default)} strict>
       <MotionConfig reducedMotion="user">
-        <ErrorBoundary fallback={<Crashed />}><App /></ErrorBoundary>
+        <ErrorBoundary fallback={<Crashed />}><App /><SplashGate /></ErrorBoundary>
       </MotionConfig>
     </LazyMotion>,
   )

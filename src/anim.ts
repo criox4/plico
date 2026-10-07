@@ -24,3 +24,8 @@ export function gaze(dx: number, dy: number, dead: number): [number, number, num
   const r = (n: number) => Math.round(n * 100) / 100 || 0
   return [r(dx * k), r(dy * k), r(dx * k * 2.5)]
 }
+
+/** The splash holds for its full second on a fresh open (not a reload, not back/forward) an hour or more after the
+ *  last visit, or on the very first one. `nav` is the Navigation Timing type; `last` the last-seen time, if any. */
+export const lingers = (nav: string | undefined, last: number | null, now: number) =>
+  nav === 'navigate' && (last === null || now - last >= 3_600_000)

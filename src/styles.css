@@ -684,6 +684,7 @@ fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--mute
   background: #6C5CE7; color: #FFFFFF; --brand: #FFFFFF; --plico-bowl: #C9C1FA;
 }
 .splash-word { font: 800 2.25rem/1 'Gabarito', 'Anek Latin', system-ui, sans-serif; letter-spacing: -.03em; }
+.splash.out { opacity: 0; pointer-events: none; transition: opacity 250ms ease; }
 @media (prefers-reduced-motion: no-preference) {
   .splash-word { animation: rise 700ms cubic-bezier(.22, 1, .36, 1) 350ms both; }
 }
