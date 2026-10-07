@@ -14,3 +14,13 @@ export const ROW = {
 
 /** A block that comes and goes as a whole (a list's last row leaving, its empty state arriving). */
 export const FADE = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0.18 } } as const
+
+/** Where Plico looks, for a point dx, dy px from its centre: the face's offset in drawing units (at most 1.6) and the
+ *  bowl's lean in degrees (at most 4). Inside `dead` px it looks straight ahead; the pull eases in over the next 160px. */
+export function gaze(dx: number, dy: number, dead: number): [number, number, number] {
+  const d = Math.hypot(dx, dy)
+  if (d <= dead) return [0, 0, 0]
+  const k = (Math.min(1, (d - dead) / 160) * 1.6) / d
+  const r = (n: number) => Math.round(n * 100) / 100 || 0
+  return [r(dx * k), r(dy * k), r(dx * k * 2.5)]
+}

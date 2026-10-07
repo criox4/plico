@@ -13,9 +13,9 @@ import { ChatButton } from './chat'
 import { AnimatePresence } from 'motion/react'
 import { flushSync } from 'react-dom'
 import { Capacitor } from '@capacitor/core'
-import { Haptics, NotificationType } from '@capacitor/haptics'
+import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics'
 import * as m from 'motion/react-m'
-import { FADE, ROW, SPRING } from './anim'
+import { FADE, ROW, SPRING, gaze } from './anim'
 
 /** The selected option's background in a .seg control. One per control id, so Motion slides it between options. */
 export const SegPill = ({ id }: { id: string }) => <m.span layoutId={`seg-${id}`} className="seg-pill" transition={SPRING} aria-hidden />
@@ -136,23 +136,103 @@ export function BrandMark({ size = 26 }: { size?: number }) {
 export const Wordmark = () => <span className="wordmark" role="img" aria-label="plico"><BrandMark /><span aria-hidden>lico</span></span>
 
 export type Mood = 'idle' | 'owed' | 'owe' | 'settled' | 'empty' | 'thinking'
-/** Plico, the mascot. Appears in onboarding, empty states, settling, loading and errors; never parked on money. */
-export function Plico({ mood = 'idle', size = 64 }: { mood?: Mood; size?: number }) {
-  const closed = mood === 'empty'
-  return (
-    <svg width={size} height={size} viewBox="-2 -3 36 36" aria-hidden className={`plico plico-shape is-${mood}`}>
-      {mood === 'settled' && <g className="pl-sparks">{[[-1, 2], [31, 3], [30, 26], [0, 27]].map(([x, y]) => <path key={x + '' + y} d={`M${x} ${y - 2.5}v5M${x - 2.5} ${y}h5`} />)}</g>}
+type Face = 'blink' | 'happy' | 'wink' | 'snap' | 'dizzy'
+type Point = { x: number; y: number }
+
+// ---------- Plico's gaze: one shared listener for every watching Plico, written straight to CSS variables ----------
+// A mouse moves the eyes as it goes; a tap anywhere gets a one-second glance. `look` pins a Plico to a point instead.
+const watchers = new Map<SVGSVGElement, () => Point | null>()
+let pointer: Point | null = null
+let raf = 0
+let glance = 0
+function paint() {
+  raf = 0
+  for (const [el, pin] of watchers) {
+    const p = calm() ? null : pin() ?? pointer
+    const b = el.getBoundingClientRect()
+    const [x, y, t] = p ? gaze(p.x - (b.left + b.width / 2), p.y - (b.top + b.height / 2), b.width / 2) : [0, 0, 0]
+    el.style.setProperty('--gx', String(x)); el.style.setProperty('--gy', String(y)); el.style.setProperty('--gt', String(t))
+  }
+}
+const repaint = () => { if (!raf) raf = requestAnimationFrame(paint) }
+const onMove = (e: PointerEvent) => { if (e.pointerType === 'mouse') { pointer = { x: e.clientX, y: e.clientY }; repaint() } }
+const onDown = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse') return
+  pointer = { x: e.clientX, y: e.clientY }; repaint()
+  clearTimeout(glance); glance = window.setTimeout(() => { pointer = null; repaint() }, 1000)
+}
+const onLeave = () => { pointer = null; repaint() }
+function watchGaze(el: SVGSVGElement, pin: () => Point | null) {
+  if (!watchers.size) {
+    addEventListener('pointermove', onMove, { passive: true }); addEventListener('pointerdown', onDown, { passive: true })
+    addEventListener('scroll', repaint, { passive: true }); document.documentElement.addEventListener('mouseleave', onLeave)
+  }
+  watchers.set(el, pin); repaint()
+  return () => {
+    watchers.delete(el)
+    if (!watchers.size) {
+      removeEventListener('pointermove', onMove); removeEventListener('pointerdown', onDown)
+      removeEventListener('scroll', repaint); document.documentElement.removeEventListener('mouseleave', onLeave)
+    }
+  }
+}
+
+const SQUASH: Keyframe[] = [
+  { scale: '1 1', easing: 'ease-in' }, { scale: '1.1 .86', offset: .18, easing: 'ease-out' },
+  { scale: '.95 1.08', offset: .45, easing: 'ease-in-out' }, { scale: '1.03 .97', offset: .72 }, { scale: '1 1' },
+]
+const PAYOFFS: Face[] = ['happy', 'wink', 'snap']
+const spiral = (x: number, y: number) => `M${x} ${y}m-.3 0a.5.5 0 1 1 .6.5a1.1 1.1 0 1 1-1.1-1.3a1.7 1.7 0 1 1 1.9 1.9`
+
+/** Plico, the mascot. Appears in onboarding, empty states, settling, loading and errors; never parked on money.
+ *  `watch`: the eyes follow the pointer (and glance at taps). `boop`: Plico becomes a button with that label and reacts
+ *  when poked: a blink, then happy, a wink or the settle snap in turn; four quick boops make it dizzy.
+ *  `look` pins the gaze to a point (the sign-in field being typed in); `cover` hides its eyes behind the stem. */
+export function Plico({ mood = 'idle', size = 64, watch, boop, look, cover }: {
+  mood?: Mood; size?: number; watch?: boolean; boop?: string; look?: () => Point | null; cover?: boolean
+}) {
+  const svg = useRef<SVGSVGElement>(null)
+  const [face, setFace] = useState<Face | null>(null)
+  const timers = useRef<number[]>([])
+  const boops = useRef({ n: 0, at: 0, total: 0 })
+  const pin = useRef(look)
+  pin.current = look
+  useEffect(() => { if (watch && svg.current) return watchGaze(svg.current, () => pin.current?.() ?? null) }, [watch])
+  useEffect(() => { if (watch) repaint() }) // a pinned point (the caret) moves as the person types
+  useEffect(() => () => timers.current.forEach(clearTimeout), [])
+  const poke = () => {
+    timers.current.forEach(clearTimeout); timers.current = []
+    const later = (ms: number, f: Face | null) => timers.current.push(window.setTimeout(() => setFace(f), ms))
+    const now = Date.now(), b = boops.current
+    b.n = now - b.at < 1600 ? b.n + 1 : 1; b.at = now; b.total++
+    if (b.n >= 4) { b.n = 0; setFace('dizzy'); later(1100, null) }
+    else { const f = PAYOFFS[(b.total - 1) % PAYOFFS.length]; setFace('blink'); later(120, f); later(f === 'snap' ? 1000 : 640, null) }
+    if (Capacitor.isNativePlatform()) void Haptics.impact({ style: ImpactStyle.Light }).catch(() => {})
+    if (!calm()) svg.current?.animate(SQUASH, { duration: 420, easing: 'linear' })
+  }
+  const shown = face === 'snap' ? 'settled' : mood
+  const closed = !face && mood === 'empty'
+  const art = (
+    <svg ref={svg} width={size} height={size} viewBox="-2 -3 36 36" aria-hidden
+      className={`plico plico-shape is-${shown}${face ? ` f-${face}` : ''}${watch ? ' watch' : ''}${cover ? ' cover' : ''}`}>
+      {shown === 'settled' && <g className="pl-sparks">{[[-1, 2], [31, 3], [30, 26], [0, 27]].map(([x, y]) => <path key={x + '' + y} d={`M${x} ${y - 2.5}v5M${x - 2.5} ${y}h5`} />)}</g>}
       <g className="pl-bowl">
         {BOWL}
         <g className="pl-face">
           {closed ? <path className="pl-lids" d="M16.2 12.8q1.4 1.3 2.8 0M21.8 12.8q1.4 1.3 2.8 0" />
+            : face === 'happy' ? <path className="pl-lids" d="M15.9 13.2q1.7-2.2 3.4 0M21.5 13.2q1.7-2.2 3.4 0" />
+            : face === 'wink' ? <><g className="pl-eyes"><circle cx="17.6" cy="12.4" r="1.7" /></g><path className="pl-lids" d="M21.6 12.5q1.6 1.1 3.2 0" /></>
+            : face === 'dizzy' ? <path className="pl-lids" d={spiral(17.6, 12.4) + spiral(23.2, 12.4)} />
             : <g className="pl-eyes"><circle cx="17.6" cy="12.4" r="1.7" /><circle cx="23.2" cy="12.4" r="1.7" /></g>}
-          {(mood === 'settled' || closed) && <path className="pl-mouth" d="M18.4 16.4q2 1.8 4 0" />}
+          {(shown === 'settled' || closed || face === 'happy' || face === 'wink') && <path className="pl-mouth" d="M18.4 16.4q2 1.8 4 0" />}
+          {face === 'dizzy' && <path className="pl-mouth" d="M18.4 17q.7-.9 1.4 0t1.4 0t1.4 0" />}
+          {cover && <g className="pl-blush"><ellipse cx="14.6" cy="19.4" rx="1.7" ry="1" /><ellipse cx="25.8" cy="19.4" rx="1.7" ry="1" /></g>}
         </g>
       </g>
       {STEM}
     </svg>
   )
+  return boop ? <button type="button" className="plico-boop" aria-label={boop} onClick={poke}>{art}</button> : art
 }
 
 export const EMOJI = ['🌵', '🦊', '🌙', '🍜', '🎧', '🐯', '🌸', '☕', '🏏', '🎸', '🥭', '🍕', '🐼', '🌊', '⚡', '🪁', '🏖️', '🏔️', '🏠', '🎉', '⚽', '🍻', '🚗', '💼']
@@ -326,7 +406,7 @@ export function Denomination({ t, amount, line, caption }: { t: ThemeId; amount:
 }
 
 const Peaceful = () => (
-  <div className="peaceful"><Plico mood="empty" size={64} /><p><strong>Suspiciously peaceful in here.</strong>Add the first expense with +.</p></div>
+  <div className="peaceful"><Plico mood="empty" size={64} watch boop="Boop Plico" /><p><strong>Suspiciously peaceful in here.</strong>Add the first expense with +.</p></div>
 )
 
 /** After adding an expense: everyone in it converges around their share for a beat. */
@@ -568,7 +648,7 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
           {banner && <div className="d-banner">{banner}</div>}
           {fresh && (
             <section className="d-card d-start" aria-labelledby="d-start">
-              <div className="hello"><Plico mood="idle" size={56} /><p><strong id="d-start">Start your first group.</strong>Pick who’s spending together. You can invite them by email next.</p></div>
+              <div className="hello"><Plico mood="idle" size={56} watch boop="Boop Plico" /><p><strong id="d-start">Start your first group.</strong>Pick who’s spending together. You can invite them by email next.</p></div>
               <div className="kinds">
                 {GROUP_KINDS.map(k => <button key={k} className="kind" onClick={() => go('/new/' + k)}><Icon n={k} size={26} /><span>{KINDS[k].label}</span></button>)}
               </div>

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, friendsIn, findFriend, personKey, verifyLabel, missedChecks, showUtr, toCheck, type Group } from './logic.ts'
+import { gaze } from './anim.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
@@ -94,6 +95,13 @@ assert.deepEqual(parseQuick('Dinner 1200/4', mem), { amount: 120000, people: all
 assert.deepEqual(parseQuick('Chai 120 3 log', mem), { amount: 12000, count: 3, title: 'Chai', cat: 'food' })
 assert.deepEqual(parseQuick('Movie 900 split into 3', mem), { amount: 90000, count: 3, title: 'Movie', cat: 'fun' })
 assert.deepEqual(parseQuick('Uber 850 with Arjun, split 2', mem), { amount: 85000, people: [ME, 'a'], title: 'Uber', cat: 'transport' })
+
+// Plico's gaze: straight ahead up close, full pull far away, never past 1.6 units or 4 degrees
+assert.deepEqual(gaze(10, 10, 40), [0, 0, 0])
+assert.deepEqual(gaze(500, 0, 40), [1.6, 0, 4])
+assert.deepEqual(gaze(0, -500, 40), [0, -1.6, 0])
+assert.deepEqual(gaze(-120, 0, 40), [-0.8, 0, -2])
+{ const [x, y, t] = gaze(300, 400, 40); assert.ok(Math.hypot(x, y) <= 1.6 + 1e-9 && x > 0 && y > 0 && t <= 4) }
 
 // item split: extras follow item subtotals, totals add up exactly
 const is = itemSplit([{ name: 'Burger', amount: 42000, who: [ME] }, { name: 'Pasta', amount: 58000, who: ['r'] }, { name: 'Beer x3', amount: 90000, who: [ME, 'r', 'k'] }], 10800)
