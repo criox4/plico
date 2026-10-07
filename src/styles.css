@@ -1257,6 +1257,13 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .lp-theme { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px 8px 10px; border-radius: 999px; background: var(--surface); color: var(--ink); box-shadow: var(--elev); font: 600 .875rem/1 var(--ui); }
 .lp-theme i { width: 16px; height: 16px; border-radius: 50%; }
 .lp-caption { margin-top: 14px; color: var(--muted); font-size: .9375rem; }
+.lp-faq details { border-bottom: 1px solid var(--line); max-width: 64ch; }
+.lp-faq h2 + details { margin-top: 20px; }
+.lp-faq summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; cursor: pointer; list-style: none; font-weight: 600; color: var(--ink); font-size: 1.0625rem; }
+.lp-faq summary::-webkit-details-marker { display: none; }
+.lp-faq summary::after { content: '+'; color: var(--link); font-size: 1.375rem; line-height: 1; }
+.lp-faq details[open] summary::after { content: '−'; }
+.lp-faq details p { padding-bottom: 18px; color: var(--muted); line-height: 1.55; max-width: 60ch; }
 .lp-close { padding: 72px 0 56px; border-top: 1px solid var(--line); display: grid; justify-items: center; text-align: center; gap: 12px; }
 .lp-close > p:not(.lp-fine) { max-width: 38ch; font-size: 1.125rem; color: var(--muted); }
 .lp-close h2 { max-width: none; }

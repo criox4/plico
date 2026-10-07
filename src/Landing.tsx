@@ -20,6 +20,16 @@ const STEPS: { id: string; title: string; body: string }[] = [
   { id: 'record', title: 'Every change, on the record.', body: 'Who added, changed or deleted what, and what it did to each balance. Sealed, so nobody can quietly rewrite it.' },
 ]
 
+// What sceptical people ask before they sign up. Answers say only what's true today; pricing is undecided, so it says so.
+const FAQ: [string, ReactNode][] = [
+  ['Who makes Plico?', <>Ashutosh Pradhan, an independent developer in Bengaluru. Every line of code is <a href={REPO} target="_blank" rel="noopener">public on GitHub</a>, and the <a href={legalUrl('privacy')}>privacy policy</a> says plainly what’s kept.</>],
+  ['How does it make money?', 'It doesn’t yet. Plico is free while it grows. Whatever comes later, adding expenses stays free, and there will be no ads and no selling your data.'],
+  ['What do you keep about me?', <>What you put in: your name, email (and phone, if you add it), and your groups’ expenses. No access to your bank, SMS or address book. It’s stored in Mumbai, and you can export it or <a href={legalUrl('delete-account')}>delete your account</a> any time.</>],
+  ['Do my friends need Plico too?', 'No. Add them by name. They see what they owe and pay from a WhatsApp link with any UPI app, no account needed. If they join later, their part of the hisaab comes with them.'],
+  ['When is a payment “Verified”?', 'A payment counts as soon as it’s recorded and shows “Not verified” until the person who was paid confirms it arrived, or the payer’s UPI receipt screenshot passes every check. Without one of those, it stays “Not verified”.'],
+  ['Can I bring my Splitwise groups?', 'Yes, from a Splitwise CSV export, balances included. Or start your next trip on Plico and move the flat when you’re ready.'],
+]
+
 /**
  * Phones: pin a section while scrolling down walks its card row sideways, the way Apple's product galleries move.
  * The section grows by exactly the row's overflow (plus a short hold at each end), so one pixel down is one pixel across.
@@ -194,6 +204,11 @@ export function Landing() {
             <Fact icon="user" title="No ads, no trackers">Plico doesn’t sell attention: no ad networks, no analytics following you around.</Fact>
           </ul>
           </div></div>
+        </section>
+
+        <section className="lp-band lp-faq" id="questions" aria-labelledby="faq">
+          <h2 id="faq">Fair questions.</h2>
+          {FAQ.map(([q, a]) => <details key={q}><summary>{q}</summary><p>{a}</p></details>)}
         </section>
 
         <section className="lp-close" aria-labelledby="close">
