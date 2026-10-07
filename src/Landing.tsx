@@ -129,7 +129,7 @@ export function Landing() {
             <p className="lp-promise">“Bhai, GPay kar dena.” Then nobody remembers who paid. Plico keeps the hisaab for trips, rent and dinners, and you settle it over UPI.</p>
             <div className="lp-actions">
               <a className="btn primary" href="#/start">Get started</a>
-              <a className="btn secondary" href="#/start">Coming from Splitwise? Bring your groups</a>
+              <a className="btn secondary" href="#/start">Coming from Splitwise? Try it on your next trip</a>
             </div>
             <ul className="lp-trust">
               <li className="lp-made"><IndiaFlag />Made for India</li>
@@ -169,8 +169,8 @@ export function Landing() {
           <div className="lp-pin" ref={india.pin}><div className="lp-pin-stage">
           <h2 id="india">Made for how groups in India actually pay.</h2>
           <ul className="lp-facts lp-rail" ref={india.track}>
-            <Fact icon="qr" title="Any UPI app">GPay, PhonePe, Paytm or your bank: Plico hands over the payment with the name and amount filled in.</Fact>
-            <Fact icon="send" title="Reminders that stay friendly">Nudge on WhatsApp in your tone, with a pay link nobody needs an app to open.</Fact>
+            <Fact icon="qr" title="Any UPI app">GPay, PhonePe, Paytm or your bank: Plico opens it with the name and amount filled in. It never connects to your bank or holds your money.</Fact>
+            <Fact icon="send" title="Reminders that stay friendly">You choose when to nudge on WhatsApp, in your tone. Friends pay from the link with no app and no account, and see your name and UPI ID first. Plico’s own reminder is one push a week, at most.</Fact>
             <Fact icon="check" title="Works offline">Add expenses in a cab or a hill station. They sync when you’re back, and clashes are yours to resolve, never lost.</Fact>
             <Fact icon="direct" title="Friends and groups">Trips, flats, couples, families, office lunches, or just the two of you.</Fact>
           </ul>
@@ -190,6 +190,7 @@ export function Landing() {
             <Fact icon="lock" title="The name before the payment">Every payment shows who you’re paying and their UPI ID first. It counts straight away, and the payee or your UPI receipt verifies it.</Fact>
             <Fact icon="shield" title="A sealed record">Each group’s log is chained, change after change, and your phone checks the seal itself.</Fact>
             <Fact icon="home" title="Kept in India">Your ledger is stored in Mumbai, under India’s data protection law, with parental consent for teens.</Fact>
+            <Fact icon="direct" title="Your contacts stay yours">Plico never reads your address book. Pick one person with your phone’s own picker, or just type a name.</Fact>
             <Fact icon="user" title="No ads, no trackers">Plico doesn’t sell attention: no ad networks, no analytics following you around.</Fact>
           </ul>
           </div></div>
