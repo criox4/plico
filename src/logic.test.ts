@@ -266,6 +266,10 @@ assert.equal(normPhone('riya@x.com'), null)
   assert.equal(findFriend(fs, 'e:bala@x.in')?.key, 'u:U1')
   assert.equal(findFriend(fs, 'p:+919876543210')?.name, 'Riya')
   assert.equal(personKey({ id: 'x', name: 'Nobody' }), undefined)
+  // Friends from groups you no longer share stay, with nothing owed; one you still share a group with isn't doubled.
+  const kept = friendsIn([grp('a', [{ id: 'm1', name: 'Bala K', email: 'bala@x.in', joined: true, uid: 'U1' }])], { id: 'U0', email: 'me@x.in' },
+    [{ id: 'U1', name: 'Bala', image: null, email: 'bala@x.in' }, { id: 'U2', name: 'Asha', image: null, email: 'Asha@x.in' }, { id: 'U0', name: 'Me', image: null, email: 'me@x.in' }])
+  assert.deepEqual(kept.map(f => [f.key, f.spots.length, f.joined, f.email]), [['u:U2', 0, true, 'asha@x.in'], ['u:U1', 1, true, 'bala@x.in']])
   console.log('friends ok')
 }
 
