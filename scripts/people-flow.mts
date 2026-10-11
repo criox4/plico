@@ -90,6 +90,24 @@ try {
   assert.equal(r.status, 200); assert.equal(r.body.phone, '+919000000001')
   console.log('✓ verified number links spots')
 
+  // Like Splitwise: sharing a group makes friends that outlive it. Bala and Chitra share only Goa.
+  assert.equal(await db.friendship.count({ where: { OR: [{ userId: B.id, friendId: C.id }, { userId: C.id, friendId: B.id }] } }), 2, 'joining made them friends, both ways')
+  assert.equal((await B.call('POST', '/api/friends', { name: 'Chitra', userId: C.id })).status, 200, 'a friend you share a group with')
+  await db.group.deleteMany({ where: { kind: 'direct', AND: [{ members: { some: { userId: B.id } } }, { members: { some: { userId: C.id } } }] } })
+  assert.equal((await B.call('POST', `/api/groups/${gid}/leave`, {})).status, 200)
+  r = await B.call('GET', '/api/groups')
+  assert.deepEqual(r.body.friends.map((f: any) => f.id).sort(), [C.id], 'Chitra is still a friend after Bala left Goa (Asha shares a friends ledger with Bala)')
+  assert.equal((await B.call('POST', '/api/friends', { name: 'Chitra', userId: C.id })).status, 200, 'and Bala can still split with her directly')
+  console.log('✓ friends outlive the group')
+
+  // The group link lists spots still waiting, contacts masked, so the joiner can take theirs.
+  await A.call('PUT', `/api/groups/${gid}/members/${crypto.randomUUID()}`, { name: 'Dev', phone: '9123456789' })
+  r = await C.call('GET', `/api/invites/${invite}`)
+  const dev2 = r.body.spots.find((x: any) => x.name === 'Dev')
+  assert.equal(dev2.phone, '•••• 6789')
+  assert.ok(!JSON.stringify(r.body.spots).includes('9123456789'), 'never the full number')
+  console.log('✓ the group link lists waiting spots, masked')
+
   console.log('\nall people checks passed')
 } finally {
   await db.group.deleteMany({ where: { id: { in: (await groups()).map(g => g.id) } } })
