@@ -14,7 +14,7 @@ import { disablePush, enablePush, pushState, type PushState } from './push'
 import { ClaimPreviewOut, InvitePreviewOut, NotifyOut, PhoneStartOut, PhoneStatusOut, type NotifyPrefs, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
 import type { z } from 'zod/mini'
 
-type PhoneStatus = z.infer<typeof PhoneStatusOut>
+export type PhoneStatus = z.infer<typeof PhoneStatusOut>
 type PhoneStart = z.infer<typeof PhoneStartOut>
 
 const origin = () => location.origin + location.pathname.replace(/index\.html$/, '')
@@ -785,7 +785,7 @@ const prettyPhone = (p: string) => p.replace(/^\+91(\d{5})(\d{5})$/, '+91 $1 $2'
 
 /** Prove a number by sending Plico a WhatsApp message from it: the app opens WhatsApp with the code typed in,
  *  then checks every 3 seconds (only while the screen is open and in front) until the Yes tap lands or the code runs out. */
-function PhoneVerify({ status, set }: { status: PhoneStatus; set: (p: PhoneStatus) => void }) {
+export function PhoneVerify({ status, set }: { status: PhoneStatus; set: (p: PhoneStatus) => void }) {
   const [wait, setWait] = useState<PhoneStart | null>(null)
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(false)

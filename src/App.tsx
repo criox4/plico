@@ -6,14 +6,14 @@ import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, pars
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { getState, update, useStore, type State } from './store'
 import { API } from './auth-client'
-import { FriendCardOut } from './schema'
+import { FriendCardOut, PhoneStatusOut } from './schema'
 import { addProof, api, photoData, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
 import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
-  NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
+  NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner, PhoneVerify, type PhoneStatus } from './account'
 import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
@@ -821,11 +821,25 @@ function Invite({ g, lead }: { g: Group; lead?: boolean }) {
 }
 
 function JoinGroup({ s, code }: { s: State; code: string }) {
-  type Inv = { id: string; name: string; kind: Kind; theme: ThemeId; joined: boolean; people: number }
+  type Spot = { name: string; phone?: string; email?: string }
+  type Inv = { id: string; name: string; kind: Kind; theme: ThemeId; joined: boolean; people: number; spots?: Spot[] }
   const [inv, setInv] = useState<Inv | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  useEffect(() => { api<Inv>(`/api/invites/${code}`).then(setInv, e => setErr(e.message)) }, [code])
+  const [mine, setMine] = useState<Spot | null>(null) // "that's me": proving it before the spot is theirs
+  const [phone, setPhone] = useState<PhoneStatus | null>(null)
+  const load = () => api<Inv>(`/api/invites/${code}`).then(setInv, e => setErr(e.message))
+  useEffect(() => { void load() }, [code]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (mine?.phone && !phone) void api('/api/me/phone').then(r => setPhone(PhoneStatusOut.parse(r)), () => {}) }, [mine, phone])
+  // Their number verified: the spot under it is theirs now (linkByPhone), and the group is one of theirs.
+  const proved = async (p: PhoneStatus) => {
+    setPhone(p)
+    if (!p.phone) return
+    await pull()
+    const r = await api<Inv>(`/api/invites/${code}`).catch(() => null)
+    if (r?.joined) location.replace('#/g/' + r.id)
+    else setErr(`That number isn’t the one ${mine!.name} was added with (${mine!.phone}). Ask whoever added you to fix it, or join as yourself.`)
+  }
   const join = async () => {
     setBusy(true)
     try {
@@ -844,8 +858,28 @@ function JoinGroup({ s, code }: { s: State; code: string }) {
       {!inv ? <p className="empty">{err || 'Opening invite…'}</p> : (
         <div className="form">
           <h1 className="q">{inv.name}</h1>
-          <p className="muted-p">{count(inv.people, 'person is', 'people are')} splitting here. If someone added you by email, you get that spot and its balance.</p>
-          <button className="btn primary" disabled={busy} onClick={() => void join()}>Join as {s.me.name || 'me'}</button>
+          <p className="muted-p">{count(inv.people, 'person is', 'people are')} splitting here.</p>
+          {mine ? <>
+            <h2 className="form-h">Join as {mine.name}</h2>
+            {mine.phone ? <>
+              <p className="muted-p">{mine.name} was added with the number {mine.phone}. Verify it’s yours on WhatsApp and that spot, with its balance, is yours.</p>
+              {phone?.available ? <PhoneVerify status={{ ...phone, phone: null }} set={p => void proved(p)} />
+                : phone && <p className="muted-p">Ask whoever added you for your personal invite link.</p>}
+            </> : <p className="muted-p">{mine.name} was added with {mine.email}. Sign in with that email (or Google with it) and open this link again, and that spot, with its balance, is yours.</p>}
+            <button type="button" className="link center-link" onClick={() => { setMine(null); setErr('') }}>That’s not me</button>
+          </> : <>
+            {!!inv.spots?.length && <>
+              <h2 className="form-h">Is one of these you?</h2>
+              <ul className="rows">
+                {inv.spots.map((x, i) => (
+                  <li key={i}><button type="button" className="row-in link-row" onClick={() => { setMine(x); setErr('') }}>
+                    <Avatar name={x.name} size={36} /><span className="grow"><strong>{x.name}</strong><small>{x.phone ?? x.email}</small></span><Icon n="arrow" size={18} />
+                  </button></li>
+                ))}
+              </ul>
+            </>}
+            <button className="btn primary" disabled={busy} onClick={() => void join()}>{inv.spots?.length ? `None of these, join as ${s.me.name || 'me'}` : `Join as ${s.me.name || 'me'}`}</button>
+          </>}
           {err && <p className="error" role="alert">{err}</p>}
         </div>
       )}
