@@ -646,6 +646,7 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
             <button onClick={() => go('/import')}><Icon n="arrow" />Import</button>
           </nav>
           {banner && <div className="d-banner">{banner}</div>}
+          {!preview && <InstallAsk />}
           {fresh && (
             <section className="d-card d-start" aria-labelledby="d-start">
               <div className="hello"><Plico mood="idle" size={56} watch boop="Boop Plico" /><p><strong id="d-start">Start your first group.</strong>Pick who’s spending together. You can invite them by email next.</p></div>
@@ -878,6 +879,43 @@ function RemindButton({ s, g, d }: { s: State; g: Group; d: Transfer }) {
 }
 
 /** Asks for notifications once the group gives a reason to (it exists; or you're waiting on a payment), at most once a fortnight. */
+// ---------- install the web app (until the store apps are out) ----------
+// Feature flag: VITE_INSTALL_PROMPT=off at build time turns it off once Plico is on the Play Store and App Store.
+const ASK_INSTALL = import.meta.env.VITE_INSTALL_PROMPT !== 'off'
+const INSTALL_ASKED = 'plico-install-asked'
+type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> }
+let installEvent: InstallEvent | null = null // Chrome on Android offers it once, early: kept for when the card is tapped
+if (typeof window !== 'undefined') window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvent = e as InstallEvent })
+const ios = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+const installed = () => matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true
+const askedRecently = () => { try { return Date.now() - Number(localStorage.getItem(INSTALL_ASKED) ?? 0) < 7 * 864e5 } catch { return false } }
+
+/** On a phone's browser: put Plico on the home screen. Android gets the browser's own install; iPhone, the two taps. */
+function InstallAsk() {
+  const [hide, setHide] = useState(() => !ASK_INSTALL || Capacitor.isNativePlatform() || installed() || askedRecently()
+    || !(ios() || /Android/.test(navigator.userAgent)))
+  const [steps, setSteps] = useState(false)
+  if (hide) return null
+  const later = () => { try { localStorage.setItem(INSTALL_ASKED, String(Date.now())) } catch { /* shows again next time */ } setHide(true) }
+  const install = async () => {
+    if (!installEvent) return setSteps(true)
+    await installEvent.prompt()
+    if ((await installEvent.userChoice).outcome === 'accepted') setHide(true)
+    installEvent = null
+  }
+  return (
+    <section className="confirm-card">
+      <p><strong>Get the Plico app</strong>
+        <small>{steps ? (ios() ? 'In Safari, tap Share, then “Add to Home Screen”.' : 'Open your browser’s menu (⋮), then “Install app” or “Add to Home screen”.')
+          : 'Add it to your home screen: opens in a tap, works offline, and tells you when you’re paid.'}</small></p>
+      <span className="debt-actions">
+        {!steps && <button className="btn-sm" onClick={() => void install()}><Icon n="plus" size={16} />{ios() ? 'Show me how' : 'Install'}</button>}
+        <button className="btn-sm ghost" onClick={later}>{steps ? 'Done' : 'Not now'}</button>
+      </span>
+    </section>
+  )
+}
+
 /** Everyone in a group should be on Plico: until they are, a nudge to invite them. */
 function NotJoined({ g }: { g: Group }) {
   const waiting = g.kind === 'direct' ? [] : g.members.filter(m => m.id !== ME && !m.joined)
