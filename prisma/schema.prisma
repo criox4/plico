@@ -44,6 +44,8 @@ model User {
   accounts      Account[]
   members       Member[]
   groupsCreated Group[]
+  friends       Friendship[] @relation("friends")
+  friendOf      Friendship[] @relation("friendOf")
 
   @@unique([email])
   @@map("user")
@@ -123,6 +125,21 @@ model Group {
   updatedAt   DateTime  @updatedAt
 
   @@map("group")
+  @@schema("splittr")
+}
+
+/// Two accounts that have shared a group, one row each way. Kept after either leaves, like Splitwise.
+/// Written only by the member_befriend trigger (migration 20261011120000_friendships), on every path that gives a spot an account.
+model Friendship {
+  userId    String
+  user      User     @relation("friends", fields: [userId], references: [id], onDelete: Cascade)
+  friendId  String
+  friend    User     @relation("friendOf", fields: [friendId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, friendId])
+  @@index([friendId])
+  @@map("friendship")
   @@schema("splittr")
 }
 
