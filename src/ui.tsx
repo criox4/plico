@@ -815,6 +815,7 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
       {spent.length > 0 && !debts.length && <Seal t={t} burst={burst} />}
       <IssuesBanner gid={g.id} />
+      <NotJoined g={g} />
       <PushAsk g={g} />
       <NeedsYou groups={[g]} />
       <SpendBar cats={byCat(spent, e => e.amount)} />
@@ -877,6 +878,20 @@ function RemindButton({ s, g, d }: { s: State; g: Group; d: Transfer }) {
 }
 
 /** Asks for notifications once the group gives a reason to (it exists; or you're waiting on a payment), at most once a fortnight. */
+/** Everyone in a group should be on Plico: until they are, a nudge to invite them. */
+function NotJoined({ g }: { g: Group }) {
+  const waiting = g.kind === 'direct' ? [] : g.members.filter(m => m.id !== ME && !m.joined)
+  if (!waiting.length) return null
+  const one = waiting.length === 1
+  return (
+    <div className="confirm-card" role="status">
+      <p><strong>{one ? `${waiting[0].name} isn’t` : `${waiting[0].name} and ${count(waiting.length - 1, 'other', 'others')} aren’t`} on Plico yet</strong>
+        <small>Invite {one ? 'them' : 'everyone'} so they see what they owe and can settle up.</small></p>
+      <button className="btn-sm" onClick={() => go(`/g/${g.id}/invite`)}><Icon n="send" size={16} />Invite</button>
+    </div>
+  )
+}
+
 function PushAsk({ g }: { g: Group }) {
   const sync = useSync()
   const [state, setState] = useState<PushState | null>(null)

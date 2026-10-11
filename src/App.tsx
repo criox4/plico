@@ -703,15 +703,17 @@ function AddPeople({ s, g, label }: { s: State; g: Group; label?: string }) {
  * WhatsApp group you already have, is the quickest way; personal invites for anyone added by phone; or add more. */
 function GetEveryoneIn({ s, g }: { s: State; g: Group }) {
   const done = () => location.replace('#/g/' + g.id)
-  const phones = g.members.filter(m => m.id !== ME && !m.joined && m.phone && !m.email)
+  const waiting = g.members.filter(m => m.id !== ME && !m.joined)
+  const used = new Set(g.expenses.flatMap(e => [...Object.keys(e.paid), ...Object.keys(e.owed)]))
   return (
     <Screen t={g.theme} title="Get everyone in" action={<button type="button" className="link" onClick={done}>Skip</button>}>
       <div className="form">
         <p className="muted-p">Everyone in {g.name} sees who paid what. The quickest way in: share the link in the WhatsApp group you already have. Friends open it, sign in, and pick which name is theirs.</p>
         <Invite g={g} lead />
-        {phones.length > 0 && <>
-          <h2 className="form-h">Added by phone</h2>
-          {phones.map(m => <WhatsAppInvite key={m.id} g={g} m={m} />)}
+        {waiting.length > 0 && <>
+          <h2 className="form-h">Not on Plico yet</h2>
+          <p className="muted-p">Or send each one their own link: it takes them straight to their spot.</p>
+          <ul className="people">{waiting.map(m => <Person key={m.id} s={s} g={g} m={m} used={used.has(m.id)} />)}</ul>
         </>}
         <h2 className="form-h">Or add them yourself</h2>
         <AddPeople s={s} g={g} label="Name, email or phone" />
