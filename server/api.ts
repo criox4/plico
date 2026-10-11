@@ -226,7 +226,10 @@ api.get('/groups', async c => {
   })
   const byGroup = new Map<string, typeof expenses>()
   for (const e of expenses) (byGroup.get(e.groupId) ?? byGroup.set(e.groupId, []).get(e.groupId)!).push(e)
-  return c.json({ now, groups: groups.map(g => ({ ...g, full: !delta.includes(g.id), expenses: byGroup.get(g.id) ?? [] })) })
+  // Friends you no longer share a group with (they stay friends, like Splitwise); everyone else comes with the groups.
+  const kept = await db.friendship.findMany({ where: { userId: uid, friend: { members: { none: { group: { members: { some: { userId: uid } } } } } } },
+    select: { friend: { select: { id: true, name: true, image: true, email: true } } } })
+  return c.json({ now, groups: groups.map(g => ({ ...g, full: !delta.includes(g.id), expenses: byGroup.get(g.id) ?? [] })), friends: kept.map(k => k.friend) })
 })
 
 // A group's whole audit log, oldest first, so the phone can check the hash chain end to end and export it.
@@ -764,11 +767,15 @@ api.post('/claim/:token', async c => {
 })
 
 // ---------- group invite links: anyone with the link joins as themselves ----------
+const maskPhone = (p: string) => '•••• ' + p.slice(-4)
+const maskEmail = (e: string) => { const [u, d] = e.split('@'); return `${u[0]}•••@${d}` }
 // A spot someone was invited to by email is only theirs: claimed by its personal link, or here when the email matches.
 api.get('/invites/:code', async c => {
-  const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, include: { members: { select: { userId: true } } } })
+  const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, include: { members: { select: { userId: true, name: true, email: true, phone: true }, orderBy: { createdAt: 'asc' } } } })
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
-  return c.json({ id: g.id, name: g.name, kind: g.kind, theme: g.theme, people: g.members.length, joined: g.members.some(m => m.userId === c.get('userId')) })
+  // Spots still waiting for someone, so the joiner can say "that's me". Contacts masked: the link may be in a big WhatsApp group.
+  const spots = g.members.filter(m => !m.userId).map(m => ({ name: m.name, ...(m.phone ? { phone: maskPhone(m.phone) } : m.email ? { email: maskEmail(m.email) } : {}) }))
+  return c.json({ id: g.id, name: g.name, kind: g.kind, theme: g.theme, people: g.members.length, joined: g.members.some(m => m.userId === c.get('userId')), spots })
 })
 
 api.post('/invites/:code/join', async c => {
@@ -833,9 +840,9 @@ api.post('/friends', async c => {
   if ([b.email, b.phone, b.userId].filter(Boolean).length !== 1) return c.json({ error: 'Add their phone number or email.' }, 400)
   const me = await meFor(c.get('userId'))
   if (b.userId) {
-    // Only people you already split with: anyone else would be a lookup of who's on Plico.
+    // Only your friends (anyone you've shared a group with): anyone else would be a lookup of who's on Plico.
     const them = b.userId === me.id ? null
-      : await db.user.findFirst({ where: { id: b.userId, members: { some: { group: { members: { some: { userId: me.id } } } } } }, select: { id: true, name: true, email: true } })
+      : await db.user.findFirst({ where: { id: b.userId, friendOf: { some: { userId: me.id } } }, select: { id: true, name: true, email: true } })
     if (!them) return c.json(notFound, 404)
     return c.json({ id: (await directWith(me, { name: them.name, userId: them.id, email: them.email.toLowerCase() })).id })
   }

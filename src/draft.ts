@@ -17,7 +17,7 @@ export type Draft = {
 
 /** Your ledger with this friend, and their spot in it, if it exists yet. */
 const direct = (key: string) => {
-  const s = getState(), f = findFriend(friendsIn(s.groups, s.user ?? undefined), key)
+  const s = getState(), f = findFriend(friendsIn(s.groups, s.user ?? undefined, s.friends), key)
   const g = f?.direct
   return g && { g, id: f.spots.find(x => x.g === g)!.id }
 }
@@ -72,7 +72,7 @@ const nextMonth = (date: string) => {
 export function fromCard(c: Extract<ChatCard, { type: 'expense' }>): Draft | { error: string } {
   const t = c.target
   // Outside groups the card names friends by email: use the key the friend has here (their account, once joined).
-  const s = getState(), fs = friendsIn(s.groups, s.user ?? undefined)
+  const s = getState(), fs = friendsIn(s.groups, s.user ?? undefined, s.friends)
   let key = (k: string) => (k === ME ? ME : findFriend(fs, k.toLowerCase())?.key ?? 'e:' + k.toLowerCase())
   if (t.kind === 'group') {
     const g = getState().groups.find(x => x.id === t.groupId)

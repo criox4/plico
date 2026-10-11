@@ -302,6 +302,7 @@ export async function pull() {
       for (const e of sg.expenses) e.deletedAt ? byId.delete(e.id) : byId.set(e.id, expenseFromServer(e, fresh.selfId))
       return { ...fresh, expenses: [...byId.values()] }
     })
+    d.friends = data.friends ?? []
   })
   setCursor(gap ? null : data.now)
   snap = getState()

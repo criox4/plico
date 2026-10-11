@@ -131,7 +131,10 @@ export const ServerGroup = z.object({
   /** false: `expenses` holds only what changed since the cursor, deletions included. */
   full: z.boolean(),
 })
-export const GroupsOut = z.object({ now: When, groups: z.array(ServerGroup) })
+/** A friend you no longer share a group with. */
+export const KeptFriend = z.object({ id: z.string(), name: z.string(), image: z.nullable(z.string()), email: z.string() })
+export type KeptFriend = z.infer<typeof KeptFriend>
+export const GroupsOut = z.object({ now: When, groups: z.array(ServerGroup), friends: z.optional(z.array(KeptFriend)) })
 export const SavedOut = z.object({ ok: z.literal(true), version: z.optional(z.int()), pending: z.optional(z.boolean()), verifiedBy: z.nullish(VerifiedBy), ignored: z.optional(z.boolean()) })
 export const ConflictOut = z.object({
   code: z.literal('conflict'), error: z.string(), theirs: z.nullable(ServerExpense), by: z.string(), at: z.nullish(When), action: z.optional(z.string()),

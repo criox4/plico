@@ -16,7 +16,7 @@ export const guessName = (email: string) =>
   email.split('@')[0].split(/[._+-]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ').slice(0, 40) || 'Friend'
 
 export type { Friend }
-export const friendsOf = (s: State) => friendsIn(s.groups, s.user ?? undefined)
+export const friendsOf = (s: State) => friendsIn(s.groups, s.user ?? undefined, s.friends)
 /** The friend a /f/<key> address names (older links carry a bare email). */
 export const friendBy = (s: State, k: string) => findFriend(friendsOf(s), k)
 /** How a friend shows under their name: their email, else their phone. */
@@ -185,7 +185,7 @@ export function Friends({ s }: { s: State }) {
               <li key={f.key}><button className="friend-row" onClick={() => go(friendPath(f))}>
                 <Avatar name={f.name} image={f.image} size={44} />
                 <span className="grow"><strong>{f.name}</strong>
-                  <small>{f.joined ? (f.spots.some(x => x.g.kind !== 'direct') ? `In ${count(f.spots.filter(x => x.g.kind !== 'direct').length, 'group', 'groups')}` : 'Just the two of you') : <span className="tag-invited">Invited</span>}</small></span>
+                  <small>{f.joined ? (f.spots.some(x => x.g.kind !== 'direct') ? `In ${count(f.spots.filter(x => x.g.kind !== 'direct').length, 'group', 'groups')}` : f.spots.length ? 'Just the two of you' : 'No shared groups now') : <span className="tag-invited">Invited</span>}</small></span>
                 <span className={`money ${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}`}>{n ? inr(n) : <Icon n="check" size={20} />}<small>{n > 0 ? 'owes you' : n < 0 ? 'you owe' : 'settled'}</small></span>
               </button></li>
             ))}

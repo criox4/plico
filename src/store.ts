@@ -9,6 +9,8 @@ export type State = {
   groupThemes?: boolean
   tone: Tone
   groups: Group[]
+  /** Friends you no longer share a group with (from the server). */
+  friends?: { id: string; name: string; image: string | null; email: string }[]
 }
 
 const KEY = 'splittr'

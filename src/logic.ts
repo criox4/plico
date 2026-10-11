@@ -403,8 +403,9 @@ export function itemSplit(items: Item[], extras: number): { owed: Record<Id, num
 /** Who a spot is: their account once they've joined, else the email or phone they were invited by. */
 export const personKey = (m: Member) => m.uid ? 'u:' + m.uid : m.email ? 'e:' + m.email.toLowerCase() : m.phone ? 'p:' + m.phone : undefined
 export type Friend = { key: string; name: string; email?: string; phone?: string; uid?: string; image?: string; joined: boolean; spots: { g: Group; id: Id }[]; direct?: Group }
-/** Everyone you share a group with, once each. `me`: your own account and email, never a friend of yours. */
-export function friendsIn(groups: Group[], me?: { id: string; email: string }): Friend[] {
+/** Everyone you share a group with, once each, and `kept`: friends from groups you no longer share (no balance left there).
+ *  `me`: your own account and email, never a friend of yours. */
+export function friendsIn(groups: Group[], me?: { id: string; email: string }, kept: { id: string; name: string; image?: string | null; email: string }[] = []): Friend[] {
   const by = new Map<string, Friend>()
   for (const g of groups) for (const m of g.members) {
     const k = personKey(m)
@@ -424,6 +425,8 @@ export function friendsIn(groups: Group[], me?: { id: string; email: string }): 
     to.spots.push(...f.spots); to.direct ||= f.direct
     by.delete(f.key)
   }
+  for (const k of kept) if (!by.has('u:' + k.id) && k.id !== me?.id)
+    by.set('u:' + k.id, { key: 'u:' + k.id, name: k.name, email: k.email.toLowerCase(), uid: k.id, image: k.image ?? undefined, joined: true, spots: [] })
   return [...by.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 /** A friend by key, or by a bare email (older /f/<email> links) or the email/phone/account a key names. */
