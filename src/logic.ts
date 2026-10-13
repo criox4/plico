@@ -401,7 +401,8 @@ export function itemSplit(items: Item[], extras: number): { owed: Record<Id, num
 
 // ---------- people: one identity each, across every group ----------
 /** Who a spot is: their account once they've joined, else the email or phone they were invited by. */
-export const personKey = (m: Member) => m.uid ? 'u:' + m.uid : m.email ? 'e:' + m.email.toLowerCase() : m.phone ? 'p:' + m.phone : undefined
+// Masked (someone else's invitee): not enough to tell who they are, so not a friend of yours.
+export const personKey = (m: Member) => m.uid ? 'u:' + m.uid : m.email?.includes('•') || m.phone?.includes('•') ? undefined : m.email ? 'e:' + m.email.toLowerCase() : m.phone ? 'p:' + m.phone : undefined
 export type Friend = { key: string; name: string; email?: string; phone?: string; uid?: string; image?: string; joined: boolean; spots: { g: Group; id: Id }[]; direct?: Group }
 /** Everyone you share a group with, once each, and `kept`: friends from groups you no longer share (no balance left there).
  *  `me`: your own account and email, never a friend of yours. */

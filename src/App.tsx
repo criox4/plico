@@ -776,7 +776,7 @@ function Person({ s, g, m, used }: { s: State; g: Group; m: M; used: boolean }) 
             </>}
             <div className="person-actions">
               {m.email && emailOk(m.email) && <button type="button" className="btn-sm" onClick={() => void resend()}><Icon n="send" size={16} />{m.invited ? 'Resend email' : 'Email invite'}</button>}
-              {link && <a className="btn-sm" href={wa(msg, m.phone)} target="_blank" rel="noopener"><Icon n="send" size={16} />WhatsApp</a>}
+              {link && <a className="btn-sm" href={wa(msg, m.phone?.includes('•') ? undefined : m.phone)} target="_blank" rel="noopener"><Icon n="send" size={16} />WhatsApp</a>}
               {link && <button type="button" className="btn-sm ghost" onClick={() => { void navigator.clipboard?.writeText(link); setNote('Invite link copied.') }}><Icon n="copy" size={16} />Copy link</button>}
             </div>
             {!link && <small>Invite links appear once this person has synced. Check your connection.</small>}

@@ -22,6 +22,9 @@ import { THEMES } from '../src/themes.ts'
 
 type Env = { Variables: { userId: string; userName: string; sessionId: string } }
 // Public (no sign-in): a parent opening the consent link from their email.
+const maskPhone = (p: string) => '•••• ' + p.slice(-4)
+const maskEmail = (e: string) => { const [u, d] = e.split('@'); return `${u[0]}•••@${d}` }
+
 export const publicApi = new Hono()
 const guardianToken = async (token: string) => {
   if (!/^[a-f0-9]{64}$/.test(token)) return null
@@ -70,7 +73,7 @@ publicApi.get('/public/claim/:token', async c => {
   const m = await db.member.findUnique({ where: { inviteToken: token }, select: { id: true, name: true, email: true, userId: true, group: { select: { id: true, name: true, kind: true, theme: true } } } })
   if (!m || m.userId) return c.json({ error: 'This invite was already used or is no longer valid' }, 404)
   // The token was emailed to this address, so whoever holds it can see it: it pre-fills their sign-up.
-  const mask = m.email ? m.email.replace(/^(.{1,2})[^@]*/, '$1***') : null
+  const mask = m.email ? maskEmail(m.email) : null
   return c.json({ group: { name: m.group.name, kind: m.group.kind, theme: m.group.theme }, invitedBy: await inviterOf(m.group.id, m.id), name: m.name, email: mask, prefill: m.email })
 })
 // A personal friend link: who you'd be adding, a name and a face, nothing else.
@@ -229,7 +232,11 @@ api.get('/groups', async c => {
   // Friends you no longer share a group with (they stay friends, like Splitwise); everyone else comes with the groups.
   const kept = await db.friendship.findMany({ where: { userId: uid, friend: { members: { none: { group: { members: { some: { userId: uid } } } } } } },
     select: { friend: { select: { id: true, name: true, image: true, email: true } } } })
-  return c.json({ now, groups: groups.map(g => ({ ...g, full: !delta.includes(g.id), expenses: byGroup.get(g.id) ?? [] })), friends: kept.map(k => k.friend) })
+  // Someone still waiting: their email and number are for whoever added them. Anyone can join from a group link,
+  // so everyone else sees them masked.
+  const hide = (m: (typeof groups)[number]['members'][number]) => !m.userId && m.addedById !== uid
+    ? { ...m, email: m.email && maskEmail(m.email), phone: m.phone && maskPhone(m.phone) } : m
+  return c.json({ now, groups: groups.map(g => ({ ...g, members: g.members.map(hide), full: !delta.includes(g.id), expenses: byGroup.get(g.id) ?? [] })), friends: kept.map(k => k.friend) })
 })
 
 // A group's whole audit log, oldest first, so the phone can check the hash chain end to end and export it.
@@ -382,7 +389,9 @@ api.put('/groups/:gid/members/:mid', async c => {
   // Someone with an account owns their details. Letting others edit a joined person's UPI ID would let them
   // redirect that person's incoming payments, so those edits are ignored (not errors: they may be stale outbox ops).
   if (m?.userId && m.userId !== uid) return c.json({ ok: true, ignored: true })
-  const email = b.email?.toLowerCase() || null, phone = b.phone || null
+  // Someone else's waiting person: this phone only has their contact masked, so it keeps what's stored.
+  const theirs = !!m && !m.userId && m.addedById !== uid
+  const email = theirs ? m.email : b.email?.toLowerCase() || null, phone = theirs ? m.phone : b.phone || null
   const data = { name: b.name, upi: b.upi || null, upi2: b.upi2 || null, email: m?.userId ? m.email : email, phone }
   // Everyone in a group is a real person: an account, or an email or phone number that becomes one when they join.
   if (!m?.userId && !email && !phone) return c.json({ error: 'Add their phone number or email so they can join.' }, 400)
@@ -763,8 +772,6 @@ api.post('/claim/:token', async c => {
 })
 
 // ---------- group invite links: anyone with the link joins as themselves ----------
-const maskPhone = (p: string) => '•••• ' + p.slice(-4)
-const maskEmail = (e: string) => { const [u, d] = e.split('@'); return `${u[0]}•••@${d}` }
 // A spot someone was invited to by email is only theirs: claimed by its personal link, or here when the email matches.
 api.get('/invites/:code', async c => {
   const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, include: { members: { select: { userId: true, name: true, email: true, phone: true }, orderBy: { createdAt: 'asc' } } } })
