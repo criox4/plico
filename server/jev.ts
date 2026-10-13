@@ -1,21 +1,24 @@
-// TypeSafe's Jev: fast typed judgments (yes/no probabilities, one-of choices) for the chat's guardrails and for
-// sorting receipt items. It never writes text and never touches money; code decides what the probabilities mean.
+// TypeSafe's Jev on OpenRouter's Decisions API: fast typed judgments (yes/no probabilities, one-of choices) for the
+// chat's guardrails and for sorting receipt items. It never writes text and never touches money; code decides what the
+// probabilities mean. Same OpenRouter key as server/ai.ts. The alias tracks each new Jev: re-run scripts/chat-eval.mts
+// after a release, since the thresholds below were tuned on it.
 import { createHash } from 'node:crypto'
 
-const KEY = process.env.TYPESAFE_API_KEY
+const KEY = process.env.OPENROUTER_API_KEY
+const MODEL = '~typesafe/jev-latest'
 export const jevReady = () => !!KEY
 
 type Question = { type: 'noul' | 'choice'; instructions: unknown; criteria: unknown }
 export type Answer = { type: 'noul'; noul: number } | { type: 'choice'; choice: string; confidence: number; probabilities: Record<string, number> }
 
 export async function jev(state: unknown, questions: Record<string, Question>): Promise<Record<string, Answer>> {
-  const res = await fetch('https://api.typesafe.ai/v1/systemone', {
+  const res = await fetch('https://openrouter.ai/api/alpha/decisions', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'jev-latest', state, questions }),
+    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': process.env.PUBLIC_URL || 'https://plico.space', 'X-Title': 'Plico' },
+    body: JSON.stringify({ model: MODEL, state, questions }),
     signal: AbortSignal.timeout(8000),
   })
-  if (!res.ok) throw new Error(`TypeSafe ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  if (!res.ok) throw new Error(`Jev ${res.status}: ${(await res.text()).slice(0, 200)}`)
   return (await res.json() as { answers: Record<string, Answer> }).answers
 }
 const noul = (a?: Answer) => (a?.type === 'noul' ? a.noul : 0)
