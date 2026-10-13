@@ -5,6 +5,7 @@ import { APIError } from 'better-auth/api'
 import { db } from './db.ts'
 import { mail } from './email.ts'
 import { linkByEmail } from './audit.ts'
+import { BUCKET, deleteFolder } from './storage.ts'
 import { isVpa } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
 import { IP_HEADER } from './ip.ts'
@@ -72,6 +73,8 @@ export const auth = betterAuth({
       enabled: true,
       // The mailed link opens the app (which holds the session) and finishes deletion with the token.
       sendDeleteAccountVerification: async ({ user, token }) => { void mail.deleteAccount(user.email, `${APP}/#/delete/${token}`).catch(console.error) },
+      // Avatars are public files: they go with the account.
+      afterDelete: async user => { void deleteFolder(BUCKET.public, user.id).catch(console.error) },
     },
   },
   databaseHooks: {

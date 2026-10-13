@@ -8,7 +8,7 @@ import { db } from './db.ts'
 import { mail } from './email.ts'
 import { aiReady, readExpense, readReceipt } from './ai.ts'
 import { NO_READ, checkReceipt, type ReceiptRead } from './proof.ts'
-import { BUCKET, deleteFile, getFile, imageType, putFile, storageReady } from './storage.ts'
+import { BUCKET, deleteFile, deleteFolder, getFile, imageType, putFile, storageReady } from './storage.ts'
 import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
 import { prefsOf } from './push-text.ts'
@@ -342,6 +342,7 @@ api.delete('/groups/:id', async c => {
   if (g.kind === 'direct') return c.json({ error: 'Friends can’t be deleted' }, 403)
   if (g.createdById !== c.get('userId')) return c.json({ error: 'Only the person who made the group can delete it' }, 403)
   await db.group.delete({ where: { id: g.id } })
+  void deleteFolder(BUCKET.private, g.id).catch(console.error) // its receipts and cover go with it
   return c.json({ ok: true })
 })
 
