@@ -506,19 +506,24 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   const all = await db.member.findMany({ where: { groupId: gid }, select: { id: true, name: true, userId: true, user: { select: { email: true } } } })
   const bad = sharesError(b.amount, b.paid, b.owed, new Set(all.map(m => m.id)))
   if (bad) return c.json({ error: bad }, 400)
+  const one = (o: Record<string, number>) => Object.keys(o).filter(k => o[k] > 0)
+  const [payer, payeeId] = [one(b.paid), one(b.owed)]
+  if (b.settle && (payer.length !== 1 || payeeId.length !== 1 || payer[0] === payeeId[0])) return c.json({ error: 'A payment goes from one person to one other' }, 400)
   const existing = await db.expense.findUnique({ where: { id: eid }, include: withShares })
   if (existing && existing.groupId !== gid) return c.json(notFound, 404)
 
   // A settlement counts as soon as it's recorded; `pending` only means not verified yet. Only the payee can verify it
   // (or nobody can, when the payee is a guest: then it's verified at once). Anyone else's record waits for them; a
-  // verified one stays verified while its amount is unchanged.
-  const payee = b.settle ? all.find(m => m.id === Object.keys(b.owed)[0]) : undefined
+  // verified one stays verified while it's the same payment.
+  const payee = b.settle ? all.find(m => m.id === payeeId[0]) : undefined
+  // Same payment as before: same amount, same payer, same payee. Changing who paid whom needs the new payee to confirm.
+  const samePay = existing && existing.amount === b.amount && existing.shares.find(s => s.paid > 0)?.memberId === payer[0] && existing.shares.find(s => s.owed > 0)?.memberId === payeeId[0]
   const canConfirm = !payee?.userId || payee.userId === uid
-  const pending = !!b.settle && (canConfirm ? !!b.pending : !(existing && !existing.pending && existing.amount === b.amount))
+  const pending = !!b.settle && (canConfirm ? !!b.pending : !(samePay && !existing.pending))
   // Only the payee can say it hasn't arrived: the one thing that stops a settlement counting.
   const rejected = !!b.settle && (payee?.userId === uid ? !!b.rejected : !!existing?.rejected)
-  // Verified by the payee, unless it already was (by them or by the payer's receipt) at this amount.
-  const kept = existing?.verifiedBy && !existing.pending && !existing.rejected && existing.amount === b.amount
+  // Verified by the payee, unless it already was (by them or by the payer's receipt) for this same payment.
+  const kept = samePay && existing.verifiedBy && !existing.pending && !existing.rejected
   const verifiedBy = b.settle && !pending && !rejected ? (kept ? existing.verifiedBy : 'payee') : null
   const verifiedAt = verifiedBy ? (kept ? existing.verifiedAt : new Date()) : null
 
