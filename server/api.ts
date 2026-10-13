@@ -623,7 +623,8 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
   const payee = await db.member.findUniqueOrThrow({ where: { id: e.shares.find(s => s.owed > 0)!.memberId }, select: { name: true, upi: true, upi2: true } })
   const r = read || utr ? checkReceipt(read ?? NO_READ, { amount: e.amount, createdAt: e.createdAt, payee }, used) : null
   const proof: Proof = { method: b.method, ...(b.note && { note: b.note }), ...(file && { file }), ...(read && { read }), ...(r && { checks: r.checks }) }
-  if (b.image && prev?.file && prev.file !== file) void deleteFile(BUCKET.private, `${gid}/${prev.file}`)
+  // The old photo goes only once the new proof is saved: a failed save must still point at a file that exists.
+  const dropOld = () => { if (b.image && prev?.file && prev.file !== file) void deleteFile(BUCKET.private, `${gid}/${prev.file}`) }
   if (r?.verified && e.pending) {
     // Verified: a new version, on the record, so every phone pulls it and the payee hears (push.ts).
     try {
@@ -633,10 +634,12 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
         await audit(tx, gid, { kind: 'expense.edited', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), before: snapOf(e), after: snapOf({ ...e, pending: false, verifiedBy: 'screenshot' }) })
       })
     } catch (err) { if (err instanceof Stale) return conflict(c, eid); throw err }
+    dropOld()
     return c.json({ verifiedBy: 'screenshot', proof, version: e.version + 1, pending: false })
   }
   // Proof alone moves no money and changes no version: phones pick it up by its update time.
   const saved = await db.expense.update({ where: { id: eid }, data: { proof, utr }, select: { verifiedBy: true, version: true, pending: true } })
+  dropOld()
   return c.json({ verifiedBy: saved.verifiedBy, proof, version: saved.version, pending: saved.pending })
 })
 
