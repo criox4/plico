@@ -419,7 +419,7 @@ api.put('/groups/:gid/members/:mid', async c => {
       await audit(tx, gid, { kind: 'member.edited', memberId: mid, ...by, ...diff })
     })
   }
-  // A new email: link now if that person already has a verified account, otherwise email an invite.
+  // A new email: email them an invite.
   if (email && email !== m?.email && !m?.userId && !(await inviteByEmail(gid, mid, email, { id: uid, name: c.get('userName') }))) return c.json({ ok: true, emailed: false })
   return c.json({ ok: true })
 })
@@ -439,20 +439,11 @@ async function mayEmail(byId: string, to: string) {
   return true
 }
 
-/** Links the spot if that email already has an account, otherwise emails an invite. False when a cap stopped the email. */
+/** Emails an invite with their claim link. Never links to an account here, even a verified one: that would tell anyone
+ *  whether an email is on Plico and put people in groups without asking. They join from the link. False when a cap stopped it. */
 async function inviteByEmail(gid: string, mid: string, email: string, by: { id: string; name: string }) {
   const inviter = by.name
   const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { name: true } })
-  const user = await db.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, emailVerified: true } })
-  if (user) {
-    const count = await db.$transaction(async tx => {
-      const { count } = await tx.member.updateMany({ where: { id: mid, userId: null, group: { members: { none: { userId: user.id } } } }, data: { userId: user.id, inviteToken: null, name: user.name } })
-      if (count) await audit(tx, gid, { kind: 'member.joined', memberId: mid, byId: user.id, byName: user.name, after: { email, how: 'email', addedBy: inviter } })
-      return count
-    })
-    if (count && await mayEmail(by.id, user.email.toLowerCase())) void mail.added(user.email, inviter, g.name).catch(console.error)
-    return true
-  }
   const token = await ensureToken(mid)
   if (!(await mayEmail(by.id, email))) return false
   await db.member.update({ where: { id: mid }, data: { invitedAt: new Date() } })

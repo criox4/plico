@@ -63,6 +63,8 @@ function layout(title: string, body: string, cta: { label: string; url: string }
 </table></td></tr></table></body></html>`
 }
 
+const rupees = (paise: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: paise % 100 ? 2 : 0 }).format(paise / 100)
+
 export const mail = {
   verify: (to: string, name: string, url: string) => sendEmail({
     to, subject: 'Verify your email for Plico',
@@ -79,13 +81,8 @@ export const mail = {
     html: layout(`${inviter} added you to ${group}`, `${esc(inviter)} is splitting expenses for <strong>${esc(group)}</strong> on Plico. Join to see who owes what, and settle up over UPI in one tap.`, { label: 'See the group', url }),
     text: `${inviter} added you to “${group}” on Plico.\n\nJoin to see what you owe or are owed:\n${url}`,
   }),
-  added: (to: string, inviter: string, group: string) => sendEmail({
-    to, subject: `${inviter} added you to “${group}”`,
-    html: layout(`You’re in ${group}`, `${esc(inviter)} added you to <strong>${esc(group)}</strong>. It’s already waiting in Plico.`, { label: 'Open Plico', url: `${APP}/#/` }),
-    text: `${inviter} added you to “${group}”. It’s already waiting in Plico: ${APP}/#/`,
-  }),
   paid: (to: string, payer: string, group: string, paise: number) => {
-    const amt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: paise % 100 ? 2 : 0 }).format(paise / 100)
+    const amt = rupees(paise)
     return sendEmail({
       to, subject: `${payer} says they paid you ${amt}`,
       html: layout(`${payer} paid you ${amt}?`, `${esc(payer)} marked ${amt} as paid to you in <strong>${esc(group)}</strong>. It already counts in Plico. Check your UPI app, then tell Plico whether it arrived.`, { label: 'Open Plico', url: `${APP}/#/` }),
@@ -93,7 +90,7 @@ export const mail = {
     })
   },
   notReceived: (to: string, payee: string, group: string, paise: number) => {
-    const amt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: paise % 100 ? 2 : 0 }).format(paise / 100)
+    const amt = rupees(paise)
     return sendEmail({
       to, subject: `${payee} hasn’t received your ${amt} yet`,
       html: layout(`${payee} hasn’t got it yet`, `${esc(payee)} says your ${amt} in <strong>${esc(group)}</strong> hasn’t arrived. Check your UPI app: if it went through, share the transaction ID with them; if not, pay again from Plico.`, { label: 'Open Plico', url: `${APP}/#/` }),
