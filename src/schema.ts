@@ -202,14 +202,11 @@ export const ChatEvent = z.union([
 export type ChatCard = z.infer<typeof ChatCard>
 export type ChatEvent = z.infer<typeof ChatEvent>
 
-export type GroupInput = z.input<typeof GroupIn>
-export type MemberInput = z.input<typeof MemberIn>
 export type ExpenseInput = z.input<typeof ExpenseIn>
 export type Snap = z.infer<typeof Snap>
 export type SnapFull = z.infer<typeof SnapFull>
 export type ServerExpense = z.infer<typeof ServerExpense>
 export type ServerGroup = z.infer<typeof ServerGroup>
-export type Conflict = z.infer<typeof ConflictOut>
 export type AuditEvent = z.infer<typeof AuditEvent>
 export type ActivityEvent = z.infer<typeof ActivityEvent>
 export type Read = z.infer<typeof ReadOut>

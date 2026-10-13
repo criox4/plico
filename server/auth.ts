@@ -3,7 +3,7 @@ import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { bearer } from 'better-auth/plugins'
 import { APIError } from 'better-auth/api'
 import { db } from './db.ts'
-import { mail } from './email.ts'
+import { APP, mail } from './email.ts'
 import { linkByEmail } from './audit.ts'
 import { BUCKET, deleteFolder } from './storage.ts'
 import { isVpa } from '../src/logic.ts'
@@ -15,7 +15,6 @@ export const ORIGINS = ['http://localhost:5173', 'http://localhost:4173', 'capac
   ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL] : [])]
 
 const TONES = ['gentle', 'normal', 'shameless']
-const APP = process.env.PUBLIC_URL || 'http://localhost:5173'
 
 // Google is optional: the button only appears (via /api/config) once credentials exist.
 // One Google Cloud project, one client id per platform: web first (used for the redirect flow), then native ids for ID-token sign-in.

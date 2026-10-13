@@ -5,7 +5,7 @@ import * as z from 'zod/mini'
 import { AgeIn, AiConsentIn, ChatIn, ExpenseIn, FileName, FriendCode, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, NotifyIn, ParentConsentIn, ProofIn, PushDeviceIn, PushTokenIn, ReadIn, RemindIn, SeenIn, Token, type Proof } from '../src/schema.ts'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
-import { mail } from './email.ts'
+import { APP, mail } from './email.ts'
 import { aiReady, readExpense, readReceipt } from './ai.ts'
 import { NO_READ, checkReceipt, type ReceiptRead } from './proof.ts'
 import { BUCKET, deleteFile, deleteFolder, getFile, imageType, putFile, storageReady } from './storage.ts'
@@ -17,8 +17,7 @@ import { mePhone } from './whatsapp.ts'
 import { clientIp, limiter } from './ip.ts'
 import { count } from './otel.ts'
 import { createHash, randomInt } from 'node:crypto'
-import { isVpa, sharesError } from '../src/logic.ts'
-import { THEMES } from '../src/themes.ts'
+import { sharesError } from '../src/logic.ts'
 
 type Env = { Variables: { userId: string; userName: string; sessionId: string } }
 const maskPhone = (p: string) => '•••• ' + p.slice(-4)
@@ -95,7 +94,6 @@ publicApi.get('/public/u/:code', async c => {
 
 export const api = new Hono<Env>()
 
-const APP = process.env.PUBLIC_URL || 'http://localhost:5173'
 const claimUrl = (token: string) => `${APP}/#/claim/${token}`
 
 const inviteCode = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12)

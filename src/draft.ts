@@ -1,6 +1,6 @@
 // An expense before it's saved: who it's with (a group, or friends outside any group), the amounts, and any items.
 // The Add screen and Ask Plico both build one; commitDraft() saves it the same way from either.
-import { ME, findFriend, friendParts, friendsIn, runRecurring, uid, type Expense, type Id, type SplitMode } from './logic'
+import { ME, addMonth, findFriend, friendParts, friendsIn, runRecurring, uid, type Expense, type Id, type SplitMode } from './logic'
 import { getState, update } from './store'
 import { directWith, targetOf } from './people'
 import { markAi } from './sync'
@@ -32,7 +32,7 @@ export async function commitDraft(d: Draft, via?: 'ai'): Promise<Saved[]> {
     if (!g) return
     const day = +e.date.slice(8), id = uid()
     if (via) markAi(id)
-    g.expenses.push({ ...e, id, ...(d.repeat && { repeat: { next: nextMonth(e.date), day } }) })
+    g.expenses.push({ ...e, id, ...(d.repeat && { repeat: { next: addMonth(e.date, +e.date.slice(8)), day } }) })
     runRecurring(g)
   })
   const base = { title: d.title, cat: d.cat, date: d.date, ...(d.receipt && { receipt: d.receipt }) }
@@ -60,12 +60,6 @@ export async function commitDraft(d: Draft, via?: 'ai'): Promise<Saved[]> {
     out.push({ groupId: g.id, friend: p.key })
   }
   return out
-}
-
-const nextMonth = (date: string) => {
-  const [y, m, dd] = date.split('-').map(Number)
-  const n = new Date(Date.UTC(y, m, 1)), last = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth() + 1, 0)).getUTCDate()
-  return `${n.getUTCFullYear()}-${String(n.getUTCMonth() + 1).padStart(2, '0')}-${String(Math.min(dd, last)).padStart(2, '0')}`
 }
 
 /** A chat card's draft on this phone: the server's member ids map to your copy of the group (you are ME here). */
