@@ -111,7 +111,8 @@ export const auth = betterAuth({
           if (data.image && !/^(\/api\/files\/avatars\/[\w/-]+\.(jpg|png|webp)|https:\/\/lh\d\.googleusercontent\.com\/[^\s"<>]{1,500}|plico:[0-9a-f]{6}|emoji:(?=.*\p{Extended_Pictographic})\S{1,16})$/u.test(String(data.image))) return no('That picture can’t be used')
           return { data }
         },
-        after: async u => { if (u.emailVerified) await linkByEmail(u.id, u.email) },
+        // Only when the email just got verified: a profile save (theme, UPI) would pull a leaver back into their old groups.
+        after: async (u, ctx) => { if (u.emailVerified && ctx?.path !== '/update-user') await linkByEmail(u.id, u.email) },
       },
     },
   },
