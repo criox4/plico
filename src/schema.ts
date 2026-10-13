@@ -28,6 +28,7 @@ const When = z.string()
 // ---------- requests ----------
 export const GroupIn = z.object({
   name: text(60), kind: Kind, theme: Theme, track: z.optional(z.boolean()), emoji: z.nullish(Emoji), cover: z.nullish(FileName), selfId: Id,
+  create: z.optional(z.boolean()), // a new group: without it a missing id is a deleted group, not one to make
 })
 export const MemberIn = z.object({ name: text(60), upi: Upi, upi2: z.optional(Upi), email: Email, phone: Phone })
 export const ExpenseIn = z.object({

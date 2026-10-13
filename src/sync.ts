@@ -105,7 +105,7 @@ export function diff(prev: State, next: State): Op[] {
   for (const g of next.groups) {
     const o = old.get(g.id)
     const base = `/api/groups/${g.id}`
-    if (!o || !same(groupBody(o), groupBody(g))) groups.push({ m: 'PUT', path: base, body: groupBody(g) })
+    if (!o || !same(groupBody(o), groupBody(g))) groups.push({ m: 'PUT', path: base, body: { ...groupBody(g), ...(!o && { create: true }) } })
     if (!o || selfChanged) members.push({ m: 'PUT', path: `${base}/members/${g.selfId}`, body: selfBody(next) })
     const om = new Map((o?.members ?? []).map(m => [m.id, m]))
     for (const m of g.members) {

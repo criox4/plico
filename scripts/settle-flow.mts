@@ -27,7 +27,7 @@ const pay = (from: string, to: string, amount: number, o: object = {}) => ({ tit
 const put = (who: typeof A, eid: string, body: object) => who.call('PUT', `/api/groups/${gid}/expenses/${eid}`, body)
 const effectOf = async (eid: string, kind: string) => (await db.auditEvent.findFirstOrThrow({ where: { expenseId: eid, kind }, orderBy: { seq: 'desc' } })).effect
 try {
-  assert.equal((await A.call('PUT', `/api/groups/${gid}`, { name: 'Goa', kind: 'trip', theme: 'classic', selfId: a })).status, 200)
+  assert.equal((await A.call('PUT', `/api/groups/${gid}`, { name: 'Goa', kind: 'trip', theme: 'classic', selfId: a, create: true })).status, 200)
   const code = (await A.call('GET', `/api/groups/${gid}/invite`)).body.code
   assert.equal((await B.call('POST', `/api/invites/${code}/join`, {})).status, 200)
   const b = (await db.member.findFirstOrThrow({ where: { groupId: gid, userId: B.id } })).id

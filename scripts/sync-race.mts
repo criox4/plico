@@ -33,7 +33,7 @@ async function phone(name: string) {
 const [A, B, C] = await Promise.all([phone('Asha'), phone('Bala'), phone('Chitra')])
 const gid = crypto.randomUUID(), selfA = crypto.randomUUID()
 try {
-  assert.equal((await A.call('PUT', `/api/groups/${gid}`, { name: 'Race', kind: 'friends', theme: 'classic', selfId: selfA })).status, 200)
+  assert.equal((await A.call('PUT', `/api/groups/${gid}`, { name: 'Race', kind: 'friends', theme: 'classic', selfId: selfA, create: true })).status, 200)
   const code = (await A.call('GET', `/api/groups/${gid}/invite`)).body.code
   await B.call('POST', `/api/invites/${code}/join`, {}); await C.call('POST', `/api/invites/${code}/join`, {})
   const mid = async (u: string) => (await db.member.findFirst({ where: { groupId: gid, userId: u } }))?.id
@@ -186,7 +186,7 @@ try {
 
   // (l) invite previews before sign-in: the group and who invited you, nothing else
   const g2 = crypto.randomUUID(), selfA2 = crypto.randomUUID()
-  await A.call('PUT', `/api/groups/${g2}`, { name: 'Leave test', kind: 'friends', theme: 'classic', selfId: selfA2 })
+  await A.call('PUT', `/api/groups/${g2}`, { name: 'Leave test', kind: 'friends', theme: 'classic', selfId: selfA2, create: true })
   const code2 = (await A.call('GET', `/api/groups/${g2}/invite`)).body.code
   const peek = await (await fetch(`${API}/api/public/invites/${code2}`)).json() as any
   assert.deepEqual(peek, { group: { name: 'Leave test', kind: 'friends', theme: 'classic', people: 1 }, invitedBy: 'Asha' })
@@ -244,7 +244,7 @@ try {
   contract(NotifyOut, nb, 'notify'); assert.equal(nb.sessions.length, 1); assert.equal(nb.prefs.nudge, true)
 
   const g3 = crypto.randomUUID(), selfA3 = crypto.randomUUID()
-  await A.call('PUT', `/api/groups/${g3}`, { name: 'Push', kind: 'friends', theme: 'classic', selfId: selfA3 })
+  await A.call('PUT', `/api/groups/${g3}`, { name: 'Push', kind: 'friends', theme: 'classic', selfId: selfA3, create: true })
   const code3 = (await A.call('GET', `/api/groups/${g3}/invite`)).body.code
   await B.call('POST', `/api/invites/${code3}/join`, {}); await C.call('POST', `/api/invites/${code3}/join`, {})
   const [b3, c3] = [await db.member.findFirstOrThrow({ where: { groupId: g3, userId: B.id } }), await db.member.findFirstOrThrow({ where: { groupId: g3, userId: C.id } })]

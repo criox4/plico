@@ -25,7 +25,7 @@ const [A, B, X] = await Promise.all([person('Asha'), person('Bala'), person('Xav
 const groups: string[] = []
 const group = async (owner: typeof A, name: string, others: (typeof A)[]) => {
   const id = crypto.randomUUID(), self = crypto.randomUUID(); groups.push(id)
-  await owner.call('PUT', `/api/groups/${id}`, { name, kind: 'trip', theme: 'classic', selfId: self })
+  await owner.call('PUT', `/api/groups/${id}`, { name, kind: 'trip', theme: 'classic', selfId: self, create: true })
   const code = (await owner.call('GET', `/api/groups/${id}/invite`)).code
   const ids: Record<string, string> = { [owner.name]: self }
   for (const o of others) { await o.call('POST', `/api/invites/${code}/join`, {}); ids[o.name] = (await db.member.findFirstOrThrow({ where: { groupId: id, userId: o.id } })).id }

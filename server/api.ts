@@ -322,6 +322,8 @@ api.put('/groups/:id', async c => {
       await audit(tx, id, { kind: 'group.edited', ...by, ...diff })
     })
   } else {
+    // Not a new group: it was deleted while this phone was offline. Don't bring it back.
+    if (!b.create) return c.json(notFound, 404)
     if (b.kind === 'direct') return c.json({ error: 'Add friends from the Friends tab' }, 400)
     await db.$transaction(async tx => {
       await tx.group.create({
