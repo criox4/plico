@@ -157,7 +157,8 @@ async function verify(events: Event[], head: { auditSeq: number; auditHash: stri
 }
 
 function saveCsv(file: string, rows: (string | number)[][]) {
-  const cell = (c: string | number) => (/[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : String(c))
+  // A leading = + - @ would run as a formula in Excel or Sheets: titles are other people's text. Amounts like -12.50 stay numbers.
+  const cell = (c: string | number) => { const v = typeof c === 'string' && /^[=+\-@\t\r]/.test(c) && isNaN(Number(c)) ? `'${c}` : String(c); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v }
   const blob = new Blob(['\ufeff' + rows.map(r => r.map(cell).join(',')).join('\n')], { type: 'text/csv' })
   const f = new File([blob], file, { type: 'text/csv' })
   // Phones: the share sheet (save to Files, send to yourself). Web: a download.
