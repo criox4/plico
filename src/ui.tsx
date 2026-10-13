@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
-import { ME, balances, missedChecks, personKey, pairwise, showUtr, simplify, toCheck, today, verifyLabel, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
+import { ME, balances, missedChecks, pairwise, showUtr, simplify, toCheck, today, verifyLabel, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import { update, useStore, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
@@ -611,15 +611,14 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
   const total = live.reduce((a, r) => a + r.net, 0)
   // Net per person across groups, like Needs you and People: owing Bala in one group and being owed more in another is
   // nothing to pay. Collect is derived so the tiles always add up to the total.
-  const each = new Map<string, number>()
-  for (const { g } of live) for (const m of g.members) if (m.id !== ME) {
-    const k = personKey(m) ?? `${g.id}:${m.id}`
-    each.set(k, (each.get(k) ?? 0) + pairwise(g, ME, m.id))
-  }
-  const pay = [...each.values()].reduce((a, n) => a + Math.max(-n, 0), 0)
+  // Grouped with friendsOf, so a spot waiting under a friend's email counts as that friend; anyone else on their own.
+  const friends = friendsOf(s), theirs = new Set(friends.flatMap(f => f.spots.map(x => `${x.g.id}:${x.id}`)))
+  const nets = friends.map(f => f.spots.reduce((a, x) => a + (x.g.track ? 0 : pairwise(x.g, ME, x.id)), 0))
+  for (const { g } of live) for (const m of g.members) if (m.id !== ME && !theirs.has(`${g.id}:${m.id}`)) nets.push(pairwise(g, ME, m.id))
+  const pay = nets.reduce((a, n) => a + Math.max(-n, 0), 0)
   const collect = total + pay
   const open = rows.filter(r => r.net && !r.g.track).length
-  const people = friendsOf(s)
+  const people = friends
     .map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name)).slice(0, 6)
   const recent = s.groups
     .flatMap(g => g.expenses.map((e, i) => ({ g, e, i })))
