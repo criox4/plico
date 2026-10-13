@@ -187,7 +187,7 @@ export function runRecurring(g: Group, now = today()): boolean {
   let changed = false
   for (const e of [...g.expenses]) {
     while (e.repeat && e.repeat.next <= now) {
-      g.expenses.push({ ...e, id: `${e.id}:${e.repeat.next}`, date: e.repeat.next, repeat: undefined })
+      g.expenses.push({ ...e, id: `${e.id}:${e.repeat.next}`, date: e.repeat.next, repeat: undefined, v: undefined }) // a new expense: never the parent's version
       e.repeat.next = addMonth(e.repeat.next, e.repeat.day)
       changed = true
     }
@@ -452,13 +452,14 @@ export function friendParts(amount: number, paid: Record<string, number>, owed: 
 
 // ---------- sync: the outbox and edit history ----------
 /** A queued server change. `base` = the expense version it started from (null = new, absent = not an expense). */
-export type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown; base?: number | null; via?: 'ai' }
+export type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown; base?: number | null; via?: 'ai'; sent?: true }
 const expensePath = (p: string) => /\/expenses\/[^/?]+$/.test(p)
 
 /** Queue an op. A newer change to an expense replaces one still waiting (keeping its base, so the server can still
- * spot a stale edit) and moves to the back, after anything it may depend on (a person added since). `busy`: ops[0] is being sent. */
+ * spot a stale edit) and moves to the back, after anything it may depend on (a person added since). `busy`: ops[0] is being sent.
+ * Never into a `sent` op: the server may already have it, so the newer change must build on its version. */
 export function enqueue(ops: Op[], op: Op, busy: boolean): Op[] {
-  const i = expensePath(op.path) ? ops.findIndex((o, k) => o.path === op.path && !(busy && k === 0)) : -1
+  const i = expensePath(op.path) ? ops.findIndex((o, k) => o.path === op.path && !o.sent && !(busy && k === 0)) : -1
   if (i < 0) return [...ops, op]
   const via = op.via ?? ops[i].via // a change folded with an Ask Plico one still says Ask Plico was involved
   return [...ops.slice(0, i), ...ops.slice(i + 1), { ...op, base: ops[i].base, ...(via && { via }) }]

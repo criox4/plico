@@ -184,6 +184,7 @@ function addIssue(i: Omit<Issue, 'id' | 'at'>) {
 async function flush() {
   if (flushing || !status.authed) return
   flushing = true
+  let stalled = false // the server can't take the head change yet: wait for the 30 s timer, not an instant retry
   try {
     while (outbox.length) {
       const op = outbox[0]
@@ -195,14 +196,15 @@ async function flush() {
       try {
         res = await req(url, { method: op.m, body })
       } catch {
+        outbox[0] = { ...op, sent: true }; saveOutbox() // it may have landed: later edits stay separate
         return setStatus({ offline: true })
       } finally { sending = false }
       if (res.status === 401) return expired()
-      if (res.status >= 500) return setStatus({ error: 'The server had trouble. Your changes are safe and will retry.' })
+      if (res.status >= 500) { stalled = true; outbox[0] = { ...op, sent: true }; saveOutbox(); return setStatus({ error: 'The server had trouble. Your changes are safe and will retry.' }) }
       const raw: unknown = await res.json().catch(() => ({}))
       const { code, error } = raw as { code?: string; error?: string }
       // Waiting on the age question or a parent's consent: keep everything and try again once it's sorted.
-      if (res.status === 403 && (code === 'age' || code === 'guardian')) return
+      if (res.status === 403 && (code === 'age' || code === 'guardian')) { stalled = true; return }
       outbox.shift()
       const [, gid, eid] = opIds(op.path)
       const title = (op.body as { title?: string })?.title ?? snap.groups.find(g => g.id === gid)?.expenses.find(e => e.id === eid)?.title ?? groupName(gid) ?? 'A change'
@@ -229,7 +231,7 @@ async function flush() {
     await pull()
   } finally {
     flushing = false
-    if (outbox.length && status.authed && !status.offline) setTimeout(() => void flush(), 0) // edits that landed mid-pull
+    if (outbox.length && status.authed && !status.offline && !stalled) setTimeout(() => void flush(), 0) // edits that landed mid-pull
   }
 }
 

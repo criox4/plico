@@ -31,6 +31,11 @@ assert.equal(addMonth('2026-12-15', 15), '2027-01-15')
 assert.ok(runRecurring(g, '2026-04-01'))
 assert.equal(g.expenses.filter(e => e.amount === 300 && !e.settle).length, 3) // original + Feb 28 + Mar 31
 assert.equal(g.expenses[2].repeat!.next, '2026-04-30')
+{ // a repeat's copy is a new expense: it must not carry the parent's version, or a stale copy passes as an edit
+  const r = { id: 'r', name: '', theme: 'default', members: [], expenses: [{ id: 'p', title: '', cat: '', date: '2026-01-01', amount: 1, paid: {}, owed: {}, v: 5, repeat: { next: '2026-02-01', day: 1 } }] } as unknown as Group
+  runRecurring(r, '2026-02-01')
+  assert.equal(r.expenses[1].v, undefined)
+}
 
 const sh = { g: "Goa '26 🌴", f: 'Karan', t: 'Arjun', v: 'arjun@okhdfc', a: 184200 }
 assert.deepEqual(decodeShare(encodeShare(sh)), sh)
@@ -136,6 +141,8 @@ r2 = enqueue(r2, { m: 'PUT', path: e1, body: 2, base: null }, true)
 assert.equal(r2.length, 2)
 r2 = rebase(r2.slice(1), e1, 1)
 assert.deepEqual(r2, [{ m: 'PUT', path: e1, body: 2, base: 1 }])
+// a change whose response got lost may already be on the server: a newer edit queues behind it, not into it
+assert.equal(enqueue([{ m: 'PUT', path: e1, body: 1, base: null, sent: true }], { m: 'PUT', path: e1, body: 2, base: null }, false).length, 2)
 assert.deepEqual(rebase([{ m: 'PUT', path: mem1, body: 1 }], mem1, 4), [{ m: 'PUT', path: mem1, body: 1 }])
 
 // history: versions described in words
