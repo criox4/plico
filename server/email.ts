@@ -36,6 +36,8 @@ async function resend(m: Mail) {
 }
 
 export async function sendEmail(m: Mail) {
+  // Test accounts (@splittr.test, and any reserved .test domain) can't receive mail: sending would only burn the daily quota.
+  if (/\.test$/i.test(m.to.trim())) { count.email.add(1, { result: 'skipped' }); return }
   for (const provider of [zeptomail, resend]) {
     try {
       if (await provider(m)) { count.email.add(1, { result: 'sent' }); return }
