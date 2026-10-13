@@ -635,7 +635,7 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
   // ponytail: checked, not enforced: two proofs racing with the same transaction ID could both pass. A unique index on utr if that's ever seen.
   const used = !!utr && (await db.expense.count({ where: { utr, id: { not: eid }, settle: true, deletedAt: null } })) > 0
   const payee = await db.member.findUniqueOrThrow({ where: { id: e.shares.find(s => s.owed > 0)!.memberId }, select: { name: true, upi: true, upi2: true } })
-  const r = read || utr ? checkReceipt(read ?? NO_READ, { amount: e.amount, createdAt: e.createdAt, payee }, used) : null
+  const r = read || utr ? checkReceipt(read ?? { ...NO_READ, utr }, { amount: e.amount, createdAt: e.createdAt, payee }, used) : null
   const proof: Proof = { method: b.method, ...(b.note && { note: b.note }), ...(file && { file }), ...(read && { read }), ...(r && { checks: r.checks }) }
   // The old photo goes only once the new proof is saved: a failed save must still point at a file that exists.
   const dropOld = () => { if (b.image && prev?.file && prev.file !== file) void deleteFile(BUCKET.private, `${gid}/${prev.file}`) }
