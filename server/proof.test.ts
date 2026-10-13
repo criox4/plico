@@ -34,5 +34,6 @@ assert.deepEqual(['Payment Successful', 'Paid', 'Money sent', 'Completed', 'Tran
 assert.deepEqual(['Failed', 'Payment unsuccessful', 'Pending', 'Processing', 'Reversed', 'Refunded', null].map(succeeded), [false, false, false, false, false, false, false])
 
 // No read at all (AI off, or only a typed transaction ID): nothing passes but freshness, so nothing is verified.
-assert.deepEqual(checkReceipt(NO_READ, s, false), { checks: { amount: false, payee: false, time: false, fresh: true }, verified: false })
+assert.deepEqual(checkReceipt(NO_READ, s, false), { checks: { amount: false, payee: false, time: false, fresh: false }, verified: false })
+assert.equal(checkReceipt({ ...ok, utr: null }, s, false).verified, false, 'no transaction ID: the same screenshot could prove two payments')
 console.log('proof ok')

@@ -122,7 +122,7 @@ export const needsConfirm = (g: Group, to: Id) => to !== ME && !!g.members.find(
 /** A settlement's quiet status: how it was verified, or that it hasn't been yet ('' for plain or rejected ones). */
 export const verifyLabel = (e: Expense) =>
   e.rejected ? '' : e.verifiedBy === 'screenshot' ? 'Verified · screenshot' : e.verifiedBy ? 'Verified' : e.pending ? 'Not verified' : ''
-const CHECKS = { amount: 'amount', payee: 'recipient', time: 'time', fresh: 'used before' } as const
+const CHECKS = { amount: 'amount', payee: 'recipient', time: 'time', fresh: 'transaction ID' } as const
 /** The receipt checks that failed, in words: "amount / time". '' when there were none or all passed. */
 export const missedChecks = (p?: Proof) => (p?.checks ? (Object.keys(CHECKS) as (keyof typeof CHECKS)[]).filter(k => !p.checks![k]).map(k => CHECKS[k]).join(' / ') : '')
 /** A UPI transaction ID in full for the two people in the payment, the last 4 digits for everyone else. */

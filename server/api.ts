@@ -608,7 +608,7 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
       catch (err) { count.ai.add(1, { result: 'error' }); console.error('[ai]', (err as Error).message) }
     }
   }
-  const utr = b.utr ?? read?.utr ?? null
+  const utr = read?.utr ?? b.utr ?? null // the ID on the receipt wins: a typed one isn't proof
   // ponytail: checked, not enforced: two proofs racing with the same transaction ID could both pass. A unique index on utr if that's ever seen.
   const used = !!utr && (await db.expense.count({ where: { utr, id: { not: eid }, settle: true, deletedAt: null } })) > 0
   const payee = await db.member.findUniqueOrThrow({ where: { id: e.shares.find(s => s.owed > 0)!.memberId }, select: { name: true, upi: true, upi2: true } })
