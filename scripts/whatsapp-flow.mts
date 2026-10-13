@@ -45,7 +45,7 @@ const [A, B] = await Promise.all([person('Asha'), person('Bala')])
 const gid = crypto.randomUUID(), spot = crypto.randomUUID()
 try {
   // A spot added under the number before it's verified: verifying links it.
-  await B.call('PUT', `/api/groups/${gid}`, { name: 'Goa', kind: 'trip', theme: 'classic', selfId: crypto.randomUUID() })
+  await B.call('PUT', `/api/groups/${gid}`, { name: 'Goa', kind: 'trip', theme: 'classic', selfId: crypto.randomUUID(), create: true })
   assert.equal((await B.call('PUT', `/api/groups/${gid}/members/${spot}`, { name: 'Asha', phone: PHONE })).status, 200)
 
   let r = await A.call('GET', '/api/me/phone')

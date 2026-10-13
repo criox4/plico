@@ -24,7 +24,7 @@ const [A, B, C] = await Promise.all([person('Asha'), person('Bala'), person('Chi
 const gid = crypto.randomUUID(), self = crypto.randomUUID(), spot = crypto.randomUUID()
 const groups = () => db.group.findMany({ where: { members: { some: { userId: { in: [A.id, B.id, C.id] } } } }, select: { id: true } })
 try {
-  assert.equal((await A.call('PUT', `/api/groups/${gid}`, { name: 'Goa', kind: 'trip', theme: 'classic', selfId: self })).status, 200)
+  assert.equal((await A.call('PUT', `/api/groups/${gid}`, { name: 'Goa', kind: 'trip', theme: 'classic', selfId: self, create: true })).status, 200)
 
   // A spot by phone alone, stored in one form; the same number again is refused.
   let r = await A.call('PUT', `/api/groups/${gid}/members/${spot}`, { name: 'Bala', phone: '98765 43210' })
@@ -82,7 +82,7 @@ try {
   assert.equal((await db.member.findUniqueOrThrow({ where: { id: cSpot } })).userId, C.id, 'joined into the spot with their number')
   assert.equal(await db.member.count({ where: { groupId: gid, userId: C.id } }), 1)
   const g2 = crypto.randomUUID(), s2 = crypto.randomUUID(), c2 = crypto.randomUUID()
-  await A.call('PUT', `/api/groups/${g2}`, { name: 'Flat', kind: 'home', theme: 'classic', selfId: s2 })
+  await A.call('PUT', `/api/groups/${g2}`, { name: 'Flat', kind: 'home', theme: 'classic', selfId: s2, create: true })
   await A.call('PUT', `/api/groups/${g2}/members/${c2}`, { name: 'Chitra', phone: '+919000000001' })
   assert.equal(await linkByPhone(C.id, '+919000000001'), 1)
   assert.equal((await db.member.findUniqueOrThrow({ where: { id: c2 } })).userId, C.id)

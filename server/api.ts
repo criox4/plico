@@ -5,10 +5,10 @@ import * as z from 'zod/mini'
 import { AgeIn, AiConsentIn, ChatIn, ExpenseIn, FileName, FriendCode, FriendIn, GroupIn, GuardianIn, Id, InviteCode, InviteResendIn, MemberIn, NotifyIn, ParentConsentIn, ProofIn, PushDeviceIn, PushTokenIn, ReadIn, RemindIn, SeenIn, Token, type Proof } from '../src/schema.ts'
 import { auth } from './auth.ts'
 import { db } from './db.ts'
-import { mail } from './email.ts'
+import { APP, mail } from './email.ts'
 import { aiReady, readExpense, readReceipt } from './ai.ts'
 import { NO_READ, checkReceipt, type ReceiptRead } from './proof.ts'
-import { BUCKET, deleteFile, getFile, imageType, putFile, storageReady } from './storage.ts'
+import { BUCKET, deleteFile, deleteFolder, getFile, imageType, putFile, storageReady } from './storage.ts'
 import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
 import { prefsOf } from './push-text.ts'
@@ -17,12 +17,23 @@ import { mePhone } from './whatsapp.ts'
 import { clientIp, limiter } from './ip.ts'
 import { count } from './otel.ts'
 import { createHash, randomInt } from 'node:crypto'
-import { isVpa, sharesError } from '../src/logic.ts'
-import { THEMES } from '../src/themes.ts'
+import { sharesError } from '../src/logic.ts'
 
 type Env = { Variables: { userId: string; userName: string; sessionId: string } }
+const maskPhone = (p: string) => '•••• ' + p.slice(-4)
+const maskEmail = (e: string) => { const [u, d] = e.split('@'); return `${u[0]}•••@${d}` }
+
+/** Bad input is the caller's mistake (400), not ours (500). Both routers use it. */
+const onError = (e: Error, c: Context) => {
+  if (e instanceof z.core.$ZodError || e instanceof SyntaxError) return c.json({ error: e instanceof z.core.$ZodError ? e.issues[0]?.message ?? 'Invalid input' : 'Invalid JSON' }, 400)
+  if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return c.json({ error: 'Already exists' }, 409)
+  console.error(e)
+  return c.json({ error: 'Something went wrong' }, 500)
+}
+
 // Public (no sign-in): a parent opening the consent link from their email.
 export const publicApi = new Hono()
+publicApi.onError(onError)
 const guardianToken = async (token: string) => {
   if (!/^[a-f0-9]{64}$/.test(token)) return null
   const v = await db.verification.findFirst({ where: { value: token, identifier: { startsWith: 'guardian:' }, expiresAt: { gt: new Date() } } })
@@ -70,7 +81,7 @@ publicApi.get('/public/claim/:token', async c => {
   const m = await db.member.findUnique({ where: { inviteToken: token }, select: { id: true, name: true, email: true, userId: true, group: { select: { id: true, name: true, kind: true, theme: true } } } })
   if (!m || m.userId) return c.json({ error: 'This invite was already used or is no longer valid' }, 404)
   // The token was emailed to this address, so whoever holds it can see it: it pre-fills their sign-up.
-  const mask = m.email ? m.email.replace(/^(.{1,2})[^@]*/, '$1***') : null
+  const mask = m.email ? maskEmail(m.email) : null
   return c.json({ group: { name: m.group.name, kind: m.group.kind, theme: m.group.theme }, invitedBy: await inviterOf(m.group.id, m.id), name: m.name, email: mask, prefill: m.email })
 })
 // A personal friend link: who you'd be adding, a name and a face, nothing else.
@@ -83,7 +94,6 @@ publicApi.get('/public/u/:code', async c => {
 
 export const api = new Hono<Env>()
 
-const APP = process.env.PUBLIC_URL || 'http://localhost:5173'
 const claimUrl = (token: string) => `${APP}/#/claim/${token}`
 
 const inviteCode = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12)
@@ -108,11 +118,13 @@ api.route('/me/phone', mePhone) // verifying a phone number over WhatsApp (serve
 // ---------- age, parental consent, AI consent, data export ----------
 async function askGuardian(uid: string) {
   const u = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { name: true, email: true, guardianEmail: true } })
-  if (!u.guardianEmail) return
+  // Same daily caps as invites: the address and the name in the subject are the user's own text.
+  if (!u.guardianEmail || !(await mayEmail(uid, u.guardianEmail.toLowerCase()))) return false
   const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
   await db.verification.deleteMany({ where: { identifier: `guardian:${uid}` } })
   await db.verification.create({ data: { id: crypto.randomUUID(), identifier: `guardian:${uid}`, value: token, expiresAt: new Date(Date.now() + 14 * 864e5) } })
   void mail.guardian(u.guardianEmail, u.name, u.email, `${APP}/#/guardian/${token}`).catch(console.error)
+  return true
 }
 
 api.post('/me/age', async c => {
@@ -139,7 +151,7 @@ api.post('/me/guardian', async c => {
     if (b.email === u.email.toLowerCase()) return c.json({ error: 'That’s your own email. We need your parent’s.' }, 400)
     await db.user.update({ where: { id: uid }, data: { guardianEmail: b.email } })
   }
-  await askGuardian(uid)
+  if (!(await askGuardian(uid))) return c.json({ error: 'Too many emails today. Try again tomorrow.' }, 429)
   return c.json({ ok: true })
 })
 
@@ -172,12 +184,7 @@ api.get('/me/export', async c => {
   return c.body(JSON.stringify(data, null, 2), 200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="plico-export.json"' })
 })
 
-api.onError((e, c) => {
-  if (e instanceof z.core.$ZodError) return c.json({ error: e.issues[0]?.message ?? 'Invalid input' }, 400)
-  if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return c.json({ error: 'Already exists' }, 409)
-  console.error(e)
-  return c.json({ error: 'Something went wrong' }, 500)
-})
+api.onError(onError)
 
 /** The caller's membership in a group, or null. Every group route goes through this. */
 const membership = (groupId: string, userId: string) => db.member.findFirst({ where: { groupId, userId } })
@@ -229,7 +236,11 @@ api.get('/groups', async c => {
   // Friends you no longer share a group with (they stay friends, like Splitwise); everyone else comes with the groups.
   const kept = await db.friendship.findMany({ where: { userId: uid, friend: { members: { none: { group: { members: { some: { userId: uid } } } } } } },
     select: { friend: { select: { id: true, name: true, image: true, email: true } } } })
-  return c.json({ now, groups: groups.map(g => ({ ...g, full: !delta.includes(g.id), expenses: byGroup.get(g.id) ?? [] })), friends: kept.map(k => k.friend) })
+  // Someone still waiting: their email and number are for whoever added them. Anyone can join from a group link,
+  // so everyone else sees them masked.
+  const hide = (m: (typeof groups)[number]['members'][number]) => !m.userId && m.addedById !== uid
+    ? { ...m, email: m.email && maskEmail(m.email), phone: m.phone && maskPhone(m.phone) } : m
+  return c.json({ now, groups: groups.map(g => ({ ...g, members: g.members.map(hide), full: !delta.includes(g.id), expenses: byGroup.get(g.id) ?? [] })), friends: kept.map(k => k.friend) })
 })
 
 // A group's whole audit log, oldest first, so the phone can check the hash chain end to end and export it.
@@ -313,6 +324,8 @@ api.put('/groups/:id', async c => {
       await audit(tx, id, { kind: 'group.edited', ...by, ...diff })
     })
   } else {
+    // Not a new group: it was deleted while this phone was offline. Don't bring it back.
+    if (!b.create) return c.json(notFound, 404)
     if (b.kind === 'direct') return c.json({ error: 'Add friends from the Friends tab' }, 400)
     await db.$transaction(async tx => {
       await tx.group.create({
@@ -329,8 +342,11 @@ api.delete('/groups/:id', async c => {
   const g = await db.group.findUnique({ where: { id: Id.parse(c.req.param('id')) } })
   if (!g) return c.json({ ok: true }) // idempotent: already gone
   if (g.kind === 'direct') return c.json({ error: 'Friends can’t be deleted' }, 403)
-  if (g.createdById !== c.get('userId')) return c.json({ error: 'Only the person who made the group can delete it' }, 403)
+  // The creator deleted their account: any member with one may delete it, or it could never go.
+  const may = g.createdById ? g.createdById === c.get('userId') : !!(await membership(g.id, c.get('userId')))
+  if (!may) return c.json({ error: 'Only the person who made the group can delete it' }, 403)
   await db.group.delete({ where: { id: g.id } })
+  void deleteFolder(BUCKET.private, g.id).catch(console.error) // its receipts and cover go with it
   return c.json({ ok: true })
 })
 
@@ -382,7 +398,9 @@ api.put('/groups/:gid/members/:mid', async c => {
   // Someone with an account owns their details. Letting others edit a joined person's UPI ID would let them
   // redirect that person's incoming payments, so those edits are ignored (not errors: they may be stale outbox ops).
   if (m?.userId && m.userId !== uid) return c.json({ ok: true, ignored: true })
-  const email = b.email?.toLowerCase() || null, phone = b.phone || null
+  // Someone else's waiting person: this phone only has their contact masked, so it keeps what's stored.
+  const theirs = !!m && !m.userId && m.addedById !== uid
+  const email = theirs ? m.email : b.email?.toLowerCase() || null, phone = theirs ? m.phone : b.phone || null
   const data = { name: b.name, upi: b.upi || null, upi2: b.upi2 || null, email: m?.userId ? m.email : email, phone }
   // Everyone in a group is a real person: an account, or an email or phone number that becomes one when they join.
   if (!m?.userId && !email && !phone) return c.json({ error: 'Add their phone number or email so they can join.' }, 400)
@@ -506,19 +524,24 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   const all = await db.member.findMany({ where: { groupId: gid }, select: { id: true, name: true, userId: true, user: { select: { email: true } } } })
   const bad = sharesError(b.amount, b.paid, b.owed, new Set(all.map(m => m.id)))
   if (bad) return c.json({ error: bad }, 400)
+  const one = (o: Record<string, number>) => Object.keys(o).filter(k => o[k] > 0)
+  const [payer, payeeId] = [one(b.paid), one(b.owed)]
+  if (b.settle && (payer.length !== 1 || payeeId.length !== 1 || payer[0] === payeeId[0])) return c.json({ error: 'A payment goes from one person to one other' }, 400)
   const existing = await db.expense.findUnique({ where: { id: eid }, include: withShares })
   if (existing && existing.groupId !== gid) return c.json(notFound, 404)
 
   // A settlement counts as soon as it's recorded; `pending` only means not verified yet. Only the payee can verify it
   // (or nobody can, when the payee is a guest: then it's verified at once). Anyone else's record waits for them; a
-  // verified one stays verified while its amount is unchanged.
-  const payee = b.settle ? all.find(m => m.id === Object.keys(b.owed)[0]) : undefined
+  // verified one stays verified while it's the same payment.
+  const payee = b.settle ? all.find(m => m.id === payeeId[0]) : undefined
+  // Same payment as before: same amount, same payer, same payee. Changing who paid whom needs the new payee to confirm.
+  const samePay = existing && existing.amount === b.amount && existing.shares.find(s => s.paid > 0)?.memberId === payer[0] && existing.shares.find(s => s.owed > 0)?.memberId === payeeId[0]
   const canConfirm = !payee?.userId || payee.userId === uid
-  const pending = !!b.settle && (canConfirm ? !!b.pending : !(existing && !existing.pending && existing.amount === b.amount))
+  const pending = !!b.settle && (canConfirm ? !!b.pending : !(samePay && !existing.pending))
   // Only the payee can say it hasn't arrived: the one thing that stops a settlement counting.
   const rejected = !!b.settle && (payee?.userId === uid ? !!b.rejected : !!existing?.rejected)
-  // Verified by the payee, unless it already was (by them or by the payer's receipt) at this amount.
-  const kept = existing?.verifiedBy && !existing.pending && !existing.rejected && existing.amount === b.amount
+  // Verified by the payee, unless it already was (by them or by the payer's receipt) for this same payment.
+  const kept = samePay && existing.verifiedBy && !existing.pending && !existing.rejected
   const verifiedBy = b.settle && !pending && !rejected ? (kept ? existing.verifiedBy : 'payee') : null
   const verifiedAt = verifiedBy ? (kept ? existing.verifiedAt : new Date()) : null
 
@@ -608,13 +631,14 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
       catch (err) { count.ai.add(1, { result: 'error' }); console.error('[ai]', (err as Error).message) }
     }
   }
-  const utr = b.utr ?? read?.utr ?? null
+  const utr = read?.utr ?? b.utr ?? null // the ID on the receipt wins: a typed one isn't proof
   // ponytail: checked, not enforced: two proofs racing with the same transaction ID could both pass. A unique index on utr if that's ever seen.
   const used = !!utr && (await db.expense.count({ where: { utr, id: { not: eid }, settle: true, deletedAt: null } })) > 0
   const payee = await db.member.findUniqueOrThrow({ where: { id: e.shares.find(s => s.owed > 0)!.memberId }, select: { name: true, upi: true, upi2: true } })
-  const r = read || utr ? checkReceipt(read ?? NO_READ, { amount: e.amount, createdAt: e.createdAt, payee }, used) : null
+  const r = read || utr ? checkReceipt(read ?? { ...NO_READ, utr }, { amount: e.amount, createdAt: e.createdAt, payee }, used) : null
   const proof: Proof = { method: b.method, ...(b.note && { note: b.note }), ...(file && { file }), ...(read && { read }), ...(r && { checks: r.checks }) }
-  if (b.image && prev?.file && prev.file !== file) void deleteFile(BUCKET.private, `${gid}/${prev.file}`)
+  // The old photo goes only once the new proof is saved: a failed save must still point at a file that exists.
+  const dropOld = () => { if (b.image && prev?.file && prev.file !== file) void deleteFile(BUCKET.private, `${gid}/${prev.file}`) }
   if (r?.verified && e.pending) {
     // Verified: a new version, on the record, so every phone pulls it and the payee hears (push.ts).
     try {
@@ -624,10 +648,12 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
         await audit(tx, gid, { kind: 'expense.edited', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), before: snapOf(e), after: snapOf({ ...e, pending: false, verifiedBy: 'screenshot' }) })
       })
     } catch (err) { if (err instanceof Stale) return conflict(c, eid); throw err }
+    dropOld()
     return c.json({ verifiedBy: 'screenshot', proof, version: e.version + 1, pending: false })
   }
   // Proof alone moves no money and changes no version: phones pick it up by its update time.
   const saved = await db.expense.update({ where: { id: eid }, data: { proof, utr }, select: { verifiedBy: true, version: true, pending: true } })
+  dropOld()
   return c.json({ verifiedBy: saved.verifiedBy, proof, version: saved.version, pending: saved.pending })
 })
 
@@ -767,8 +793,6 @@ api.post('/claim/:token', async c => {
 })
 
 // ---------- group invite links: anyone with the link joins as themselves ----------
-const maskPhone = (p: string) => '•••• ' + p.slice(-4)
-const maskEmail = (e: string) => { const [u, d] = e.split('@'); return `${u[0]}•••@${d}` }
 // A spot someone was invited to by email is only theirs: claimed by its personal link, or here when the email matches.
 api.get('/invites/:code', async c => {
   const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, include: { members: { select: { userId: true, name: true, email: true, phone: true }, orderBy: { createdAt: 'asc' } } } })

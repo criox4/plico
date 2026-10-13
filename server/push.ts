@@ -48,7 +48,7 @@ type Device = { id: string; platform: string; token: string; keys: Prisma.JsonVa
 async function sendWeb(d: Device, m: Msg): Promise<Result> {
   if (!VAPID) return 'error'
   try {
-    await webpush.sendNotification({ endpoint: d.token, keys: d.keys as { p256dh: string; auth: string } }, JSON.stringify(m), { TTL: 86_400, urgency: 'high', topic: m.tag.replace(/[^\w-]/g, '').slice(0, 32) })
+    await webpush.sendNotification({ endpoint: d.token, keys: d.keys as { p256dh: string; auth: string } }, JSON.stringify(m), { TTL: 86_400, timeout: 10_000, urgency: 'high', topic: m.tag.replace(/[^\w-]/g, '').slice(0, 32) })
     return 'ok'
   } catch (e) {
     const code = (e as { statusCode?: number }).statusCode
@@ -153,6 +153,7 @@ export async function flush() {
     for (const r of asks) if (!open.has(String(r.data.expenseId))) skip.set(r.id, 'stale')
   }
   let sent = 0
+  const sends: (() => Promise<unknown>)[] = []
   for (const u of users) {
     const mine = rows.filter(r => r.userId === u.id && !skip.has(r.id))
     const prefs = prefsOf(u.notify)
@@ -175,11 +176,13 @@ export async function flush() {
       if (!u.pushDevices.length) { unit.forEach(r => skip.set(r.id, 'nodevice')); continue }
       const group = lead.groupId ? groups.get(lead.groupId) ?? null : null
       const text = compose(unit, group, prefs.amounts)
-      await deliver(u.pushDevices, { ...text, url: urlFor(lead.kind, lead.groupId), tag: lead.groupId ?? lead.kind })
+      sends.push(() => deliver(u.pushDevices, { ...text, url: urlFor(lead.kind, lead.groupId), tag: lead.groupId ?? lead.kind }))
       unit.slice(1).forEach(r => skip.set(r.id, 'merged'))
       sent++
     }
   }
+  // 20 at a time: a Sunday's reminders shouldn't hold urgent pushes back behind them one by one.
+  for (let i = 0; i < sends.length; i += 20) await Promise.all(sends.slice(i, i + 20).map(f => f()))
   for (const reason of new Set(skip.values())) await db.notification.updateMany({ where: { id: { in: [...skip].filter(([, v]) => v === reason).map(([k]) => k) } }, data: { skipped: reason } })
   for (const [id, at] of later) await db.notification.update({ where: { id }, data: { sentAt: null, dueAt: at } })
   return sent

@@ -122,7 +122,7 @@ export const needsConfirm = (g: Group, to: Id) => to !== ME && !!g.members.find(
 /** A settlement's quiet status: how it was verified, or that it hasn't been yet ('' for plain or rejected ones). */
 export const verifyLabel = (e: Expense) =>
   e.rejected ? '' : e.verifiedBy === 'screenshot' ? 'Verified · screenshot' : e.verifiedBy ? 'Verified' : e.pending ? 'Not verified' : ''
-const CHECKS = { amount: 'amount', payee: 'recipient', time: 'time', fresh: 'used before' } as const
+const CHECKS = { amount: 'amount', payee: 'recipient', time: 'time', fresh: 'transaction ID' } as const
 /** The receipt checks that failed, in words: "amount / time". '' when there were none or all passed. */
 export const missedChecks = (p?: Proof) => (p?.checks ? (Object.keys(CHECKS) as (keyof typeof CHECKS)[]).filter(k => !p.checks![k]).map(k => CHECKS[k]).join(' / ') : '')
 /** A UPI transaction ID in full for the two people in the payment, the last 4 digits for everyone else. */
@@ -187,7 +187,7 @@ export function runRecurring(g: Group, now = today()): boolean {
   let changed = false
   for (const e of [...g.expenses]) {
     while (e.repeat && e.repeat.next <= now) {
-      g.expenses.push({ ...e, id: `${e.id}:${e.repeat.next}`, date: e.repeat.next, repeat: undefined })
+      g.expenses.push({ ...e, id: `${e.id}:${e.repeat.next}`, date: e.repeat.next, repeat: undefined, v: undefined }) // a new expense: never the parent's version
       e.repeat.next = addMonth(e.repeat.next, e.repeat.day)
       changed = true
     }
@@ -401,7 +401,8 @@ export function itemSplit(items: Item[], extras: number): { owed: Record<Id, num
 
 // ---------- people: one identity each, across every group ----------
 /** Who a spot is: their account once they've joined, else the email or phone they were invited by. */
-export const personKey = (m: Member) => m.uid ? 'u:' + m.uid : m.email ? 'e:' + m.email.toLowerCase() : m.phone ? 'p:' + m.phone : undefined
+// Masked (someone else's invitee): not enough to tell who they are, so not a friend of yours.
+export const personKey = (m: Member) => m.uid ? 'u:' + m.uid : m.email?.includes('•') || m.phone?.includes('•') ? undefined : m.email ? 'e:' + m.email.toLowerCase() : m.phone ? 'p:' + m.phone : undefined
 export type Friend = { key: string; name: string; email?: string; phone?: string; uid?: string; image?: string; joined: boolean; spots: { g: Group; id: Id }[]; direct?: Group }
 /** Everyone you share a group with, once each, and `kept`: friends from groups you no longer share (no balance left there).
  *  `me`: your own account and email, never a friend of yours. */
@@ -417,6 +418,9 @@ export function friendsIn(groups: Group[], me?: { id: string; email: string }, k
     if (g.kind === 'direct') f.direct = g
     by.set(k, f)
   }
+  // Kept friends first, so a spot they left behind under their email merges into them below.
+  for (const k of kept) if (!by.has('u:' + k.id) && k.id !== me?.id)
+    by.set('u:' + k.id, { key: 'u:' + k.id, name: k.name, email: k.email.toLowerCase(), uid: k.id, image: k.image ?? undefined, joined: true, spots: [] })
   // A spot still waiting under an email or phone that a friend's account already has is that friend.
   for (const f of by.values()) {
     if (f.joined) continue
@@ -425,8 +429,6 @@ export function friendsIn(groups: Group[], me?: { id: string; email: string }, k
     to.spots.push(...f.spots); to.direct ||= f.direct
     by.delete(f.key)
   }
-  for (const k of kept) if (!by.has('u:' + k.id) && k.id !== me?.id)
-    by.set('u:' + k.id, { key: 'u:' + k.id, name: k.name, email: k.email.toLowerCase(), uid: k.id, image: k.image ?? undefined, joined: true, spots: [] })
   return [...by.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 /** A friend by key, or by a bare email (older /f/<email> links) or the email/phone/account a key names. */
@@ -452,13 +454,14 @@ export function friendParts(amount: number, paid: Record<string, number>, owed: 
 
 // ---------- sync: the outbox and edit history ----------
 /** A queued server change. `base` = the expense version it started from (null = new, absent = not an expense). */
-export type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown; base?: number | null; via?: 'ai' }
+export type Op = { m: 'PUT' | 'DELETE' | 'POST'; path: string; body?: unknown; base?: number | null; via?: 'ai'; sent?: true }
 const expensePath = (p: string) => /\/expenses\/[^/?]+$/.test(p)
 
 /** Queue an op. A newer change to an expense replaces one still waiting (keeping its base, so the server can still
- * spot a stale edit) and moves to the back, after anything it may depend on (a person added since). `busy`: ops[0] is being sent. */
+ * spot a stale edit) and moves to the back, after anything it may depend on (a person added since). `busy`: ops[0] is being sent.
+ * Never into a `sent` op: the server may already have it, so the newer change must build on its version. */
 export function enqueue(ops: Op[], op: Op, busy: boolean): Op[] {
-  const i = expensePath(op.path) ? ops.findIndex((o, k) => o.path === op.path && !(busy && k === 0)) : -1
+  const i = expensePath(op.path) ? ops.findIndex((o, k) => o.path === op.path && !o.sent && !(busy && k === 0)) : -1
   if (i < 0) return [...ops, op]
   const via = op.via ?? ops[i].via // a change folded with an Ask Plico one still says Ask Plico was involved
   return [...ops.slice(0, i), ...ops.slice(i + 1), { ...op, base: ops[i].base, ...(via && { via }) }]

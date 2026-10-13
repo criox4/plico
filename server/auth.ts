@@ -3,8 +3,9 @@ import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { bearer } from 'better-auth/plugins'
 import { APIError } from 'better-auth/api'
 import { db } from './db.ts'
-import { mail } from './email.ts'
+import { APP, mail } from './email.ts'
 import { linkByEmail } from './audit.ts'
+import { BUCKET, deleteFolder } from './storage.ts'
 import { isVpa } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
 import { IP_HEADER } from './ip.ts'
@@ -14,7 +15,6 @@ export const ORIGINS = ['http://localhost:5173', 'http://localhost:4173', 'capac
   ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL] : [])]
 
 const TONES = ['gentle', 'normal', 'shameless']
-const APP = process.env.PUBLIC_URL || 'http://localhost:5173'
 
 // Google is optional: the button only appears (via /api/config) once credentials exist.
 // One Google Cloud project, one client id per platform: web first (used for the redirect flow), then native ids for ID-token sign-in.
@@ -72,6 +72,8 @@ export const auth = betterAuth({
       enabled: true,
       // The mailed link opens the app (which holds the session) and finishes deletion with the token.
       sendDeleteAccountVerification: async ({ user, token }) => { void mail.deleteAccount(user.email, `${APP}/#/delete/${token}`).catch(console.error) },
+      // Avatars are public files: they go with the account.
+      afterDelete: async user => { void deleteFolder(BUCKET.public, user.id).catch(console.error) },
     },
   },
   databaseHooks: {
@@ -111,7 +113,8 @@ export const auth = betterAuth({
           if (data.image && !/^(\/api\/files\/avatars\/[\w/-]+\.(jpg|png|webp)|https:\/\/lh\d\.googleusercontent\.com\/[^\s"<>]{1,500}|plico:[0-9a-f]{6}|emoji:(?=.*\p{Extended_Pictographic})\S{1,16})$/u.test(String(data.image))) return no('That picture can’t be used')
           return { data }
         },
-        after: async u => { if (u.emailVerified) await linkByEmail(u.id, u.email) },
+        // Only when the email just got verified: a profile save (theme, UPI) would pull a leaver back into their old groups.
+        after: async (u, ctx) => { if (u.emailVerified && ctx?.path !== '/update-user') await linkByEmail(u.id, u.email) },
       },
     },
   },

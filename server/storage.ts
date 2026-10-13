@@ -15,7 +15,8 @@ function call(method: string, path: string, body?: Buffer | string, headers: Rec
   return new Promise((resolve, reject) => {
     const r = https.request(BASE + '/storage/v1' + path, {
       method,
-      headers: { authorization: `Bearer ${KEY}`, apikey: KEY, ...headers },
+      // An explicit length: without it a DELETE body goes chunked and Supabase reads it as empty.
+      headers: { authorization: `Bearer ${KEY}`, apikey: KEY, ...(body && { 'content-length': String(Buffer.byteLength(body)) }), ...headers },
       ...(IP && { lookup: ((_h: string, o: { all?: boolean }, cb: Function) => (o.all ? cb(null, [{ address: IP, family: 4 }]) : cb(null, IP, 4))) as unknown as LookupFunction }),
     }, res => {
       const chunks: Buffer[] = []
@@ -42,6 +43,18 @@ export async function getFile(bucket: string, path: string) {
 
 export async function deleteFile(bucket: string, path: string) {
   await call('DELETE', `/object/${bucket}`, JSON.stringify({ prefixes: [path] }), { 'content-type': 'application/json' }).catch(() => {})
+}
+
+/** Every file in a folder (a group's receipts, a user's avatars): when the group or account is deleted. */
+export async function deleteFolder(bucket: string, folder: string) {
+  if (!storageReady()) return
+  for (;;) {
+    const r = await call('POST', `/object/list/${bucket}`, JSON.stringify({ prefix: folder, limit: 1000, offset: 0 }), { 'content-type': 'application/json' })
+    const names = r.status === 200 ? (JSON.parse(r.body.toString()) as { name: string }[]).map(f => `${folder}/${f.name}`) : []
+    if (!names.length) return
+    const d = await call('DELETE', `/object/${bucket}`, JSON.stringify({ prefixes: names }), { 'content-type': 'application/json' })
+    if (d.status >= 300) throw new Error(`Storage delete ${d.status}: ${d.body.toString().slice(0, 200)}`)
+  }
 }
 
 /** Only real images, sniffed from their first bytes (never trust the declared type). */

@@ -33,7 +33,7 @@ async function phone(name: string) {
 const [A, B, C] = await Promise.all([phone('Asha'), phone('Bala'), phone('Chitra')])
 const gid = crypto.randomUUID(), selfA = crypto.randomUUID()
 try {
-  assert.equal((await A.call('PUT', `/api/groups/${gid}`, { name: 'Race', kind: 'friends', theme: 'classic', selfId: selfA })).status, 200)
+  assert.equal((await A.call('PUT', `/api/groups/${gid}`, { name: 'Race', kind: 'friends', theme: 'classic', selfId: selfA, create: true })).status, 200)
   const code = (await A.call('GET', `/api/groups/${gid}/invite`)).body.code
   await B.call('POST', `/api/invites/${code}/join`, {}); await C.call('POST', `/api/invites/${code}/join`, {})
   const mid = async (u: string) => (await db.member.findFirst({ where: { groupId: gid, userId: u } }))?.id
@@ -186,7 +186,7 @@ try {
 
   // (l) invite previews before sign-in: the group and who invited you, nothing else
   const g2 = crypto.randomUUID(), selfA2 = crypto.randomUUID()
-  await A.call('PUT', `/api/groups/${g2}`, { name: 'Leave test', kind: 'friends', theme: 'classic', selfId: selfA2 })
+  await A.call('PUT', `/api/groups/${g2}`, { name: 'Leave test', kind: 'friends', theme: 'classic', selfId: selfA2, create: true })
   const code2 = (await A.call('GET', `/api/groups/${g2}/invite`)).body.code
   const peek = await (await fetch(`${API}/api/public/invites/${code2}`)).json() as any
   assert.deepEqual(peek, { group: { name: 'Leave test', kind: 'friends', theme: 'classic', people: 1 }, invitedBy: 'Asha' })
@@ -196,7 +196,7 @@ try {
   const tok = (await db.member.findUniqueOrThrow({ where: { id: spot } })).inviteToken!
   const cl = await (await fetch(`${API}/api/public/claim/${tok}`)).json() as any
   contract(ClaimPreviewOut, cl, 'claim preview')
-  assert.equal(cl.name, 'Esha'); assert.equal(cl.prefill, `esha-${run}@splittr.test`); assert.equal(cl.invitedBy, 'Asha'); assert.match(cl.email, /^es\*\*\*@/)
+  assert.equal(cl.name, 'Esha'); assert.equal(cl.prefill, `esha-${run}@splittr.test`); assert.equal(cl.invitedBy, 'Asha'); assert.match(cl.email, /^e•••@/)
   assert.equal((await fetch(`${API}/api/public/claim/${'0'.repeat(32)}`)).status, 404)
   console.log('✓ invite previews: group and inviter only; personal invites pre-fill their email')
 
@@ -244,7 +244,7 @@ try {
   contract(NotifyOut, nb, 'notify'); assert.equal(nb.sessions.length, 1); assert.equal(nb.prefs.nudge, true)
 
   const g3 = crypto.randomUUID(), selfA3 = crypto.randomUUID()
-  await A.call('PUT', `/api/groups/${g3}`, { name: 'Push', kind: 'friends', theme: 'classic', selfId: selfA3 })
+  await A.call('PUT', `/api/groups/${g3}`, { name: 'Push', kind: 'friends', theme: 'classic', selfId: selfA3, create: true })
   const code3 = (await A.call('GET', `/api/groups/${g3}/invite`)).body.code
   await B.call('POST', `/api/invites/${code3}/join`, {}); await C.call('POST', `/api/invites/${code3}/join`, {})
   const [b3, c3] = [await db.member.findFirstOrThrow({ where: { groupId: g3, userId: B.id } }), await db.member.findFirstOrThrow({ where: { groupId: g3, userId: C.id } })]
@@ -254,6 +254,9 @@ try {
   await db.notification.deleteMany({ where: { groupId: g3 } })
   const third = (amount: number) => ({ [selfA3]: amount / 4, [b3.id]: amount / 2, [c3.id]: amount / 4 })
   const spend = (title: string, amount: number) => A.call('PUT', `/api/groups/${g3}/expenses/${crypto.randomUUID()}`, { title, cat: 'food', date: '2026-09-27', amount, paid: { [selfA3]: amount }, owed: third(amount), base: null })
+  // Daytime for B, whenever this runs: quiet hours would hold the batch instead of sending it.
+  const zones = [...Array(27)].map((_, i) => `Etc/GMT${i - 12 < 0 ? '+' : '-'}${Math.abs(i - 12)}`)
+  await db.user.update({ where: { id: B.id }, data: { tz: zones.find(z => { try { return !quietUntil(z) } catch { return false } })! } })
   await spend('Chai', 40000); await spend('Samosa', 20000)
   let bRows = await rows(B.id)
   assert.deepEqual(bRows.map(r => [r.kind, (r.data as any).share]), [['expense.created', 20000], ['expense.created', 10000]], 'one row each, with B’s share')
@@ -266,7 +269,7 @@ try {
   assert.deepEqual(bRows.map(r => r.skipped).sort(), ['merged', null].sort() as any, 'one sent, one merged into it')
 
   // Quiet hours hold pushes until 08:00 local; switched-off kinds are dropped; the daily cap stops the ninth.
-  const night = [...Array(27)].map((_, i) => `Etc/GMT${i - 12 < 0 ? '+' : '-'}${Math.abs(i - 12)}`).find(z => { try { return !!quietUntil(z) } catch { return false } })!
+  const night = zones.find(z => { try { return !!quietUntil(z) } catch { return false } })!
   await db.user.update({ where: { id: B.id }, data: { tz: night } })
   await spend('Late chai', 8000)
   const late = (await rows(B.id)).at(-1)!
@@ -316,7 +319,7 @@ try {
   assert.equal(await nudge(new Date(Date.UTC(2026, 8, 26, 5, 30))), 0, 'not on a Saturday')
   await nudge(sunday11)
   const nd = await db.notification.findFirstOrThrow({ where: { userId: B.id, kind: 'nudge' } })
-  assert.deepEqual(nd.data, { amount: 20000 + 10000 + 4000 + 2000 + 2000, groups: 1 }, 'what B owes; the payment still waiting to be confirmed doesn’t count yet')
+  assert.deepEqual(nd.data, { amount: 20000 + 10000 + 4000 + 2000 + 2000 - 1000, groups: 1 }, 'what B owes, less the 1,000 paid: a payment counts when recorded, confirmed or not')
   await nudge(sunday11)
   assert.equal(await db.notification.count({ where: { userId: B.id, kind: 'nudge' } }), 1, 'once a week')
   console.log('✓ push: weekly nudge on Sunday morning, once')

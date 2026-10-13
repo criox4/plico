@@ -20,14 +20,15 @@ function payeeMatches(shown: string | null, p: Settlement['payee']) {
 export const succeeded = (status: string | null) =>
   !!status && /success|completed|paid|sent|credited|done/i.test(status) && !/unsuccess|fail|pending|processing|declin|revers|refund|cancel/i.test(status)
 
-/** Each check on the receipt, and whether together they verify the settlement. usedElsewhere: its transaction ID already proved another one. */
+/** Each check on the receipt, and whether together they verify the settlement. usedElsewhere: its transaction ID already proved another one.
+ *  No transaction ID on it: nothing shows it wasn't used before, so it can't verify on its own. */
 export function checkReceipt(read: ReceiptRead, s: Settlement, usedElsewhere: boolean) {
   const at = read.at ? Date.parse(read.at) : NaN
   const checks = {
     amount: read.amount === s.amount,
     payee: payeeMatches(read.payee, s.payee),
     time: !isNaN(at) && Math.abs(at - s.createdAt.getTime()) <= WINDOW,
-    fresh: !usedElsewhere,
+    fresh: !!read.utr && !usedElsewhere,
   }
   return { checks, verified: Object.values(checks).every(Boolean) && succeeded(read.status) }
 }
