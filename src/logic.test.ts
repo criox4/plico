@@ -277,6 +277,10 @@ assert.equal(normPhone('riya@x.com'), null)
   const kept = friendsIn([grp('a', [{ id: 'm1', name: 'Bala K', email: 'bala@x.in', joined: true, uid: 'U1' }])], { id: 'U0', email: 'me@x.in' },
     [{ id: 'U1', name: 'Bala', image: null, email: 'bala@x.in' }, { id: 'U2', name: 'Asha', image: null, email: 'Asha@x.in' }, { id: 'U0', name: 'Me', image: null, email: 'me@x.in' }])
   assert.deepEqual(kept.map(f => [f.key, f.spots.length, f.joined, f.email]), [['u:U2', 0, true, 'asha@x.in'], ['u:U1', 1, true, 'bala@x.in']])
+  // Asha left Flat: her spot there went back to her email, and she's a kept friend. Still one Asha.
+  const left = friendsIn([grp('f', [{ id: 'm9', name: 'Asha', email: 'asha@x.in' }])], { id: 'U0', email: 'me@x.in' }, [{ id: 'U2', name: 'Asha', image: null, email: 'asha@x.in' }])
+  assert.deepEqual(left.map(f => [f.key, f.spots.map(x => x.id)]), [['u:U2', ['m9']]])
+  assert.equal(personKey({ id: 'x', name: 'Riya', phone: '•••• 3210' }), undefined, "someone else's masked invitee isn't a friend")
   console.log('friends ok')
 }
 

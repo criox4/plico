@@ -418,6 +418,9 @@ export function friendsIn(groups: Group[], me?: { id: string; email: string }, k
     if (g.kind === 'direct') f.direct = g
     by.set(k, f)
   }
+  // Kept friends first, so a spot they left behind under their email merges into them below.
+  for (const k of kept) if (!by.has('u:' + k.id) && k.id !== me?.id)
+    by.set('u:' + k.id, { key: 'u:' + k.id, name: k.name, email: k.email.toLowerCase(), uid: k.id, image: k.image ?? undefined, joined: true, spots: [] })
   // A spot still waiting under an email or phone that a friend's account already has is that friend.
   for (const f of by.values()) {
     if (f.joined) continue
@@ -426,8 +429,6 @@ export function friendsIn(groups: Group[], me?: { id: string; email: string }, k
     to.spots.push(...f.spots); to.direct ||= f.direct
     by.delete(f.key)
   }
-  for (const k of kept) if (!by.has('u:' + k.id) && k.id !== me?.id)
-    by.set('u:' + k.id, { key: 'u:' + k.id, name: k.name, email: k.email.toLowerCase(), uid: k.id, image: k.image ?? undefined, joined: true, spots: [] })
   return [...by.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 /** A friend by key, or by a bare email (older /f/<email> links) or the email/phone/account a key names. */
