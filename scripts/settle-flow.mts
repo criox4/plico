@@ -83,6 +83,20 @@ try {
   r = await put(B, crypto.randomUUID(), pay(b, guest, 10000, { base: null }))
   assert.deepEqual([r.body.pending, r.body.verifiedBy], [false, 'payee'])
   console.log('✓ recorded by the payee, or to a guest: verified at once')
+  // A payment is one payer to one payee: a zero-amount first payee can't stand in for the real one.
+  r = await put(B, crypto.randomUUID(), { ...pay(b, a, 10000, { base: null }), owed: { [guest]: 0, [a]: 10000 } })
+  assert.equal(r.status, 200, 'zeros are ignored')
+  assert.deepEqual([r.body.pending, r.body.verifiedBy], [true, null], 'Asha, the real payee, still has to confirm')
+  r = await put(B, crypto.randomUUID(), { ...pay(b, a, 10000, { base: null }), owed: { [guest]: 5000, [a]: 5000 } })
+  assert.equal(r.status, 400)
+  // Asha confirmed s7 from Bala. Moving it to the guest at the same amount is a different payment.
+  const s7 = crypto.randomUUID()
+  assert.equal((await put(A, s7, pay(b, a, 20000, { pending: false, base: null }))).body.verifiedBy, 'payee')
+  r = await put(B, s7, pay(b, guest, 20000, { base: 1 }))
+  assert.equal(r.status, 200, JSON.stringify(r.body))
+  r = await put(B, s7, pay(b, a, 20000, { base: 2 }))
+  assert.deepEqual([r.body.pending, r.body.verifiedBy], [true, null], 'back to Asha: she confirms again')
+  console.log('✓ one payer, one payee; changing the payee drops the confirmation')
 
   // Proof: only the payer; cash with a note saves it and verifies nothing.
   const s4 = crypto.randomUUID()
@@ -93,6 +107,10 @@ try {
   let proof = ProofOut.parse(r.body)
   assert.deepEqual([proof.verifiedBy, proof.pending, proof.version, proof.proof], [null, true, 1, { method: 'cash', note: 'Handed over at dinner' }])
   console.log('✓ proof: payer only; cash and a note')
+  // A real screenshot is 300-800 KB as base64: the proof route's own limit applies, not the 256 KB one for JSON.
+  r = await B.call('POST', `/api/groups/${gid}/expenses/${s4}/proof`, { method: 'upi', image: 'data:image/jpeg;base64,' + Buffer.alloc(400 << 10).toString('base64') })
+  assert.notEqual(r.status, 413, 'a 400 KB screenshot reaches the proof route')
+  console.log('✓ proof screenshots up to the route’s own limit get through')
 
   // A typed transaction ID: stored, fresh, but on its own it verifies nothing. The same ID on another settlement isn't fresh.
   const s5 = crypto.randomUUID(), s6 = crypto.randomUUID()
