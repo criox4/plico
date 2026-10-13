@@ -111,11 +111,13 @@ api.route('/me/phone', mePhone) // verifying a phone number over WhatsApp (serve
 // ---------- age, parental consent, AI consent, data export ----------
 async function askGuardian(uid: string) {
   const u = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { name: true, email: true, guardianEmail: true } })
-  if (!u.guardianEmail) return
+  // Same daily caps as invites: the address and the name in the subject are the user's own text.
+  if (!u.guardianEmail || !(await mayEmail(uid, u.guardianEmail.toLowerCase()))) return false
   const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
   await db.verification.deleteMany({ where: { identifier: `guardian:${uid}` } })
   await db.verification.create({ data: { id: crypto.randomUUID(), identifier: `guardian:${uid}`, value: token, expiresAt: new Date(Date.now() + 14 * 864e5) } })
   void mail.guardian(u.guardianEmail, u.name, u.email, `${APP}/#/guardian/${token}`).catch(console.error)
+  return true
 }
 
 api.post('/me/age', async c => {
@@ -142,7 +144,7 @@ api.post('/me/guardian', async c => {
     if (b.email === u.email.toLowerCase()) return c.json({ error: 'That’s your own email. We need your parent’s.' }, 400)
     await db.user.update({ where: { id: uid }, data: { guardianEmail: b.email } })
   }
-  await askGuardian(uid)
+  if (!(await askGuardian(uid))) return c.json({ error: 'Too many emails today. Try again tomorrow.' }, 429)
   return c.json({ ok: true })
 })
 
