@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { ErrorBoundary, start as startCrashReports } from './sentry'
 import { LazyMotion, MotionConfig } from 'motion/react'
 import { Capacitor } from '@capacitor/core'
+import { Analytics } from '@vercel/analytics/react'
 import App from './App'
 import { SplashGate } from './account'
 import { startSync } from './sync'
@@ -22,6 +23,7 @@ void hydrate().then(() => {
     <LazyMotion features={() => import('./motion-features').then(r => r.default)} strict>
       <MotionConfig reducedMotion="user">
         <ErrorBoundary fallback={<Crashed />}><App /><SplashGate /></ErrorBoundary>
+        <Analytics />
       </MotionConfig>
     </LazyMotion>,
   )
