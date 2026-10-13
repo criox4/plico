@@ -21,11 +21,20 @@ import { isVpa, sharesError } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
 
 type Env = { Variables: { userId: string; userName: string; sessionId: string } }
-// Public (no sign-in): a parent opening the consent link from their email.
 const maskPhone = (p: string) => '•••• ' + p.slice(-4)
 const maskEmail = (e: string) => { const [u, d] = e.split('@'); return `${u[0]}•••@${d}` }
 
+/** Bad input is the caller's mistake (400), not ours (500). Both routers use it. */
+const onError = (e: Error, c: Context) => {
+  if (e instanceof z.core.$ZodError || e instanceof SyntaxError) return c.json({ error: e instanceof z.core.$ZodError ? e.issues[0]?.message ?? 'Invalid input' : 'Invalid JSON' }, 400)
+  if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return c.json({ error: 'Already exists' }, 409)
+  console.error(e)
+  return c.json({ error: 'Something went wrong' }, 500)
+}
+
+// Public (no sign-in): a parent opening the consent link from their email.
 export const publicApi = new Hono()
+publicApi.onError(onError)
 const guardianToken = async (token: string) => {
   if (!/^[a-f0-9]{64}$/.test(token)) return null
   const v = await db.verification.findFirst({ where: { value: token, identifier: { startsWith: 'guardian:' }, expiresAt: { gt: new Date() } } })
@@ -177,12 +186,7 @@ api.get('/me/export', async c => {
   return c.body(JSON.stringify(data, null, 2), 200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="plico-export.json"' })
 })
 
-api.onError((e, c) => {
-  if (e instanceof z.core.$ZodError) return c.json({ error: e.issues[0]?.message ?? 'Invalid input' }, 400)
-  if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return c.json({ error: 'Already exists' }, 409)
-  console.error(e)
-  return c.json({ error: 'Something went wrong' }, 500)
-})
+api.onError(onError)
 
 /** The caller's membership in a group, or null. Every group route goes through this. */
 const membership = (groupId: string, userId: string) => db.member.findFirst({ where: { groupId, userId } })
@@ -340,7 +344,9 @@ api.delete('/groups/:id', async c => {
   const g = await db.group.findUnique({ where: { id: Id.parse(c.req.param('id')) } })
   if (!g) return c.json({ ok: true }) // idempotent: already gone
   if (g.kind === 'direct') return c.json({ error: 'Friends can’t be deleted' }, 403)
-  if (g.createdById !== c.get('userId')) return c.json({ error: 'Only the person who made the group can delete it' }, 403)
+  // The creator deleted their account: any member with one may delete it, or it could never go.
+  const may = g.createdById ? g.createdById === c.get('userId') : !!(await membership(g.id, c.get('userId')))
+  if (!may) return c.json({ error: 'Only the person who made the group can delete it' }, 403)
   await db.group.delete({ where: { id: g.id } })
   void deleteFolder(BUCKET.private, g.id).catch(console.error) // its receipts and cover go with it
   return c.json({ ok: true })
