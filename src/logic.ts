@@ -34,7 +34,7 @@ export type Expense = {
   verifiedBy?: 'payee' | 'screenshot' // how a settlement was verified
   proof?: Proof // how the payer says they paid, and what their receipt showed
   utr?: string // the UPI transaction ID, typed by the payer or read off their receipt
-  repeat?: { next: string; day: number } // monthly
+  repeat?: { next: string; day: number; all?: true } // monthly; all: each month splits equally with whoever's in the group then
   v?: number // the server version this copy is; edits send it so the server can spot stale ones
 }
 export type { Proof }
@@ -187,7 +187,10 @@ export function runRecurring(g: Group, now = today()): boolean {
   let changed = false
   for (const e of [...g.expenses]) {
     while (e.repeat && e.repeat.next <= now) {
-      g.expenses.push({ ...e, id: `${e.id}:${e.repeat.next}`, date: e.repeat.next, repeat: undefined, v: undefined }) // a new expense: never the parent's version
+      // Everyone in the group now, including people who joined since; anyone set to 0 (left out, or left the group) stays out.
+      const input = e.repeat.all ? Object.fromEntries(g.members.map(m => [m.id, e.input?.[m.id] ?? 1])) : e.input
+      const owed = e.repeat.all ? allocate(e.amount, input!) : e.owed
+      g.expenses.push({ ...e, id: `${e.id}:${e.repeat.next}`, date: e.repeat.next, owed: Object.keys(owed).length ? owed : e.owed, input, repeat: undefined, v: undefined }) // a new expense: never the parent's version
       e.repeat.next = addMonth(e.repeat.next, e.repeat.day)
       changed = true
     }
@@ -494,6 +497,7 @@ export function changes(a: Snap, b: Snap, name: (id: Id) => string): string[] {
   if (!a.rejected && b.rejected) out.push('said the payment hasn’t arrived')
   if ((a.receipt ?? null) !== (b.receipt ?? null)) out.push(b.receipt ? (a.receipt ? 'replaced the receipt' : 'added a receipt') : 'removed the receipt')
   if (!!a.repeatNext !== !!b.repeatNext) out.push(b.repeatNext ? 'made it repeat monthly' : 'stopped it repeating')
+  else if (b.repeatNext && !!a.repeatAll !== !!b.repeatAll) out.push(b.repeatAll ? 'made each month include people who join later' : 'kept each month to the same people')
   return out
 }
 

@@ -209,6 +209,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
     old?.input ? strs(old.input) : old ? Object.fromEntries(g.members.map(m => [m.id, old.owed[m.id] ? '1' : '0'])) : flags(g))
   const [adjust, setAdjust] = useState((old?.mode ?? 'equal') !== 'equal' || payers0.length > 1)
   const [repeat, setRepeat] = useState(!!old?.repeat)
+  const [everyone, setEveryone] = useState(!!old?.repeat?.all)
   const [receipt, setReceipt] = useState(old?.receipt)
   const [done, setDone] = useState<Expense | null>(null)
   // capture: type it, scan it, or arrive with something shared from another app
@@ -365,7 +366,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
     const day = +date.slice(8)
     const e: Expense = {
       id: old?.id ?? uid(), title: title.trim() || CATS.find(c => c.id === cat)!.label, cat, date, amount: total, paid, owed, mode, input, receipt,
-      repeat: repeat ? old?.repeat ?? { next: addMonth(date, day), day } : undefined,
+      repeat: repeat ? { ...(old?.repeat ?? { next: addMonth(date, day), day }), all: everyone && mode === 'equal' ? true : undefined } : undefined,
     }
     edit(g.id, x => {
       const i = x.expenses.findIndex(y => y.id === e.id)
@@ -498,6 +499,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
           <summary>{date === today() ? 'Today' : new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}{repeat ? ' · every month' : ''}{receipt ? ' · bill attached' : ''}<span className="link">Date, repeat{real ? ', bill photo' : ''}</span></summary>
           <label className="field"><span>Date</span><input type="date" value={date} onChange={e => setDate(e.target.value || today())} /></label>
           <label className="check"><input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} />Repeats every month</label>
+          {repeat && mode === 'equal' && <label className="check"><input type="checkbox" checked={everyone} onChange={e => setEveryone(e.target.checked)} />Split each month with everyone in the group, including people who join later</label>}
           {real && <ReceiptField gid={real.id} name={receipt} onChange={setReceipt} />}
         </details>
       </>}

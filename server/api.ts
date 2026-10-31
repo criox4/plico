@@ -197,7 +197,7 @@ const sortKeys = (o: unknown) => (o && typeof o === 'object' ? Object.fromEntrie
 const snapOf = (e: Omit<Stored, 'id' | 'groupId' | 'createdById' | 'createdAt' | 'updatedAt' | 'version' | 'deletedAt' | 'updatedById' | 'verifiedBy' | 'verifiedAt' | 'proof' | 'utr'> & { verifiedBy?: string | null }) => ({
   title: e.title, cat: e.cat, date: e.date, amount: e.amount, mode: e.mode, input: sortKeys(e.input), settle: e.settle, pending: e.pending, rejected: e.rejected,
   ...(e.verifiedBy && { verifiedBy: e.verifiedBy }), // only when set, so entries from before verification look as they did
-  receipt: e.receipt, repeatNext: e.repeatNext, repeatDay: e.repeatDay,
+  receipt: e.receipt, repeatNext: e.repeatNext, repeatDay: e.repeatDay, ...(e.repeatAll && { repeatAll: true }), // only when set, so older entries look as they did
   shares: [...e.shares].filter(x => x.paid || x.owed).sort((a, b) => a.memberId.localeCompare(b.memberId)).map(x => ({ memberId: x.memberId, paid: x.paid, owed: x.owed })),
 })
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
@@ -368,6 +368,12 @@ api.post('/groups/:gid/leave', async c => {
   await db.$transaction(async tx => {
     await tx.member.update({ where: { id: me.id }, data: { userId: null, email: user.email.toLowerCase(), inviteToken: null, invitedAt: null } })
     if (g.createdById === uid) await tx.group.update({ where: { id: gid }, data: { createdById: heir!.userId } })
+    // Repeats that split with everyone stop including them from next month.
+    for (const e of await tx.expense.findMany({ where: { groupId: gid, repeatAll: true, deletedAt: null }, include: withShares })) {
+      const input = { ...(e.input as Record<string, number> | null), [me.id]: 0 }
+      await tx.expense.update({ where: { id: e.id }, data: { input, updatedById: uid, version: { increment: 1 } } })
+      await audit(tx, gid, { kind: 'expense.edited', expenseId: e.id, version: e.version + 1, byId: uid, byName: c.get('userName'), before: snapOf(e), after: snapOf({ ...e, input }) })
+    }
     await audit(tx, gid, { kind: 'member.left', memberId: me.id, byId: uid, byName: c.get('userName'), before: { name: me.name, email: user.email.toLowerCase() } })
   })
   return c.json({ ok: true })
@@ -550,6 +556,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   const data = {
     title: b.title, cat: b.cat, date: b.date, amount: b.amount, mode: b.mode ?? null, input: b.input ?? Prisma.DbNull,
     settle: !!b.settle, pending: pending && !rejected, rejected, verifiedBy, verifiedAt, receipt: b.receipt ?? null, repeatNext: b.repeat?.next ?? null, repeatDay: b.repeat?.day ?? null,
+    repeatAll: !!b.repeat?.all,
   }
   const after = snapOf({ ...data, input: b.input ?? null, shares })
   if (existing) {

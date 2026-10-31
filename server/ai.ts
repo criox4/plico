@@ -1,7 +1,7 @@
 // Reads an expense out of a sentence, a receipt photo or a payment screenshot, via OpenRouter.
 // Structured output only: the model fills a JSON schema; we never execute or render what it says as markup.
 const KEY = process.env.OPENROUTER_API_KEY
-const MODEL = process.env.OPENROUTER_MODEL || 'openai/gpt-6-luna'
+const MODEL = process.env.OPENROUTER_MODEL || '~openai/gpt-luna-latest'
 export const aiReady = () => !!KEY
 
 const CATS = ['food', 'groceries', 'stay', 'transport', 'drinks', 'fun', 'rent', 'bills', 'help', 'other']

@@ -248,14 +248,14 @@ export function expenseFromServer(e: Omit<ServerExpense, 'version' | 'deletedAt'
     mode: e.mode ?? undefined, input: e.input ? Object.fromEntries(Object.entries(e.input).map(([k, v]) => [id(k), v])) : undefined,
     settle: e.settle || undefined, pending: e.pending || undefined, rejected: e.rejected || undefined, receipt: e.receipt ?? undefined,
     verifiedBy: e.verifiedBy ?? undefined, proof: e.proof ?? undefined, utr: e.utr ?? undefined,
-    repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay } : undefined, v: e.version,
+    repeat: e.repeatNext && e.repeatDay ? { next: e.repeatNext, day: e.repeatDay, ...(e.repeatAll && { all: true as const }) } : undefined, v: e.version,
   }
 }
 
 /** A queued edit's body (server member ids) as a history-style snapshot, to compare with theirs. */
 export function bodySnap(b: ExpenseInput): Snap {
   const ids = [...new Set([...Object.keys(b.paid ?? {}), ...Object.keys(b.owed ?? {})])].sort()
-  return { title: b.title, cat: b.cat, date: b.date, amount: b.amount, settle: b.settle, pending: b.pending, rejected: b.rejected, receipt: b.receipt, repeatNext: b.repeat?.next ?? null,
+  return { title: b.title, cat: b.cat, date: b.date, amount: b.amount, settle: b.settle, pending: b.pending, rejected: b.rejected, receipt: b.receipt, repeatNext: b.repeat?.next ?? null, ...(b.repeat?.all && { repeatAll: true }),
     shares: ids.map(memberId => ({ memberId, paid: b.paid?.[memberId] ?? 0, owed: b.owed?.[memberId] ?? 0 })) }
 }
 
@@ -369,7 +369,7 @@ export async function revertExpense(gid: string, eid: string, to: SnapFull, vers
   await api(`/api/groups/${gid}/expenses/${eid}`, { method: 'PUT', body: JSON.stringify({
     title: to.title, cat: to.cat, date: to.date, amount: to.amount, paid, owed, mode: to.mode ?? null, input: to.input ?? null,
     settle: !!to.settle, pending: !!to.pending, rejected: !!to.rejected, receipt: to.receipt ?? null,
-    repeat: to.repeatNext && to.repeatDay ? { next: to.repeatNext, day: to.repeatDay } : null, base: current, revertOf: version,
+    repeat: to.repeatNext && to.repeatDay ? { next: to.repeatNext, day: to.repeatDay, ...(to.repeatAll && { all: true }) } : null, base: current, revertOf: version,
   }) })
   await flush(); await pull()
 }

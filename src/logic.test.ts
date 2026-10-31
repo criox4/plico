@@ -36,6 +36,14 @@ assert.equal(g.expenses[2].repeat!.next, '2026-04-30')
   runRecurring(r, '2026-02-01')
   assert.equal(r.expenses[1].v, undefined)
 }
+{ // "everyone" repeats: someone who joined since is in, someone set to 0 stays out; a plain repeat keeps its people
+  const m = (id: string) => ({ id, name: id })
+  const rent = (id: string, all?: true) => ({ id, title: '', cat: '', date: '2026-01-01', amount: 900, paid: { a: 900 }, owed: { a: 450, b: 450 }, mode: 'equal' as const, input: { a: 1, b: 1, c: 0 }, repeat: { next: '2026-02-01', day: 1, ...(all && { all }) } })
+  const r = { id: 'r', name: '', theme: 'default', members: ['a', 'b', 'c', 'd'].map(m), expenses: [rent('all', true), rent('same')] } as unknown as Group
+  runRecurring(r, '2026-02-01')
+  assert.deepEqual(r.expenses.find(e => e.id === 'all:2026-02-01')!.owed, { a: 300, b: 300, d: 300 })
+  assert.deepEqual(r.expenses.find(e => e.id === 'same:2026-02-01')!.owed, { a: 450, b: 450 })
+}
 
 const sh = { g: "Goa '26 🌴", f: 'Karan', t: 'Arjun', v: 'arjun@okhdfc', a: 184200 }
 assert.deepEqual(decodeShare(encodeShare(sh)), sh)

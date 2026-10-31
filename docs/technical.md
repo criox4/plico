@@ -90,7 +90,7 @@ Phones never talk to Supabase directly. Every read and write goes through the AP
 | Auth | Better Auth 1.7: email and password, Google, Apple. Bearer plugin for the native apps |
 | Database | Postgres on Supabase (Mumbai), Prisma 7 with `@prisma/adapter-pg`, all tables in schema `splittr` |
 | Files | Supabase Storage through its REST API, proxied by the server |
-| AI | OpenRouter (`openai/gpt-6-luna`) for reading receipts and for chat. TypeSafe **Jev** for guardrails and for sorting receipt items |
+| AI | OpenRouter (`~openai/gpt-luna-latest`) for reading receipts and for chat. **Jev** (`~typesafe/jev-latest`, via OpenRouter) for guardrails and for sorting receipt items |
 | Push | `web-push` (VAPID). APNs and FCM called directly with Node's `http2` and `crypto`, with no SDKs |
 | Email | ZeptoMail (India), with Resend as the fallback |
 | Telemetry | OpenTelemetry to a self-hosted Grafana stack (Loki, Tempo, Prometheus, Alloy). Sentry for the app |
@@ -502,7 +502,7 @@ All AI is **on by default, with one switch to turn it off** (`/me/ai`). The app 
 ### Capture (`server/ai.ts`, `POST /api/ai/read`)
 
 - **Input:** a sentence, a receipt photo, or a payment screenshot, plus the group's member names and today's date.
-- **Model:** `openai/gpt-6-luna` through OpenRouter, `temperature 0`, with a **strict JSON schema** for the output: title, amount, category, date, payer, people, items, extras.
+- **Model:** `~openai/gpt-luna-latest` through OpenRouter, `temperature 0`, with a **strict JSON schema** for the output: title, amount, category, date, payer, people, items, extras.
 - **The prompt is written for India:** rupees, lakh formatting, how GST and CGST/SGST work, delivery and packaging fees, and UPI screenshots from GPay, PhonePe and Paytm.
 - **The output isn't trusted:**
   - amounts are clamped to ±₹10 crore;

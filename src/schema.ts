@@ -36,7 +36,7 @@ export const ExpenseIn = z.object({
   paid: Money, owed: Money,
   mode: z.nullish(z.enum(['equal', 'exact', 'percent', 'shares'])), input: z.nullish(z.record(Id, z.number())),
   settle: z.optional(z.boolean()), pending: z.optional(z.boolean()), rejected: z.optional(z.boolean()), receipt: z.nullish(FileName),
-  repeat: z.nullish(z.object({ next: Day, day: z.int().check(z.minimum(1), z.maximum(31)) })),
+  repeat: z.nullish(z.object({ next: Day, day: z.int().check(z.minimum(1), z.maximum(31)), all: z.optional(z.boolean()) })),
   /** The version this edit started from: null for a new expense. Absent only from pre-versioning clients (last write wins). */
   base: z.nullish(z.int().check(z.minimum(0))),
   /** "Restore this version" from the history screen. */
@@ -95,7 +95,7 @@ export const VerifiedBy = z.enum(['payee', 'screenshot'])
 export const Snap = z.object({
   title: z.string(), cat: z.string(), date: z.string(), amount: z.int(),
   settle: z.optional(z.boolean()), pending: z.optional(z.boolean()), rejected: z.optional(z.boolean()), verifiedBy: z.nullish(VerifiedBy),
-  receipt: z.nullish(z.string()), repeatNext: z.nullish(z.string()),
+  receipt: z.nullish(z.string()), repeatNext: z.nullish(z.string()), repeatAll: z.nullish(z.boolean()),
   shares: z.array(z.object({ memberId: z.string(), paid: z.int(), owed: z.int() })),
 })
 /** An expense snapshot as the audit stores it: a Snap plus how the split was entered, so it can be restored exactly. */
