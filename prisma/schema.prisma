@@ -189,6 +189,7 @@ model Expense {
   receipt     String? /// photo file name in the private bucket, under the group's folder
   repeatNext  String?
   repeatDay   Int?
+  repeatAll   Boolean        @default(false) /// each copy splits equally with the members then (new ones in, anyone at 0 in input out)
   createdById String?
   version     Int            @default(1) /// bumped on every change; writes must name the version they started from
   deletedAt   DateTime? /// soft delete: kept for history, restore and delta pulls; excluded from balances
