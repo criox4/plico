@@ -2,6 +2,8 @@ import { createRoot } from 'react-dom/client'
 import { ErrorBoundary, start as startCrashReports } from './sentry'
 import { LazyMotion, MotionConfig } from 'motion/react'
 import { Capacitor } from '@capacitor/core'
+import { App as NativeApp } from '@capacitor/app'
+import { handleBack } from './ui'
 import App from './App'
 import { SplashGate } from './account'
 import { startSync } from './sync'
@@ -26,6 +28,9 @@ void hydrate().then(() => {
     </LazyMotion>,
   )
 })
+
+// Without a listener Android closes the app on every back press; on Home it tucks the app away instead of killing it.
+if (Capacitor.getPlatform() === 'android') void NativeApp.addListener('backButton', e => { if (!handleBack(e.canGoBack)) void NativeApp.minimizeApp() })
 
 // Native apps ship their assets locally; only the web build needs the offline worker.
 if (import.meta.env.PROD && 'serviceWorker' in navigator && !Capacitor.isNativePlatform()) navigator.serviceWorker.register('/sw.js')

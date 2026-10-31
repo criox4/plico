@@ -7,7 +7,7 @@ import { api, isPhone, pull, refreshUser, signOut, signedIn, syncNow, uploadImag
 import { API, authClient, token } from './auth-client'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
-import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, SegPill } from './ui'
+import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, useBack, SegPill } from './ui'
 import { crashReportsOn, setCrashReports } from './sentry'
 import { lingers } from './anim'
 import { disablePush, enablePush, pushState, type PushState } from './push'
@@ -219,6 +219,7 @@ export function Onboarding({ s }: { s: State }) {
     catch (e) { setErr(navigator.onLine ? msg(e) : 'Almost there: this last step needs a connection.') } finally { setBusy(false) }
   }
   const steps = ['You', 'Your face', 'Getting paid']
+  useBack(step > 0 && (() => setStep(step - 1)))
   return (
     <Screen t={s.theme} title="Set up your profile">
       <form className="form onboard" onSubmit={e => { e.preventDefault(); if (step < 2) setStep(step + 1); else void finish() }}>
@@ -436,6 +437,8 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
   </>
   const hasSocial = showApple || sync.google
   const to = (next: Step) => { setStep(next); setErr('') }
+  const backTo: Step = returning && step === 'signin' ? 'signin' : 'welcome'
+  useBack(step !== backTo && (() => to(backTo)))
 
   useEffect(() => ensureFonts(['classic']), [])
   if (step === 'welcome')
@@ -465,7 +468,7 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
 
   const title = { signup: 'Create your account', signin: returning ? 'Welcome back' : 'Sign in', forgot: 'Reset your password', sent: 'Check your email' }[step]
   return (
-    <Screen t="classic" back={() => to(returning && step === 'signin' ? 'signin' : 'welcome')} title={title}>
+    <Screen t="classic" back={() => to(backTo)} title={title}>
       <div className="auth">
         {step !== 'sent' && <div className="auth-plico"><Plico mood="idle" size={64} watch boop="Boop Plico" look={field === 'email' ? caret : undefined} cover={field === 'password'} /></div>}
         {notice && <p className="notice" role="status">{notice}</p>}

@@ -47,6 +47,31 @@ const depth = (h: string) => h.replace(/^#\/?/, '').split('/').filter(Boolean).l
 export const go = (p: string) => (location.hash = p)
 const goBack = () => (history.length > 1 ? history.back() : go('/'))
 
+// Android's back button: closes the open sheet, then steps back inside a multi-step screen, then goes back a screen.
+const backs: (() => void)[] = []
+/** While `fn` is set, the back button calls it instead of leaving the screen (sign-in steps, setup steps, intro slides). */
+export function useBack(fn: (() => void) | false | null | undefined) {
+  const f = useRef(fn)
+  f.current = fn
+  const on = !!fn
+  useEffect(() => {
+    if (!on) return
+    const h = () => { if (f.current) f.current() }
+    backs.push(h)
+    return () => { backs.splice(backs.indexOf(h), 1) }
+  }, [on])
+}
+/** False when there's nothing left to go back to (Home, or the first step), so the app should leave. */
+export function handleBack(canGoBack: boolean) {
+  if (document.querySelector('[aria-modal="true"]')) return dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })), true
+  const top = backs.at(-1)
+  if (top) return top(), true
+  if (!location.hash.replace(/^#\/?/, '')) return false
+  if (canGoBack) history.back()
+  else go('/')
+  return true
+}
+
 // ---------- copy + names ----------
 export const KINDS: Record<Kind, { label: string; theme: ThemeId; hint: string }> = {
   trip: { label: 'Trip', theme: 'goa', hint: "Goa '26" },
