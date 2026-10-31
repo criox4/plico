@@ -14,6 +14,10 @@ import './styles.css'
 
 startCrashReports() // first, so a failure while starting up is reported too
 
+// Android apps: text follows the phone's font size (MainActivity passes it in the user agent). iPhone does it in CSS.
+const textScale = Number(navigator.userAgent.match(/PlicoTextScale\/([\d.]+)/)?.[1])
+if (textScale > 0 && textScale !== 1) document.documentElement.style.fontSize = `${textScale * 100}%`
+
 void hydrate().then(() => {
   startSync()
   startShareIntake()

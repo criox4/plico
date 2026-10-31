@@ -267,7 +267,7 @@ export function Activity({ s }: { s: State }) {
       {err && <p className="error" role="alert">{err}</p>}
       {!loaded && !err && <ol className="feed" aria-busy="true">{[0, 1, 2].map(i => <li key={i} className="skeleton" aria-hidden />)}</ol>}
       {loaded && !rows.length && (
-        <div className="empty-state"><Plico mood="empty" size={72} watch boop="Boop Plico" /><p><strong>Quiet so far.</strong>{scope === 'all' ? ' Everything people add, change or settle in your groups shows up here, with who did it.' : scope === 'ai' ? ' Changes anyone in your groups made by confirming an Ask Plico card show up here.' : ' Expenses and settlements that change your balance show up here.'}</p></div>
+        <div className="empty-state"><Plico mood="empty" size={72} watch /><p><strong>Quiet so far.</strong>{scope === 'all' ? ' Everything people add, change or settle in your groups shows up here, with who did it.' : scope === 'ai' ? ' Changes anyone in your groups made by confirming an Ask Plico card show up here.' : ' Expenses and settlements that change your balance show up here.'}</p></div>
       )}
       <ol className="feed">
         {rows.map(e => <Entry key={e.groupId + e.seq} s={s} g={gOf(e.groupId)} e={e} mine={scope === 'money' || e.myEffect ? e.memberOf : undefined} label={title(e)} />)}

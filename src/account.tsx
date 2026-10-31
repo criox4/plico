@@ -228,7 +228,7 @@ export function Onboarding({ s }: { s: State }) {
           {steps.map((x, i) => <li key={x} className={i < step ? 'done' : i === step ? 'on' : ''} aria-current={i === step ? 'step' : undefined}><span>{x}</span></li>)}
         </ol>
         {step === 0 && <>
-          <div className="hello"><Plico mood="idle" size={56} watch boop="Boop Plico" /><p><strong>Hi{first ? `, ${first}` : ''}! Let’s get you set up.</strong>Three quick things, so your friends know it’s you and can pay you back.</p></div>
+          <div className="hello"><Plico mood="idle" size={56} watch /><p><strong>Hi{first ? `, ${first}` : ''}! Let’s get you set up.</strong>Three quick things, so your friends know it’s you and can pay you back.</p></div>
           <label className="field"><span>What should friends call you?</span>
             <input value={s.me.name} maxLength={40} autoComplete="name" autoFocus required onChange={e => update(d => { d.me.name = e.target.value })} /></label>
           <label className="field"><span>Phone <em>optional</em></span>
@@ -237,13 +237,13 @@ export function Onboarding({ s }: { s: State }) {
           <button className="btn primary" disabled={!s.me.name.trim() || (!!s.me.phone && !isPhone(s.me.phone))}>Continue</button>
         </>}
         {step === 1 && <>
-          <div className="hello"><Plico mood="owed" size={56} watch boop="Boop Plico" /><p><strong>Pick your face.</strong>A photo, an emoji or a Plico. It’s how you show up in groups and on reminders.</p></div>
+          <div className="hello"><Plico mood="owed" size={56} watch /><p><strong>Pick your face.</strong>A photo, an emoji or a Plico. It’s how you show up in groups and on reminders.</p></div>
           <AvatarPicker s={s} />
           <button className="btn primary">Continue</button>
           <button type="button" className="link center-link" onClick={() => setStep(0)}>Back</button>
         </>}
         {step === 2 && <>
-          <div className="hello"><Plico mood="settled" size={56} watch boop="Boop Plico" /><p><strong>Where do friends pay you?</strong>Your UPI ID goes on your pay links and QR codes. Plico shows your name above it, so nobody pays the wrong person.</p></div>
+          <div className="hello"><Plico mood="settled" size={56} watch /><p><strong>Where do friends pay you?</strong>Your UPI ID goes on your pay links and QR codes. Plico shows your name above it, so nobody pays the wrong person.</p></div>
           <label className="field"><span>UPI ID</span>
             <input value={s.me.upi} placeholder="name@okhdfcbank" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus
               aria-invalid={upiBad} onChange={e => update(d => { d.me.upi = e.target.value.trim() })} />
@@ -447,7 +447,7 @@ function Intro({ notice, children }: { notice: string; children: ReactNode }) {
       </div>
       <footer className={`intro-foot${at === last ? ' gone' : ''}`} inert={at === last}>
         <button className="intro-skip" onClick={() => show(last)}>Skip</button>
-        <ol className="intro-dots" aria-hidden>{[0, 1, 2, 3].map(i => <li key={i} className={i === at ? 'on' : ''} />)}</ol>
+        <ol className="intro-dots">{[0, 1, 2, 3].map(i => <li key={i}><button className={i === at ? 'on' : ''} aria-label={`Slide ${i + 1} of 4`} aria-current={i === at ? 'step' : undefined} onClick={() => show(i)} /></li>)}</ol>
         <button className="intro-next" aria-label="Next" onClick={() => show(Math.min(at + 1, last))}><Icon n="arrow" /></button>
       </footer>
     </div>
@@ -531,7 +531,7 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
   return (
     <Screen t="classic" back={() => to(backTo)} title={title}>
       <div className="auth">
-        {step !== 'sent' && <div className="auth-plico"><Plico mood="idle" size={64} watch boop="Boop Plico" look={field === 'email' ? caret : undefined} cover={field === 'password'} /></div>}
+        {step !== 'sent' && <div className="auth-plico"><Plico mood="idle" size={64} watch look={field === 'email' ? caret : undefined} cover={field === 'password'} /></div>}
         {notice && <p className="notice" role="status">{notice}</p>}
         {step === 'sent' ? <>
           <p className="muted-p">If <strong>{email}</strong> has a Plico account, a link to choose a new password is on its way. It works for one hour.</p>

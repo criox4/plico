@@ -243,7 +243,8 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
       else if (p?.text) { setQuick(p.text.slice(0, 200)); void typeIt(p.text.slice(0, 200)) }
     })
   }, [shared]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (done) return <Converge s={s} g={g} e={done} />
+  const leave = () => (gid ? back() : location.replace('#/g/' + g.id))
+  if (done) return <Converge s={s} g={g} e={done} onDone={leave} />
   if (eid && !old) return null
 
   const del = () => {
@@ -374,10 +375,8 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
       else x.expenses.push(e)
       runRecurring(x)
     })
-    const leave = () => (gid ? back() : location.replace('#/g/' + g.id))
     if (old || calm()) return leave()
-    setDone(e) // a beat to see the split land, then on to the group
-    setTimeout(leave, 1500)
+    setDone(e) // see the split land; Done goes on to the group
   }
 
   const n = g.members.filter(m => input[m.id]).length

@@ -5,6 +5,8 @@ import ContactsUI
 class PlicoViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(ContactPickerPlugin())
+        // Swipe from the left edge to go back: every screen is a history entry, so this matches the Back button (HIG).
+        webView?.allowsBackForwardNavigationGestures = true
     }
 }
 

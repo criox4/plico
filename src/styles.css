@@ -7,6 +7,8 @@ html {
   /* A damped spring (about 13% overshoot, settles by 900ms) sampled into CSS, for the settled seal pressing in. */
   --spring-thud: linear(0, .053, .184, .355, .536, .706, .851, .965, 1.046, 1.096, 1.121, 1.126, 1.117, 1.098, 1.076, 1.054, 1.033, 1.015, 1.002, .992, .987, .984, .984, .986, .988, .991, .994, .996, .999, 1, 1.001, 1.002, 1.002, 1.002, 1.002, 1.001, 1.001);
 }
+/* iPhone: 1rem follows the Dynamic Type text size set in Settings (17pt at the default size, Apple's body text). */
+@supports (-webkit-touch-callout: none) { html { font: -apple-system-body; } }
 body { background: #F7F7FB; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 a { color: inherit; }
@@ -90,6 +92,7 @@ img, svg { display: block; }
 }
 .wordmark { display: inline-flex; align-items: baseline; font: 800 1.5rem/1 'Gabarito', var(--ui); letter-spacing: -.035em; padding-left: 4px; color: var(--ink); }
 .wordmark .brandmark { width: 1.08em; height: 1.08em; align-self: center; translate: 0 .2em; margin-right: -.06em; }
+.bar-title:focus { outline: none; } /* focused only so screen readers start here */
 .bar-title { flex: 1; min-width: 0; font: 600 1.0625rem/1.2 var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bar-end { margin-left: auto; display: flex; gap: 2px; }
 .iconbtn { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; transition: background var(--dur) var(--ease); }
@@ -168,6 +171,7 @@ small { font-size: .8125rem; color: var(--muted); }
 .cv-av .avatar { box-shadow: 0 0 0 3px var(--bg); }
 .cv-num { font: 800 clamp(1.75rem, 8vw, 2.25rem)/1.1 var(--num); letter-spacing: -.03em; text-align: center; max-width: 150px; font-variant-numeric: tabular-nums; }
 .cv-title { color: var(--muted); font-weight: 600; }
+.cv-done { width: min(320px, calc(100vw - 32px)); margin-top: 0; }
 @media (prefers-reduced-motion: no-preference) {
   .cv-av { animation: converge 1.2s cubic-bezier(.16, 1, .3, 1) calc(var(--i) * 50ms) both; }
   .cv-num { animation: rise 500ms cubic-bezier(.16, 1, .3, 1) 350ms both; }
@@ -194,7 +198,7 @@ small { font-size: .8125rem; color: var(--muted); }
 .who-chip.on { background: var(--accent); color: var(--on-accent); }
 .legal-line { color: var(--muted); font-size: .8125rem; line-height: 1.5; }
 .legal-line.center { text-align: center; margin-top: 12px; }
-.legal-line a { color: var(--link); text-underline-offset: 3px; }
+.legal-line a { color: var(--link); text-underline-offset: 3px; display: inline-block; padding: 12px 4px; margin: -12px -4px; } /* 44pt to tap, same line height */
 .legal-links { display: grid; gap: 2px; }
 fieldset.field { border: 0; padding: 0; min-width: 0; }
 fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--muted); margin-bottom: 8px; padding: 0; }
@@ -286,6 +290,8 @@ fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--mute
   padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
   background: var(--bg); box-shadow: 0 -1px 0 var(--line);
 }
+.dock-tabs { display: contents; } /* the nav keeps its role; its tabs sit in the dock's grid around the + */
+.dock > .fab { grid-row: 1; grid-column: 3; } /* the tabs flow around it */
 .dock-item { display: grid; justify-items: center; gap: 2px; min-width: 56px; min-height: 48px; padding-top: 4px; font-size: .75rem; font-weight: 600; color: var(--muted); text-decoration: none; }
 .dock-item:hover, .dock-item.on { color: var(--ink); }
 .dock-dot { position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }
@@ -786,9 +792,11 @@ fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--mute
 }
 .intro-foot.gone { opacity: 0; translate: 0 24px; pointer-events: none; }
 .intro-skip { justify-self: start; min-height: 48px; padding: 0 8px; margin-left: -8px; color: #FFFFFF; font-weight: 650; font-size: 1.0625rem; }
-.intro-dots { display: flex; gap: 6px; }
-.intro-dots li { width: 8px; height: 8px; border-radius: 4px; background: rgb(255 255 255 / .4); transition: width 360ms cubic-bezier(.16, 1, .3, 1), background 240ms ease; }
-.intro-dots li.on { width: 26px; background: #FFFFFF; }
+.intro-dots { display: flex; }
+.intro-dots button { display: grid; place-items: center; min-width: 22px; height: 44px; }
+.intro-dots button::after { content: ''; width: 8px; height: 8px; border-radius: 4px; background: rgb(255 255 255 / .4); transition: width 360ms cubic-bezier(.16, 1, .3, 1), background 240ms ease; }
+.intro-dots button.on::after { width: 26px; background: #FFFFFF; }
+.intro-dots button.on { min-width: 36px; }
 .intro-next {
   justify-self: end; width: 64px; height: 64px; display: grid; place-items: center; border-radius: 50%;
   background: var(--intro-ink); color: #FFFFFF; box-shadow: 0 12px 24px -8px rgb(23 23 28 / .6), 0 2px 4px rgb(23 23 28 / .2);
@@ -1228,6 +1236,7 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
   padding: 8px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--bg); color: var(--ink);
   border-radius: var(--radius) var(--radius) 0 0; box-shadow: 0 -8px 40px rgb(0 0 0 / .18);
 }
+.sheet-grab { justify-self: center; width: 36px; height: 5px; margin-bottom: 4px; border-radius: 3px; background: var(--line); }
 .sheet h2 { margin: 12px 0 2px; font: 650 1.125rem/1.25 var(--ui); }
 .sheet .debts { margin-top: 10px; }
 .paid-head { display: flex; align-items: center; gap: 12px; }
@@ -1249,7 +1258,7 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .d-stats, .d-actions { position: relative; } /* above the hero's ornament */
 .d-needs .debt { grid-template-columns: minmax(0, 1fr) auto auto; }
 .d-needs .debt .debt-actions { grid-column: auto; margin: 0; }
-.d-stats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.d-stats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 5.5em), 1fr)); gap: 8px; } /* three across; two, then one, as text gets larger */
 .d-stats li { display: grid; gap: 4px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--elev); min-width: 0; }
 .d-stats .money { font: 600 1.125rem/1.1 var(--num); letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; }
 .d-stats i { font: 500 .8125rem var(--ui); font-style: normal; color: var(--muted); }

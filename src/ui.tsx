@@ -330,6 +330,8 @@ export function Money({ p, sign, className = '' }: { p: number; sign?: boolean; 
   return <span className={`money ${tone(p)} ${className}`}>{sign && p > 0 ? '+' : sign && p < 0 ? '−' : ''}{inr(p)}</span>
 }
 
+let lastRoute: string | null = null
+
 export function Screen({ t, title, back, action, fab, preview, children }: {
   t: ThemeId; title?: ReactNode; back?: boolean | (() => void); action?: ReactNode; fab?: string
   /** Render signed in with this sample state (the share-card page), whoever is looking. */
@@ -342,6 +344,14 @@ export function Screen({ t, title, back, action, fab, preview, children }: {
   // The app's navigation, for anyone signed in and past the age question: a sidebar on wide screens,
   // bottom tabs on phones (only on the top-level screens, which pass `fab`).
   useBars(!preview && theme(t).dark)
+  // A new screen: screen readers start at its title instead of wherever the tapped row was.
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const route = here.join('/')
+  useEffect(() => {
+    if (preview || route === lastRoute) return
+    if (lastRoute !== null) titleRef.current?.focus({ preventScroll: true })
+    lastRoute = route
+  }, [route, preview])
   const shell = !!preview || (sync.authed && !!s.user?.ageGroup && s.user.onboarded !== false)
   return (
     <div className={`screen${shell ? ' has-nav' : ''}`} data-theme={t} style={themeVars(t)}>
@@ -361,7 +371,7 @@ export function Screen({ t, title, back, action, fab, preview, children }: {
       <header className="bar">
         {back ? <button className="iconbtn" onClick={typeof back === 'function' ? back : goBack} aria-label="Back"><Icon n="back" /></button>
           : !title && <span className="bar-brand"><Wordmark /></span>}
-        {title && <h1 className="bar-title">{title}</h1>}
+        {title && <h1 className="bar-title" ref={titleRef} tabIndex={-1}>{title}</h1>}
         <span className="bar-end">
           {shell && here[0] !== 'search' && <button className="iconbtn" aria-label="Search" aria-keyshortcuts="/" onClick={() => go('/search')}><Icon n="search" /></button>}
           {action}
@@ -370,13 +380,16 @@ export function Screen({ t, title, back, action, fab, preview, children }: {
       <main className="main">{children}</main>
       {shell && fab && sync.ai && s.user?.ai && <ChatButton />}
       {shell && fab && (
-        <nav className="dock" aria-label="Main">
-          <Tab to="/" icon="home" label="Home" on={!here[0]} />
-          <Tab to="/friends" icon="direct" label="Friends" on={here[0] === 'friends' || here[0] === 'f'} />
+        // Tabs only navigate (HIG): the four tabs are the nav, + is an action that sits between them on screen.
+        <div className="dock">
+          <nav className="dock-tabs" aria-label="Main">
+            <Tab to="/" icon="home" label="Home" on={!here[0]} />
+            <Tab to="/friends" icon="direct" label="Friends" on={here[0] === 'friends' || here[0] === 'f'} />
+            <Tab to="/activity" icon="log" label="Activity" on={here[0] === 'activity'} badge={sync.unread} />
+            <Tab to="/me" icon="user" label="You" on={here[0] === 'me'} />
+          </nav>
           <button className="fab" onClick={() => go(fab)} aria-label="Add expense"><Icon n="plus" size={28} /></button>
-          <Tab to="/activity" icon="log" label="Activity" on={here[0] === 'activity'} badge={sync.unread} />
-          <Tab to="/me" icon="user" label="You" on={here[0] === 'me'} />
-        </nav>
+        </div>
       )}
     </div>
   )
@@ -463,11 +476,11 @@ export function Denomination({ t, amount, line, caption }: { t: ThemeId; amount:
 }
 
 const Peaceful = () => (
-  <div className="peaceful"><Plico mood="empty" size={64} watch boop="Boop Plico" /><p><strong>Suspiciously peaceful in here.</strong>Add the first expense with +.</p></div>
+  <div className="peaceful"><Plico mood="empty" size={64} watch /><p><strong>Suspiciously peaceful in here.</strong>Add the first expense with +.</p></div>
 )
 
 /** After adding an expense: everyone in it converges around their share for a beat. */
-export function Converge({ s, g, e }: { s: State; g: Group; e: Expense }) {
+export function Converge({ s, g, e, onDone }: { s: State; g: Group; e: Expense; onDone: () => void }) {
   const ids = Object.keys(e.owed)
   const vals = Object.values(e.owed)
   const line = ids.length < 2 ? `${inr(e.amount)} added` : vals.every(v => v === vals[0]) ? `${inr(vals[0])} each` : `${inr(e.amount)}, ${ids.length} ways`
@@ -485,6 +498,7 @@ export function Converge({ s, g, e }: { s: State; g: Group; e: Expense }) {
         <p className="cv-num">{line}</p>
       </div>
       <p className="cv-title">{e.title} · {groupTitle(g)}</p>
+      <button className="btn primary cv-done" onClick={onDone} autoFocus>Done</button>
     </div>
   )
 }
@@ -683,7 +697,7 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
     .slice(0, 6)
   const fresh = !rows.length
   return (
-    <Screen t={t} preview={preview ? s : undefined} fab={s.groups.length ? '/add' : '/new'} action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
+    <Screen t={t} title="Home" preview={preview ? s : undefined} fab={s.groups.length ? '/add' : '/new'} action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
       <div className="dash">
         <div className="dash-main">
           <div className="d-hero">
@@ -705,7 +719,7 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
           {!preview && <InstallAsk />}
           {fresh && (
             <section className="d-card d-start" aria-labelledby="d-start">
-              <div className="hello"><Plico mood="idle" size={56} watch boop="Boop Plico" /><p><strong id="d-start">Start your first group.</strong>Pick who’s spending together. You can invite them by email next.</p></div>
+              <div className="hello"><Plico mood="idle" size={56} watch /><p><strong id="d-start">Start your first group.</strong>Pick who’s spending together. You can invite them by email next.</p></div>
               <div className="kinds">
                 {GROUP_KINDS.map(k => <button key={k} className="kind" onClick={() => go('/new/' + k)}><Icon n={k} size={26} /><span>{KINDS[k].label}</span></button>)}
               </div>
@@ -1069,7 +1083,10 @@ export function Sheet({ open, onClose, label, children }: { open: boolean; onClo
     <AnimatePresence>
       {open && (
         <m.div key="sheet" className="sheet-scrim" data-theme={s.theme} style={themeVars(s.theme)} onClick={e => { if (e.target === e.currentTarget) onClose() }} {...FADE}>
-          <m.section className="sheet" role="dialog" aria-modal="true" aria-label={label} initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={SPRING}>{children}</m.section>
+          <m.section className="sheet" role="dialog" aria-modal="true" aria-label={label} initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={SPRING}
+            drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }} onDragEnd={(_, i) => { if (i.offset.y > 100 || i.velocity.y > 600) onClose() }}>
+            <span className="sheet-grab" aria-hidden />{children}
+          </m.section>
         </m.div>
       )}
     </AnimatePresence>
