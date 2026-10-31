@@ -8,7 +8,7 @@ import { readExpense } from './ai.ts'
 import { createHash } from 'node:crypto'
 
 const KEY = process.env.OPENROUTER_API_KEY
-const MODEL = process.env.OPENROUTER_CHAT_MODEL || process.env.OPENROUTER_MODEL || 'openai/gpt-6-luna'
+const MODEL = process.env.OPENROUTER_CHAT_MODEL || process.env.OPENROUTER_MODEL || '~openai/gpt-luna-latest'
 const MAX_STEPS = 6
 
 export type ChatEvent =
