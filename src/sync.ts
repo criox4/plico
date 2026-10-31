@@ -510,16 +510,22 @@ export function startSync() {
   status = { ...status, authed: !!getState().user }
   setCursor(null) // a full pull at every launch: cheap insurance against anything a delta could have missed
   onLocalChange(() => { clearTimeout(timer); timer = setTimeout(queueNow, 400) })
-  addEventListener('online', () => { setStatus({ offline: false }); void flush() })
+  // The sign-in options and AI switch: asked at boot, and again on reconnecting or every 30s until an answer arrives,
+  // so a launch on bad signal doesn't hide Ask Plico and Google sign-in for the whole session.
+  let configured = false
+  const loadConfig = () => configured ? Promise.resolve() : fetch(`${API}/api/config`).then(r => r.json()).then(c => {
+    configured = true
+    setStatus({ google: !!c.google, googleWebClientId: c.googleWebClientId, googleIosClientId: c.googleIosClientId, ai: !!c.ai, ...(c.push && { push: c.push }) })
+  }).catch(() => {})
+  addEventListener('online', () => { setStatus({ offline: false }); void loadConfig(); void flush() })
   addEventListener('offline', () => setStatus({ offline: true }))
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') queueNow() // never lose a debounced edit on app close
     else void flush().then(pull)
   })
-  setInterval(() => { if (document.visibilityState === 'visible') void flush().then(pull) }, 30_000)
+  setInterval(() => { if (document.visibilityState === 'visible') { void loadConfig(); void flush().then(pull) } }, 30_000)
   // Boot: learn the sign-in options and confirm the session, but never hold an offline user hostage (800ms cap).
-  const config = fetch(`${API}/api/config`).then(r => r.json())
-    .then(c => setStatus({ google: !!c.google, googleWebClientId: c.googleWebClientId, googleIosClientId: c.googleIosClientId, ai: !!c.ai, ...(c.push && { push: c.push }) })).catch(() => {})
+  const config = loadConfig()
   const session = authClient.getSession().then(async r => {
     const u = r.data?.user
     if (u && !getState().user) return signedIn(u) // back from Google's redirect with a session cookie
