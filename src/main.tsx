@@ -3,7 +3,7 @@ import { ErrorBoundary, start as startCrashReports } from './sentry'
 import { LazyMotion, MotionConfig } from 'motion/react'
 import { Capacitor } from '@capacitor/core'
 import { App as NativeApp } from '@capacitor/app'
-import { handleBack } from './ui'
+import { handleBack, keepLinksInApp } from './ui'
 import App from './App'
 import { SplashGate } from './account'
 import { startSync } from './sync'
@@ -29,6 +29,7 @@ void hydrate().then(() => {
   )
 })
 
+if (Capacitor.isNativePlatform()) keepLinksInApp()
 // Without a listener Android closes the app on every back press; on Home it tucks the app away instead of killing it.
 if (Capacitor.getPlatform() === 'android') void NativeApp.addListener('backButton', e => { if (!handleBack(e.canGoBack)) void NativeApp.minimizeApp() })
 

@@ -5,7 +5,7 @@ import { inr, isVpa, type Kind, type Tone } from './logic'
 import { update, type State } from './store'
 import { api, isPhone, pull, refreshUser, signOut, signedIn, syncNow, uploadImage, useSync } from './sync'
 import { API, authClient, token } from './auth-client'
-import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
+import { ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
 import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, useBack, useBars, SegPill } from './ui'
 import { crashReportsOn, setCrashReports } from './sentry'
@@ -728,7 +728,6 @@ export function AccountHub({ s }: { s: State }) {
       <SyncLine />
       <button className="btn secondary" onClick={out}>Sign out</button>
       <ol className="ledger danger-zone"><Row icon="trash" title="Delete account" to="/me/delete" danger /></ol>
-      {import.meta.env.DEV && <a className="link center-link" href="#/themes">See all {THEMES.length} themes</a>}
     </Screen>
   )
 }

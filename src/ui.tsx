@@ -13,6 +13,7 @@ import { ChatButton } from './chat'
 import { AnimatePresence } from 'motion/react'
 import { flushSync } from 'react-dom'
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
+import { Browser } from '@capacitor/browser'
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics'
 import * as m from 'motion/react-m'
 import { FADE, ROW, SPRING, gaze } from './anim'
@@ -47,6 +48,24 @@ const depth = (h: string) => h.replace(/^#\/?/, '').split('/').filter(Boolean).l
 export const go = (p: string) => (location.hash = p)
 const goBack = () => (history.length > 1 ? history.back() : go('/'))
 
+// The apps have one WebView, so a "new tab" link would swap Plico for a page with no way back. Web pages open in an
+// in-app browser over Plico, photos full screen; WhatsApp links still hand off to WhatsApp.
+export function keepLinksInApp() {
+  document.addEventListener('click', e => {
+    const a = (e.target as Element).closest?.<HTMLAnchorElement>('a[target="_blank"]')
+    if (!a?.href) return
+    const { protocol, hostname } = new URL(a.href)
+    if (protocol === 'blob:' || protocol === 'data:') { e.preventDefault(); showPhoto(a.href, a.querySelector('img')?.alt ?? 'Photo') }
+    else if (/^https?:$/.test(protocol) && hostname !== 'wa.me') { e.preventDefault(); void Browser.open({ url: a.href }) }
+  })
+}
+function showPhoto(src: string, label: string) {
+  const d = document.createElement('dialog'), img = document.createElement('img')
+  d.className = 'photo-view'; d.setAttribute('aria-label', label); img.src = src; img.alt = label
+  d.append(img); d.addEventListener('click', () => d.close()); d.addEventListener('close', () => d.remove())
+  document.body.append(d); d.showModal()
+}
+
 // Status bar icons: the app draws behind them, so they follow whatever is on top (a dark group theme, the purple intro).
 const bars: { dark: boolean }[] = []
 const paintBars = () => { if (Capacitor.isNativePlatform() && bars.length) void SystemBars.setStyle({ style: bars.at(-1)!.dark ? SystemBarsStyle.Dark : SystemBarsStyle.Light }).catch(() => {}) }
@@ -73,6 +92,8 @@ export function useBack(fn: (() => void) | false | null | undefined) {
 }
 /** False when there's nothing left to go back to (Home, or the first step), so the app should leave. */
 export function handleBack(canGoBack: boolean) {
+  const photo = document.querySelector<HTMLDialogElement>('dialog.photo-view[open]')
+  if (photo) return photo.close(), true
   if (document.querySelector('[aria-modal="true"]')) return dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })), true
   const top = backs.at(-1)
   if (top) return top(), true
