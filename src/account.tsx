@@ -7,7 +7,7 @@ import { api, isPhone, pull, refreshUser, signOut, signedIn, syncNow, uploadImag
 import { API, authClient, token } from './auth-client'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
-import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, useBack, SegPill } from './ui'
+import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, useBack, useBars, SegPill } from './ui'
 import { crashReportsOn, setCrashReports } from './sentry'
 import { lingers } from './anim'
 import { disablePush, enablePush, pushState, type PushState } from './push'
@@ -66,6 +66,7 @@ export function InvitePreview({ s, kind, code }: { s: State; kind: 'join' | 'cla
 
 // ---------- splash ----------
 export function Splash({ out }: { out?: boolean }) {
+  useBars(true)
   return (
     <div className={`splash${out ? ' out' : ''}`} role="status" aria-label="Plico is starting">
       <Plico mood="settled" size={112} />
@@ -401,6 +402,7 @@ function Intro({ notice, children }: { notice: string; children: ReactNode }) {
     if (t) setAt(Math.round(t.scrollLeft / t.clientWidth))
   }
   const pay = theme('classic')
+  useBars(true)
   const slide = (i: number, title: ReactNode, line: ReactNode, art: ReactNode, extra?: ReactNode) => (
     <section className={`intro-slide${at === i ? ' on' : ''}`} role="group" aria-roledescription="slide" aria-label={`${i + 1} of 4`} inert={at !== i}>
       <div className="intro-art" aria-hidden>{art}</div>

@@ -12,7 +12,7 @@ import { enablePush, mayAsk, notNow, pushState, type PushState } from './push'
 import { ChatButton } from './chat'
 import { AnimatePresence } from 'motion/react'
 import { flushSync } from 'react-dom'
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics'
 import * as m from 'motion/react-m'
 import { FADE, ROW, SPRING, gaze } from './anim'
@@ -46,6 +46,16 @@ const tab = (h: string) => { const p = h.replace(/^#\/?/, '').split('/').filter(
 const depth = (h: string) => h.replace(/^#\/?/, '').split('/').filter(Boolean).length
 export const go = (p: string) => (location.hash = p)
 const goBack = () => (history.length > 1 ? history.back() : go('/'))
+
+// Status bar icons: the app draws behind them, so they follow whatever is on top (a dark group theme, the purple intro).
+const bars: { dark: boolean }[] = []
+const paintBars = () => { if (Capacitor.isNativePlatform() && bars.length) void SystemBars.setStyle({ style: bars.at(-1)!.dark ? SystemBarsStyle.Dark : SystemBarsStyle.Light }).catch(() => {}) }
+/** Light status bar icons while this is on screen when `dark`, dark icons otherwise; the newest screen wins until it leaves. */
+export function useBars(dark: boolean) {
+  const me = useRef({ dark })
+  useEffect(() => { bars.push(me.current); return () => { bars.splice(bars.indexOf(me.current), 1); paintBars() } }, [])
+  useEffect(() => { me.current.dark = dark; paintBars() }, [dark])
+}
 
 // Android's back button: closes the open sheet, then steps back inside a multi-step screen, then goes back a screen.
 const backs: (() => void)[] = []
@@ -310,6 +320,7 @@ export function Screen({ t, title, back, action, fab, preview, children }: {
   const here = preview ? [''] : location.hash.replace(/^#\/?/, '').split('/')
   // The app's navigation, for anyone signed in and past the age question: a sidebar on wide screens,
   // bottom tabs on phones (only on the top-level screens, which pass `fab`).
+  useBars(!preview && theme(t).dark)
   const shell = !!preview || (sync.authed && !!s.user?.ageGroup && s.user.onboarded !== false)
   return (
     <div className={`screen${shell ? ' has-nav' : ''}`} data-theme={t} style={themeVars(t)}>
