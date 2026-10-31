@@ -1,5 +1,5 @@
 // Account: splash, welcome + sign-in flows, password reset, verification, the account hub and its pages, claim links.
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { inr, isVpa, type Kind, type Tone } from './logic'
 import { update, type State } from './store'
@@ -379,6 +379,79 @@ export function Showcase() {
   )
 }
 
+// ---------- welcome: four swipeable slides on Plico Purple, the last one is the way in ----------
+const INTRO = 'plico-intro-seen'
+const sawIntro = () => { try { return localStorage.getItem(INTRO) === '1' } catch { return false } }
+const FRIENDS = [['Rohan', '#C9C1FA'], ['Isha', '#EA6673'], ['Karan', '#22B983'], ['Meera', '#F4A340']] as const
+
+function Intro({ notice, children }: { notice: string; children: ReactNode }) {
+  const track = useRef<HTMLDivElement>(null)
+  const last = 3
+  // Seen it before, or arriving from an invite: open on the way in. The earlier slides are still a swipe away.
+  const [at, setAt] = useState(() => (notice || sawIntro() ? last : 0))
+  const show = (i: number, smooth = true) => {
+    const t = track.current
+    if (t) t.scrollTo({ left: i * t.clientWidth, behavior: smooth && !calm() ? 'smooth' : 'auto' })
+  }
+  useEffect(() => { if (at) show(at, false) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (at === last) try { localStorage.setItem(INTRO, '1') } catch { /* private mode */ } }, [at])
+  useBack(at > 0 && (() => show(at - 1)))
+  const onScroll = () => {
+    const t = track.current
+    if (t) setAt(Math.round(t.scrollLeft / t.clientWidth))
+  }
+  const pay = theme('classic')
+  const slide = (i: number, title: ReactNode, line: ReactNode, art: ReactNode, extra?: ReactNode) => (
+    <section className={`intro-slide${at === i ? ' on' : ''}`} role="group" aria-roledescription="slide" aria-label={`${i + 1} of 4`} inert={at !== i}>
+      <div className="intro-art" aria-hidden>{art}</div>
+      <div className="intro-copy"><h1>{title}</h1><p>{line}</p></div>
+      {extra}
+    </section>
+  )
+  return (
+    <div className="intro" data-theme="classic" style={{ ...themeVars('classic'), '--brand': '#FFFFFF' } as CSSProperties} aria-roledescription="carousel" aria-label="Welcome to Plico">
+      <header className="intro-head"><Wordmark /></header>
+      <div className="intro-track" ref={track} onScroll={onScroll}>
+        {slide(0, 'Hisaab sorted.', 'Hi, I’m Plico. I keep track of the awkward money stuff, so trips, rent and dinners stay fun.',
+          <div className="ia ia-meet">
+            <span className="ia-disc" />
+            {FRIENDS.map(([n, c], i) => <span key={n} className={`ia-friend f${i}`} style={{ '--brand': c } as CSSProperties}><Avatar name={n} size={58} /></span>)}
+            <Plico mood="idle" size={132} watch boop="Boop Plico" />
+          </div>)}
+        {slide(1, 'Add it once. Everyone’s share, done.', 'Split equally, by amount, by shares or item by item. Type it like a text, or scan the bill.',
+          <div className="ia ia-split">
+            <p className="ia-said">Dinner at Toit 3600, split with everyone</p>
+            <div className="ia-card">
+              <span className="ia-sample">Sample</span>
+              <div className="ia-bill-head"><span className="ia-tile"><Icon n="food" /></span><strong>Dinner at Toit</strong><b>₹3,600</b></div>
+              <p className="ia-how">Split equally · 4 people</p>
+              <ul>{FRIENDS.map(([n, c]) => <li key={n}><span style={{ '--brand': c } as CSSProperties}><Avatar name={n} size={30} /></span>{n}<b>₹900</b></li>)}</ul>
+            </div>
+          </div>)}
+        {slide(2, 'Settle over UPI, to a name you can see.', 'Friends pay from a link, no app needed. The money goes straight to you; Plico never touches it.',
+          <div className="ia ia-pay">
+            <div className="ia-card">
+              <span className="ia-sample">Sample</span>
+              <p className="ia-paying">You’re paying</p>
+              <strong className="ia-payee">Meera Iyer</strong>
+              <span className="vpa">meera@okaxis</span>
+              <p className="ia-amt">₹840</p>
+              <span className="btn primary ia-paybtn">Pay ₹840 via UPI</span>
+              <span className="ia-stamp">{pay.celebrate}</span>
+            </div>
+          </div>)}
+        {slide(3, 'Money together, sorted.', 'Start a group for the trip, the flat or Friday football, and invite friends by email or WhatsApp.', <Showcase />,
+          <div className="intro-actions">{notice && <p className="notice" role="status">{notice}</p>}{children}</div>)}
+      </div>
+      <footer className={`intro-foot${at === last ? ' gone' : ''}`} inert={at === last}>
+        <button className="intro-skip" onClick={() => show(last)}>Skip</button>
+        <ol className="intro-dots" aria-hidden>{[0, 1, 2, 3].map(i => <li key={i} className={i === at ? 'on' : ''} />)}</ol>
+        <button className="intro-next" aria-label="Next" onClick={() => show(Math.min(at + 1, last))}><Icon n="arrow" /></button>
+      </footer>
+    </div>
+  )
+}
+
 // ---------- welcome + auth ----------
 type Step = 'welcome' | 'signup' | 'signin' | 'forgot' | 'sent'
 
@@ -443,27 +516,13 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
   useEffect(() => ensureFonts(['classic']), [])
   if (step === 'welcome')
     return (
-      <div className="welcome" data-theme="classic" style={themeVars('classic')}>
-        <div className="welcome-top">
-          <Wordmark />
-          <h1>Hisaab sorted.</h1>
-          <div className="hello"><Plico mood="idle" size={52} watch boop="Boop Plico" /><p><strong>Hi. I’m Plico.</strong>I keep track of the awkward money stuff, so trips, rent and dinners stay fun.</p></div>
-          {(notice || invited) && <p className="notice" role="status">{notice || 'You’ve been invited to a group. Create an account or sign in to join it.'}</p>}
-          <Showcase />
-          <ul className="points">
-            <li><Icon n="send" />Friends pay from a link. No app needed.</li>
-            <li><Icon n="check" />Works offline. Syncs when you’re back.</li>
-            <li><Icon n="qr" />Pay by UPI or QR, to a name you can see.</li>
-          </ul>
-        </div>
-        <div className="welcome-actions">
-          {social}
-          <button className="btn primary" onClick={() => to('signup')}>Create an account</button>
-          <button className="btn secondary" onClick={() => to('signin')}>I already have an account</button>
-          {err && <p className="error" role="alert">{err}</p>}
-          <p className="legal-line center"><a href={legalUrl('privacy')} target="_blank" rel="noopener">Privacy</a> · <a href={legalUrl('terms')} target="_blank" rel="noopener">Terms</a></p>
-        </div>
-      </div>
+      <Intro notice={notice || (invited ? 'You’ve been invited to a group. Create an account or sign in to join it.' : '')}>
+        {social}
+        <button className="btn intro-create" onClick={() => to('signup')}>Create an account</button>
+        <button className="btn intro-signin" onClick={() => to('signin')}>I already have an account</button>
+        {err && <p className="error" role="alert">{err}</p>}
+        <p className="legal-line center"><a href={legalUrl('privacy')} target="_blank" rel="noopener">Privacy</a> · <a href={legalUrl('terms')} target="_blank" rel="noopener">Terms</a></p>
+      </Intro>
     )
 
   const title = { signup: 'Create your account', signin: returning ? 'Welcome back' : 'Sign in', forgot: 'Reset your password', sent: 'Check your email' }[step]
