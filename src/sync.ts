@@ -10,7 +10,7 @@ import { ME, enqueue, isVpa, normPhone, rebase, runRecurring, uid, type Expense,
 import type * as z from 'zod/mini'
 import { ConflictOut, GroupsOut, ProofIn, ProofOut, ReadOut, SavedOut, UnreadOut, type ExpenseInput, type Read, type ServerExpense, type ServerGroup, type Snap, type SnapFull } from './schema'
 export type { Read, ServerExpense }
-import { blank, getState, onLocalChange, setRemote, update, type State } from './store'
+import { blank, getState, onLocalChange, setRemote, update, wipe, type State } from './store'
 import { API, authClient, token } from './auth-client'
 
 /** A change the server wouldn't take as-is. Conflict: someone changed it first. Failed: refused outright. */
@@ -496,15 +496,22 @@ export async function refreshUser() {
   return u
 }
 
+/** Device settings that aren't anyone's data: they outlive a sign-out. */
+const KEEP = new Set(['plico-crash-reports', 'plico-intro-seen', 'plico-install-asked'])
+
+/** Nothing of the account stays on the device: its groups, its outbox, Ask Plico history, cached friend codes,
+ *  a screenshot shared in but not yet added, the native copies. Then a reload, so no screen keeps any of it in memory. */
 export async function signOut() {
   await authClient.signOut().catch(() => {})
   token.clear()
-  outbox = []; issues = []
-  saveOutbox(); saveIssues(); setCursor(null)
-  for (const k of Object.keys(localStorage)) if (k.startsWith('plico-chat:')) localStorage.removeItem(k) // Ask Plico history lives on the device only
-  setRemote(d => { Object.assign(d, structuredClone(blank)) })
-  snap = getState()
-  setStatus({ authed: false, error: '' })
+  outbox = []; issues = []; cursor = null
+  for (const k of Object.keys(localStorage)) if (!KEEP.has(k)) localStorage.removeItem(k)
+  try { sessionStorage.clear() } catch { /* blocked */ }
+  if ('caches' in window) await caches.delete('plico-share').catch(() => false)
+  if (native) await Preferences.clear().catch(() => {})
+  await wipe()
+  location.hash = '#/'
+  location.reload()
 }
 
 /** Wire up once at boot. */

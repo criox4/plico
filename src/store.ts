@@ -64,6 +64,12 @@ function commit(next: State) {
 }
 
 export const getState = () => state
+/** Back to an empty app, written to disk before it resolves (sign-out reloads straight after). */
+export async function wipe() {
+  state = structuredClone(blank)
+  try { if (useIdb) await done((await store('readwrite')).delete(KEY)) } catch { /* the reload starts blank either way */ }
+  localStorage.removeItem(KEY)
+}
 export const onLocalChange = (f: typeof listener) => { listener = f }
 
 /** A user edit: saved locally at once, then queued for the server. */

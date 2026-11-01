@@ -739,7 +739,8 @@ api.get('/groups/:gid/files/:name', async c => {
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
   const f = await getFile(BUCKET.private, `${gid}/${name}`)
   if (!f) return c.json(notFound, 404)
-  return c.body(new Uint8Array(f.body), 200, { 'content-type': f.type, 'cache-control': 'private, max-age=86400' })
+  // no-store: a browser keeps a cached copy by URL alone, so after sign-out anyone on the device could still open it.
+  return c.body(new Uint8Array(f.body), 200, { 'content-type': f.type, 'cache-control': 'private, no-store' })
 })
 
 // ---------- reading expenses: a sentence, a receipt photo, a payment screenshot ----------
