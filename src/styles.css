@@ -303,25 +303,30 @@ fieldset.field legend { font-weight: 600; font-size: .9375rem; color: var(--mute
 .dock {
   position: fixed; z-index: 6; left: 0; right: 0; bottom: 0;
   display: grid; grid-template-columns: 1fr 1fr auto 1fr 1fr; align-items: center; justify-items: center;
-  padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
-  background: var(--bg); box-shadow: 0 -1px 0 var(--line);
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  /* frosted like the top bar: lists stay faintly visible as they scroll under it */
+  background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: 0 -1px 0 var(--line);
 }
 .dock-tabs { display: contents; } /* the nav keeps its role; its tabs sit in the dock's grid around the + */
 .dock > .fab { grid-row: 1; grid-column: 3; } /* the tabs flow around it */
-.dock-item { display: grid; justify-items: center; gap: 2px; min-width: 56px; min-height: 48px; padding-top: 4px; font-size: .75rem; font-weight: 600; color: var(--muted); text-decoration: none; }
+.dock-item { display: grid; justify-items: center; align-content: center; gap: 5px; min-width: 64px; min-height: 54px; font-size: .75rem; font-weight: 600; color: var(--muted); text-decoration: none; -webkit-tap-highlight-color: transparent; }
 .dock-item:hover, .dock-item.on { color: var(--ink); }
-.dock-dot { position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); }
-.dock-icon { position: relative; display: grid; place-items: center; transition: scale 120ms var(--ease), translate var(--dur) var(--ease); }
-.dock-item:active .dock-icon { scale: .88; }
-.dock-item.on .dock-icon { translate: 0 -1px; }
+.dock-item.on { font-weight: 750; }
+.dock-item.on .icon-svg { stroke-width: calc(var(--stroke) + .5); }
+/* the current tab: a soft accent pill behind its icon, sliding between tabs */
+.dock-pill { position: absolute; z-index: -1; inset: -5px -18px; border-radius: var(--pill); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.dock-icon { position: relative; isolation: isolate; display: grid; place-items: center; transition: scale 120ms var(--ease); }
+.dock-item:active .dock-icon { scale: .9; }
 .badge { min-width: 18px; height: 18px; padding: 0 5px; display: inline-grid; place-items: center; border-radius: 999px; background: var(--neg); color: #fff; font: 700 .6875rem/1 var(--ui); font-variant-numeric: tabular-nums; }
 .dock-icon .badge { position: absolute; top: -6px; left: 14px; box-shadow: 0 0 0 2px var(--bg); }
 .fab {
   width: 60px; height: 60px; display: grid; place-items: center; border-radius: 50%;
   background: var(--accent); color: var(--on-accent);
-  box-shadow: 0 10px 24px -6px color-mix(in srgb, var(--accent) 60%, transparent), 0 2px 6px rgb(0 0 0 / .18);
+  box-shadow: 0 0 0 5px var(--bg), 0 12px 24px -6px color-mix(in srgb, var(--accent) 60%, transparent), 0 2px 6px rgb(0 0 0 / .18);
   transition: transform var(--dur) var(--ease);
 }
+.dock > .fab { translate: 0 -14px; } /* rises through the bar's edge, ringed in the page colour so it reads as cut into it */
 .fab:hover { transform: translateY(-1px); }
 .fab:active { transform: scale(.94); }
 
@@ -1166,14 +1171,9 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .field small.error { color: var(--neg); font-weight: 600; }
 
 /* ---------- Ask Plico ---------- */
-/* Phones: a round Plico just above the dock's right side; a bottom sheet. Wide screens: bottom-right, a side panel. */
-.chat-fab {
-  position: fixed; z-index: 8; right: 16px; bottom: calc(88px + env(safe-area-inset-bottom));
-  width: 52px; height: 52px; display: grid; place-items: center; border-radius: 50%;
-  background: var(--surface); box-shadow: var(--elev-hi, var(--elev)), 0 0 0 1px var(--line);
-  transition: translate var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-}
-.chat-fab:hover { translate: 0 -2px; }
+/* Plico's face in the top bar opens it: a bottom sheet on phones, a side panel on wide screens. Nothing floats on content. */
+.chat-btn { background: var(--surface2); }
+.chat-btn:hover { background: color-mix(in srgb, var(--accent) 16%, var(--surface2)); }
 .chat-scrim { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; background: color-mix(in srgb, #000 32%, transparent); }
 .chat {
   width: 100%; height: min(86dvh, 760px); display: flex; flex-direction: column;
@@ -1240,7 +1240,6 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 .chat-send:disabled { opacity: .4; }
 .chat-fine { padding: 2px 16px 10px; color: var(--muted); font-size: .75rem; text-align: center; }
 @media (min-width: 900px) {
-  .chat-fab { right: 28px; bottom: 28px; width: 58px; height: 58px; }
   .chat-scrim { align-items: stretch; justify-content: flex-end; background: color-mix(in srgb, #000 18%, transparent); }
   .chat { width: 420px; height: auto; margin: 12px; border-radius: var(--radius); }
 }
@@ -1529,10 +1528,9 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
 @keyframes lp-in { from { opacity: 0; translate: 0 14px; } }
 @keyframes lp-blink { 50% { opacity: 0; } }
 
-/* Between screens (useRoute): a short slide and fade, reversed going back. The nav and the chat button stay put. */
+/* Between screens (useRoute): a short slide and fade, reversed going back. The nav stays put. */
 .dock { view-transition-name: dock; }
 .side { view-transition-name: side; }
-.chat-fab { view-transition-name: chat-fab; }
 /* The nav is live through the transition, so its moving dot and pill (Motion) show instead of a crossfade. */
 ::view-transition-old(dock), ::view-transition-old(side) { display: none; }
 ::view-transition-new(dock), ::view-transition-new(side) { animation: none; }

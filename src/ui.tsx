@@ -373,12 +373,12 @@ export function Screen({ t, title, back, action, fab, preview, children }: {
           : !title && <span className="bar-brand"><Wordmark /></span>}
         {title && <h1 className="bar-title" ref={titleRef} tabIndex={-1}>{title}</h1>}
         <span className="bar-end">
+          {shell && fab && sync.ai && s.user?.ai && <ChatButton />}
           {shell && here[0] !== 'search' && <button className="iconbtn" aria-label="Search" aria-keyshortcuts="/" onClick={() => go('/search')}><Icon n="search" /></button>}
           {action}
         </span>
       </header>
       <main className="main">{children}</main>
-      {shell && fab && sync.ai && s.user?.ai && <ChatButton />}
       {shell && fab && (
         // Tabs only navigate (HIG): the four tabs are the nav, + is an action that sits between them on screen.
         <div className="dock">
@@ -397,7 +397,8 @@ export function Screen({ t, title, back, action, fab, preview, children }: {
 
 const Badge = ({ n }: { n: number }) => (n ? <span className="badge" aria-label={`${n} new`}>{n > 99 ? '99+' : n}</span> : null)
 function Tab({ to, icon, label, on, badge = 0 }: { to: string; icon: IconName; label: string; on: boolean; badge?: number }) {
-  return <a className={`dock-item${on ? ' on' : ''}`} href={'#' + to} aria-current={on ? 'page' : undefined}><span className="dock-icon"><Icon n={icon} /><Badge n={badge} />{on && <m.span layoutId="dock-dot" className="dock-dot" transition={SPRING} />}</span>{label}</a>
+  const tick = () => { if (!on && Capacitor.isNativePlatform()) void Haptics.impact({ style: ImpactStyle.Light }).catch(() => {}) }
+  return <a className={`dock-item${on ? ' on' : ''}`} href={'#' + to} onClick={tick} aria-current={on ? 'page' : undefined}><span className="dock-icon">{on && <m.span layoutId="dock-pill" className="dock-pill" transition={SPRING} />}<Icon n={icon} /><Badge n={badge} /></span>{label}</a>
 }
 
 /** Wide screens: the app's own theme (not the group's), so navigation stays put as you move between groups. */
