@@ -665,7 +665,7 @@ export function Claim({ s, token }: { s: State; token: string }) {
     setBusy(true)
     try {
       const r = await api<{ id: string }>(`/api/claim/${token}`, { method: 'POST' })
-      await pull()
+      await Promise.all([pull(), refreshUser()])
       location.replace('#/g/' + r.id)
     } catch (e) { setErr(msg(e)); setBusy(false) }
   }

@@ -843,26 +843,32 @@ function Invite({ g, lead }: { g: Group; lead?: boolean }) {
 }
 
 function JoinGroup({ s, code }: { s: State; code: string }) {
-  type Spot = { name: string; phone?: string; email?: string }
+  type Spot = { id: string; name: string; phone?: string; email?: string; confirmBy: string | null; asked: boolean }
   type Inv = { id: string; name: string; kind: Kind; theme: ThemeId; joined: boolean; people: number; spots?: Spot[] }
   const [inv, setInv] = useState<Inv | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [mine, setMine] = useState<Spot | null>(null) // "that's me": proving it before the spot is theirs
-  const load = () => api<Inv>(`/api/invites/${code}`).then(setInv, e => setErr(e.message))
+  const [pick, setPick] = useState<string | null>(null) // "that's me": the spot they say is theirs, until it's confirmed
+  const load = () => api<Inv>(`/api/invites/${code}`).then(r => { setInv(r); const a = r.spots?.find(x => x.asked); if (a) setPick(a.id) }, e => setErr(e.message))
   useEffect(() => { void load() }, [code]) // eslint-disable-line react-hooks/exhaustive-deps
+  const mine = inv?.spots?.find(x => x.id === pick) ?? null
+  const ask = async (x: Spot) => {
+    setBusy(true); setErr('')
+    try { await api(`/api/invites/${code}/spots/${x.id}/ask`, { method: 'POST', body: '{}' }); await load() }
+    catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  }
   const join = async () => {
     setBusy(true)
     try {
       const r = await api<{ id: string }>(`/api/invites/${code}/join`, { method: 'POST', body: '{}' })
-      await pull()
+      await Promise.all([pull(), refreshUser()])
       location.replace('#/g/' + r.id)
     } catch (e) {
       setErr((e as Error).message)
       setBusy(false)
     }
   }
-  useEffect(() => { if (inv?.joined) location.replace('#/g/' + inv.id) }, [inv])
+  useEffect(() => { if (inv?.joined) void Promise.all([pull(), refreshUser()]).finally(() => location.replace('#/g/' + inv.id)) }, [inv])
   const t = inv?.theme ?? s.theme
   return (
     <Screen t={t} back title="Join group">
@@ -872,16 +878,23 @@ function JoinGroup({ s, code }: { s: State; code: string }) {
           <p className="muted-p">{count(inv.people, 'person is', 'people are')} splitting here.</p>
           {mine ? <>
             <h2 className="form-h">Join as {mine.name}</h2>
-            {mine.phone ? <>
-              <p className="muted-p">{mine.name} was added with the number {mine.phone}. Ask whoever added you for your personal invite link, and that spot, with its balance, is yours.</p>
-            </> : <p className="muted-p">{mine.name} was added with {mine.email}. Sign in with that email (or Google with it) and open this link again, and that spot, with its balance, is yours.</p>}
-            <button type="button" className="link center-link" onClick={() => { setMine(null); setErr('') }}>That’s not me</button>
+            {mine.asked ? <>
+              <p className="notice" role="status">Waiting for {mine.confirmBy} to confirm it’s you. We’ll let you know, and {inv.name} opens here once they do.</p>
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => void load()}>Check again</button>
+            </> : <>
+              <p className="muted-p">{mine.name} was added with {mine.phone ? `the number ${mine.phone}` : mine.email}.{' '}
+                {mine.confirmBy ? `Ask ${mine.confirmBy}, who added them, to confirm it’s you, and that spot, with its balance, is yours.`
+                  : mine.phone ? 'Ask whoever added you for your personal invite link, and that spot, with its balance, is yours.' : ''}
+                {mine.email && ' Or sign in with that email (or Google with it) and open this link again.'}</p>
+              {mine.confirmBy && <button type="button" className="btn primary" disabled={busy} onClick={() => void ask(mine)}>{busy ? 'Asking…' : `Ask ${mine.confirmBy} to confirm`}</button>}
+            </>}
+            <button type="button" className="link center-link" onClick={() => { setPick(null); setErr('') }}>That’s not me</button>
           </> : <>
             {!!inv.spots?.length && <>
               <h2 className="form-h">Is one of these you?</h2>
               <ul className="rows">
-                {inv.spots.map((x, i) => (
-                  <li key={i}><button type="button" className="row-in link-row" onClick={() => { setMine(x); setErr('') }}>
+                {inv.spots.map(x => (
+                  <li key={x.id}><button type="button" className="row-in link-row" onClick={() => { setPick(x.id); setErr('') }}>
                     <Avatar name={x.name} size={36} /><span className="grow"><strong>{x.name}</strong><small>{x.phone ?? x.email}</small></span><Icon n="arrow" size={18} />
                   </button></li>
                 ))}

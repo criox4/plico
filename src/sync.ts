@@ -488,7 +488,11 @@ function expired() {
 export async function refreshUser() {
   const r = await authClient.getSession().catch(() => null)
   const u = r?.data?.user
-  if (u) setRemote(d => { if (d.user) Object.assign(d.user, { email: u.email, emailVerified: u.emailVerified, image: u.image, ...gates(u as AuthUser) }); d.me.name = u.name || d.me.name })
+  if (u) setRemote(d => {
+    if (d.user) Object.assign(d.user, { email: u.email, emailVerified: u.emailVerified, image: u.image, ...gates(u as AuthUser) })
+    d.me.name = u.name || d.me.name
+    d.me.phone ||= (u as AuthUser).phone || undefined // taking a spot added with a number fills it in on the server
+  })
   return u
 }
 
