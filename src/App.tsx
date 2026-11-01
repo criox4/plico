@@ -11,7 +11,7 @@ import { addProof, api, photoData, pull, readExpense, refreshUser, uploadImage, 
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
+import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner, PhoneVerify, type PhoneStatus } from './account'
 import { Landing } from './Landing'
@@ -375,8 +375,8 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
       else x.expenses.push(e)
       runRecurring(x)
     })
-    if (old || calm()) return leave()
-    setDone(e) // see the split land; Done goes on to the group
+    if (old) return leave()
+    setDone(e) // the split lands; it closes itself after 5s, or on Done
   }
 
   const n = g.members.filter(m => input[m.id]).length

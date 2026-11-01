@@ -479,26 +479,47 @@ const Peaceful = () => (
   <div className="peaceful"><Plico mood="empty" size={64} watch /><p><strong>Suspiciously peaceful in here.</strong>Add the first expense with +.</p></div>
 )
 
-/** After adding an expense: everyone in it converges around their share for a beat. */
+/** After adding an expense: the split lands in the group's own look and says what it means for you.
+ *  It closes itself after 5 seconds (the Done button fills as it counts down), or on Done. */
 export function Converge({ s, g, e, onDone }: { s: State; g: Group; e: Expense; onDone: () => void }) {
-  const ids = Object.keys(e.owed)
-  const vals = Object.values(e.owed)
-  const line = ids.length < 2 ? `${inr(e.amount)} added` : vals.every(v => v === vals[0]) ? `${inr(vals[0])} each` : `${inr(e.amount)}, ${ids.length} ways`
+  const t = pageTheme(s, g), gt = theme(g.theme)
+  useBars(theme(t).dark)
+  const done = useRef(onDone)
+  done.current = onDone
+  useEffect(() => { const id = setTimeout(() => done.current(), 5000); return () => clearTimeout(id) }, [])
+  const ids = Object.keys(e.owed).filter(id => e.owed[id] > 0).sort((a, b) => (a === ME ? -1 : b === ME ? 1 : e.owed[b] - e.owed[a]))
+  const payers = Object.keys(e.paid).filter(id => e.paid[id] > 0)
+  const paidBy = payers.length === 1 ? who(g, payers[0]) : `${payers.length} people`
+  const lent = (e.paid[ME] ?? 0) - (e.owed[ME] ?? 0)
+  const you = e.paid[ME]
+    ? lent > 0 ? <>You paid {inr(e.paid[ME])} · <span className="money pos">you lent {inr(lent)}</span></>
+      : lent < 0 ? <>You paid {inr(e.paid[ME])} · <span className="money neg">you owe {inr(-lent)}</span></>
+      : <>You paid your share</>
+    : e.owed[ME] ? <>{paidBy} paid · <span className="money neg">your share {inr(e.owed[ME])}</span></>
+    : <>{paidBy} paid · you’re not in this one</>
+  const place = g.kind === 'direct' ? `With ${groupTitle(g)}` : `Added to ${groupTitle(g)}`
   return (
-    <div className="converge" data-theme={s.theme} style={themeVars(s.theme)} role="status" aria-label={`Added ${e.title}: ${line}`}>
-      <div className="cv-ring" aria-hidden>
-        {ids.slice(0, 8).map((id, i, a) => {
-          const ang = (i / a.length) * 2 * Math.PI - Math.PI / 2
-          return (
-            <span key={id} className="cv-av" style={{ '--tx': `${Math.round(Math.cos(ang) * 104)}px`, '--ty': `${Math.round(Math.sin(ang) * 104)}px`, '--i': i } as CSSProperties}>
-              <Avatar name={realName(s, g, id)} image={id === ME ? s.user?.image : g.members.find(m => m.id === id)?.image} size={48} />
-            </span>
-          )
-        })}
-        <p className="cv-num">{line}</p>
+    <div className="converge" data-theme={t} style={themeVars(t)} role="status" aria-label={`${place}: ${e.title}, ${inr(e.amount)}`}>
+      <Ornament t={t} />
+      <div className="cv-body">
+        <p className="cv-place">
+          <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
+          {place}
+        </p>
+        <p className="cv-total"><span className="cur">₹</span>{inr(e.amount).replace('₹', '')}</p>
+        <h1 className="cv-title">{e.title}</h1>
+        <p className="cv-you">{you}</p>
+        <ul className="cv-shares">
+          {ids.map((id, i) => (
+            <li key={id} style={{ '--i': i } as CSSProperties}>
+              <Avatar name={realName(s, g, id)} image={id === ME ? s.user?.image : g.members.find(m => m.id === id)?.image} size={32} />
+              <span>{who(g, id)}</span>
+              <span className="money">{inr(e.owed[id])}</span>
+            </li>
+          ))}
+        </ul>
       </div>
-      <p className="cv-title">{e.title} · {groupTitle(g)}</p>
-      <button className="btn primary cv-done" onClick={onDone} autoFocus>Done</button>
+      <button className="btn primary cv-done" onClick={onDone} autoFocus><span className="cv-fill" aria-hidden />Done</button>
     </div>
   )
 }
