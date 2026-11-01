@@ -23,8 +23,6 @@ model User {
   upi           String?
   upi2          String? /// backup UPI ID, for when the first bank's UPI is down
   phone         String?
-  verifiedPhone   String?   @unique /// +<country><number>, proven by a WhatsApp message from it; links spots added under it
-  phoneVerifiedAt DateTime?
   friendCode      String?   @unique /// personal "add me on Plico" link (/#/u/<code>); made on first use, resettable
   onboardedAt   DateTime? /// finished the first-run profile (name, face, UPI IDs)
   theme         String?   @default("classic")
@@ -156,6 +154,8 @@ model Member {
   inviteToken String?        @unique /// one-time claim link sent to this person
   invitedAt   DateTime?
   addedById   String? /// who added this person: until they join, only that member may change their UPI IDs or email
+  claimById   String? /// someone who says this waiting spot is them, until whoever added it (or the group's creator) answers
+  claimAt     DateTime? /// when they asked; a request lapses after 7 days
   userId      String?
   user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
   shares      ExpenseShare[]

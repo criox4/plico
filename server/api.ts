@@ -13,7 +13,6 @@ import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
 import { prefsOf } from './push-text.ts'
 import { chat } from './chat.ts'
-import { mePhone } from './whatsapp.ts'
 import { clientIp, limiter } from './ip.ts'
 import { count } from './otel.ts'
 import { createHash, randomInt } from 'node:crypto'
@@ -113,7 +112,6 @@ api.use('*', async (c, next) => {
   await next()
 })
 
-api.route('/me/phone', mePhone) // verifying a phone number over WhatsApp (server/whatsapp.ts)
 
 // ---------- age, parental consent, AI consent, data export ----------
 async function askGuardian(uid: string) {
@@ -419,11 +417,11 @@ api.put('/groups/:gid/members/:mid', async c => {
     if (dup) return c.json({ error: `${dup.name} is already in this group with that email.` }, 409)
   }
   if (phone && phone !== m?.phone) {
-    const dup = await db.member.findFirst({ where: { groupId: gid, id: { not: mid }, OR: [{ phone }, { user: { verifiedPhone: phone } }] } })
+    const dup = await db.member.findFirst({ where: { groupId: gid, id: { not: mid }, phone } })
     if (dup) return c.json({ error: `${dup.name} is already in this group with that number.` }, 409)
   }
   // Until someone joins, their UPI IDs, phone and email belong to whoever added them. Anyone else changing them could send
-  // everyone's "Pay Riya" to their own UPI ID, or move Riya's invite (and spot: a verified phone claims it) to one they control.
+  // everyone's "Pay Riya" to their own UPI ID, or move Riya's invite (and spot) to one they control.
   if (m && !m.userId && m.addedById && m.addedById !== uid && (data.upi !== m.upi || data.upi2 !== m.upi2 || data.email !== m.email || data.phone !== m.phone)) {
     const adder = await db.member.findFirst({ where: { groupId: gid, userId: m.addedById }, select: { name: true } })
     if (adder) return c.json({ error: `Only ${adder.name}, who added ${m.name}, can change their UPI ID, phone or email.`, code: 'not-yours' }, 403)
@@ -741,7 +739,8 @@ api.get('/groups/:gid/files/:name', async c => {
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
   const f = await getFile(BUCKET.private, `${gid}/${name}`)
   if (!f) return c.json(notFound, 404)
-  return c.body(new Uint8Array(f.body), 200, { 'content-type': f.type, 'cache-control': 'private, max-age=86400' })
+  // no-store: a browser keeps a cached copy by URL alone, so after sign-out anyone on the device could still open it.
+  return c.body(new Uint8Array(f.body), 200, { 'content-type': f.type, 'cache-control': 'private, no-store' })
 })
 
 // ---------- reading expenses: a sentence, a receipt photo, a payment screenshot ----------
@@ -777,6 +776,22 @@ api.post('/ai/read', bodyLimit({ maxSize: 7 << 20, onError: c => c.json({ error:
   }
 })
 
+// ---------- taking a waiting spot ----------
+type Tx = Prisma.TransactionClient
+/** A spot added with a number fills in the profile phone of whoever takes it, if they haven't one. */
+const adoptPhone = (tx: Tx, userId: string, phone: string | null) =>
+  phone ? tx.user.updateMany({ where: { id: userId, OR: [{ phone: null }, { phone: '' }] }, data: { phone } }) : null
+
+const CLAIM_TTL = 7 * 864e5
+const liveClaim = (m: { claimById: string | null; claimAt: Date | null }) => !!m.claimById && !!m.claimAt && Date.now() - m.claimAt.getTime() < CLAIM_TTL
+type Spotted = { userId: string | null; name: string; addedById: string | null }
+/** Who can say "yes, that's them" for a waiting spot: whoever added it, else the group's creator, while still in the group. */
+const confirmerOf = (members: Spotted[], m: Spotted, createdById: string | null) => {
+  const joined = members.filter(x => x.userId)
+  return joined.find(x => x.userId === m.addedById) ?? joined.find(x => x.userId === createdById) ?? null
+}
+const first = (name: string) => name.trim().split(/\s+/)[0] || name
+
 // ---------- personal claim links: whoever holds the token takes that guest spot ----------
 
 api.get('/claim/:token', async c => {
@@ -792,7 +807,10 @@ api.post('/claim/:token', async c => {
   if (await membership(m.groupId, uid)) return c.json({ id: m.groupId }) // already in via another spot
   const count = await db.$transaction(async tx => {
     const { count } = await tx.member.updateMany({ where: { id: m.id, userId: null }, data: { userId: uid, inviteToken: null, name: c.get('userName') } })
-    if (count) await audit(tx, m.groupId, { kind: 'member.joined', memberId: m.id, byId: uid, byName: c.get('userName'), after: { name: m.name, email: m.email, how: 'invite link' } })
+    if (count) {
+      await audit(tx, m.groupId, { kind: 'member.joined', memberId: m.id, byId: uid, byName: c.get('userName'), after: { name: m.name, email: m.email, how: 'invite link' } })
+      await adoptPhone(tx, uid, m.phone)
+    }
     return count
   })
   if (!count) return c.json({ error: 'Someone already claimed this invite' }, 409)
@@ -802,10 +820,16 @@ api.post('/claim/:token', async c => {
 // ---------- group invite links: anyone with the link joins as themselves ----------
 // A spot someone was invited to by email is only theirs: claimed by its personal link, or here when the email matches.
 api.get('/invites/:code', async c => {
-  const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, include: { members: { select: { userId: true, name: true, email: true, phone: true }, orderBy: { createdAt: 'asc' } } } })
+  const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) },
+    include: { members: { select: { id: true, userId: true, name: true, email: true, phone: true, addedById: true, claimById: true, claimAt: true }, orderBy: { createdAt: 'asc' } } } })
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
-  // Spots still waiting for someone, so the joiner can say "that's me". Contacts masked: the link may be in a big WhatsApp group.
-  const spots = g.members.filter(m => !m.userId).map(m => ({ name: m.name, ...(m.phone ? { phone: maskPhone(m.phone) } : m.email ? { email: maskEmail(m.email) } : {}) }))
+  // Spots still waiting for someone, so the joiner can say "that's me", and who would confirm it.
+  // Contacts masked: the link may be in a big WhatsApp group.
+  const spots = g.members.filter(m => !m.userId).map(m => {
+    const by = confirmerOf(g.members, m, g.createdById)
+    return { id: m.id, name: m.name, ...(m.phone ? { phone: maskPhone(m.phone) } : m.email ? { email: maskEmail(m.email) } : {}),
+      confirmBy: by && first(by.name), asked: m.claimById === c.get('userId') && liveClaim(m) }
+  })
   return c.json({ id: g.id, name: g.name, kind: g.kind, theme: g.theme, people: g.members.length, joined: g.members.some(m => m.userId === c.get('userId')), spots })
 })
 
@@ -814,14 +838,17 @@ api.post('/invites/:code/join', async c => {
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
   const uid = c.get('userId')
   if (g.members.some(m => m.userId === uid)) return c.json({ id: g.id })
-  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, emailVerified: true, name: true, verifiedPhone: true } })
-  // Their spot by verified email, else by the number they proved on WhatsApp.
-  const spot = (me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined)
-    ?? (me.verifiedPhone ? g.members.find(m => !m.userId && m.phone === me.verifiedPhone) : undefined)
+  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, emailVerified: true, name: true } })
+  // Their spot by verified email. (A spot added by phone is claimed by its personal link, or confirmed by whoever added it.)
+  const spot = me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined
   await db.$transaction(async tx => {
+    await tx.member.updateMany({ where: { groupId: g.id, claimById: uid }, data: { claimById: null, claimAt: null } }) // joining drops any "that's me" request here
     if (spot) {
       const { count } = await tx.member.updateMany({ where: { id: spot.id, userId: null }, data: { userId: uid, inviteToken: null, name: me.name } })
-      if (count) return audit(tx, g.id, { kind: 'member.joined', memberId: spot.id, byId: uid, byName: me.name, after: { name: spot.name, email: spot.email, how: 'group link' } })
+      if (count) {
+        await adoptPhone(tx, uid, spot.phone)
+        return audit(tx, g.id, { kind: 'member.joined', memberId: spot.id, byId: uid, byName: me.name, after: { name: spot.name, email: spot.email, how: 'group link' } })
+      }
     }
     const id = crypto.randomUUID()
     await tx.member.create({ data: { id, groupId: g.id, name: me.name, email: me.email.toLowerCase(), userId: uid } })
@@ -830,18 +857,87 @@ api.post('/invites/:code/join', async c => {
   return c.json({ id: g.id })
 })
 
+// ---------- "that's me": a waiting spot, confirmed by whoever added it ----------
+const asks = limiter(3600_000, 10)
+
+api.post('/invites/:code/spots/:mid/ask', async c => {
+  const uid = c.get('userId')
+  const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, include: { members: true } })
+  if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
+  if (g.members.some(m => m.userId === uid)) return c.json({ error: 'You’re already in this group.' }, 409)
+  const m = g.members.find(x => x.id === c.req.param('mid') && !x.userId)
+  if (!m) return c.json({ error: 'Someone already took that spot.' }, 404)
+  const by = confirmerOf(g.members, m, g.createdById)
+  if (!by) return c.json({ error: 'Nobody here can confirm that spot now. Join as yourself.' }, 409)
+  if (liveClaim(m) && m.claimById !== uid) return c.json({ error: `Someone else has asked for ${m.name}’s spot. Ask ${first(by.name)} about it.` }, 409)
+  if (asks.full(uid)) return c.json({ error: 'Too many requests. Wait an hour, then try again.' }, 429)
+  asks.hit(uid)
+  await db.$transaction(async tx => {
+    await tx.member.updateMany({ where: { groupId: g.id, claimById: uid, id: { not: m.id } }, data: { claimById: null, claimAt: null } }) // one spot at a time
+    await tx.member.update({ where: { id: m.id }, data: { claimById: uid, claimAt: new Date() } })
+    await tx.notification.create({ data: { userId: by.userId!, kind: 'claim.asked', groupId: g.id, byId: uid, data: { by: c.get('userName'), spot: m.name } } })
+  })
+  return c.json({ ok: true, confirmBy: first(by.name) })
+})
+
+/** Requests waiting on me in this group: who's asking (their account's name and email) and for which spot. */
+api.get('/groups/:gid/claims', async c => {
+  const gid = Id.parse(c.req.param('gid')), uid = c.get('userId')
+  if (!(await membership(gid, uid))) return c.json(notFound, 404)
+  const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { createdById: true, members: true } })
+  const mine = g.members.filter(m => !m.userId && liveClaim(m) && confirmerOf(g.members, m, g.createdById)?.userId === uid)
+  const who = await db.user.findMany({ where: { id: { in: mine.map(m => m.claimById!) } }, select: { id: true, name: true, email: true } })
+  return c.json({ claims: mine.flatMap(m => {
+    const u = who.find(x => x.id === m.claimById)
+    // Full contact only to whoever added them, as everywhere else.
+    const own = m.addedById === uid
+    return u ? [{ id: m.id, name: m.name, phone: m.phone && (own ? m.phone : maskPhone(m.phone)), email: m.email && (own ? m.email : maskEmail(m.email)),
+      by: { name: u.name, email: u.email }, at: m.claimAt!.toISOString() }] : []
+  }) })
+})
+
+api.post('/groups/:gid/claims/:mid', async c => {
+  const gid = Id.parse(c.req.param('gid')), mid = Id.parse(c.req.param('mid')), uid = c.get('userId')
+  const { yes } = z.object({ yes: z.boolean() }).parse(await c.req.json())
+  if (!(await membership(gid, uid))) return c.json(notFound, 404)
+  const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { createdById: true, members: true } })
+  const m = g.members.find(x => x.id === mid && !x.userId)
+  if (!m || !liveClaim(m)) return c.json({ error: 'That request is no longer waiting.' }, 404)
+  const me = confirmerOf(g.members, m, g.createdById)
+  if (me?.userId !== uid) return c.json({ error: 'Only whoever added them can confirm this.' }, 403)
+  const claimant = await db.user.findUnique({ where: { id: m.claimById! }, select: { id: true, name: true } })
+  const clear = { claimById: null, claimAt: null }
+  if (!yes || !claimant || g.members.some(x => x.userId === claimant.id)) {
+    await db.member.updateMany({ where: { id: m.id, claimById: m.claimById }, data: clear })
+    if (claimant && !yes) await db.notification.create({ data: { userId: claimant.id, kind: 'claim.declined', groupId: gid, byId: uid, data: { by: me.name, spot: m.name } } })
+    // ponytail: someone who joined as themselves meanwhile isn't merged into the spot. Merge if people ask for it.
+    if (yes) return c.json({ error: claimant ? `${claimant.name} already joined as themselves.` : 'That account is gone.' }, 409)
+    return c.json({ ok: true })
+  }
+  const done = await db.$transaction(async tx => {
+    const { count } = await tx.member.updateMany({ where: { id: m.id, userId: null, claimById: claimant.id }, data: { userId: claimant.id, name: claimant.name, inviteToken: null, ...clear } })
+    if (!count) return false
+    await audit(tx, gid, { kind: 'member.joined', memberId: m.id, byId: claimant.id, byName: claimant.name, after: { name: m.name, email: m.email, how: 'confirmed', confirmedBy: me.name } })
+    await adoptPhone(tx, claimant.id, m.phone)
+    await tx.notification.create({ data: { userId: claimant.id, kind: 'claim.approved', groupId: gid, byId: uid, data: { by: me.name, spot: m.name } } })
+    return true
+  })
+  if (!done) return c.json({ error: 'That request is no longer waiting.' }, 409)
+  return c.json({ ok: true })
+})
+
 // ---------- friends: a two-person group per pair, for expenses outside any group ----------
 type Me = { id: string; name: string; email: string }
 /** Who the friend is: an account (joined from the start), or an email or phone number they'll join with. */
 type Friend = { name: string; userId?: string; email?: string; phone?: string }
 const directKey = (a: string, b: string) => createHash('sha256').update([a, b].sort().join('\n')).digest('hex')
-const meFor = (uid: string) => db.user.findUniqueOrThrow({ where: { id: uid }, select: { id: true, email: true, name: true, verifiedPhone: true } })
+const meFor = (uid: string) => db.user.findUniqueOrThrow({ where: { id: uid }, select: { id: true, email: true, name: true } })
 /** The friends group with this person, made if there isn't one yet. `made` is the friend's new spot. */
 async function directWith(me: Me, f: Friend): Promise<{ id: string; made?: string }> {
   // Found by membership, not by key: older email-keyed groups, and spots that have since joined, still match.
   const them: Prisma.MemberWhereInput = f.userId ? { userId: f.userId }
     : f.email ? { OR: [{ email: { equals: f.email, mode: 'insensitive' } }, { user: { email: { equals: f.email, mode: 'insensitive' } } }] }
-    : { OR: [{ phone: f.phone }, { user: { verifiedPhone: f.phone } }] }
+    : { phone: f.phone }
   const found = await db.group.findFirst({ where: { kind: 'direct', AND: [{ members: { some: { userId: me.id } } }, { members: { some: them } }] }, select: { id: true } })
   if (found) return found
   // ponytail: the key only stops the same add racing itself. Two people adding each other at the same moment by
@@ -879,7 +975,6 @@ api.post('/friends', async c => {
   }
   if (b.phone) {
     // Never matched to an account here: that would tell anyone whether a number is on Plico, and whose it is.
-    if (b.phone === me.verifiedPhone) return c.json({ error: 'That’s your own number.' }, 400)
     const g = await directWith(me, { name: b.name, phone: b.phone })
     // Still waiting for them: their personal link, so the app can open WhatsApp straight to them.
     const spot = await db.member.findFirst({ where: { groupId: g.id, userId: null, phone: b.phone }, select: { id: true } })

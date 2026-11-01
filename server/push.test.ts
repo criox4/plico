@@ -31,6 +31,9 @@ assert.deepEqual(pushesFor({ kind: 'member.joined', byId: 'C', byName: 'Chitra',
 assert.equal(compose([{ kind: 'expense.created', data: { by: 'Bala', title: 'Scooters', share: 60000, delta: -60000 } }], 'Goa ’26', true).body, 'Bala added “Scooters” · your share ₹600')
 assert.equal(compose([{ kind: 'payment.claimed', data: { by: 'Bala', amount: 84000 } }], 'Goa ’26', true).body, 'Bala says they paid you ₹840 in Goa ’26. Did you get it?')
 assert.equal(compose([{ kind: 'payment.claimed', data: { by: 'Bala', amount: 84000 } }], null, false).body, 'Bala says they paid you. Did you get it?')
+assert.equal(compose([{ kind: 'claim.asked', data: { by: 'Rahul Sharma', spot: 'Rahul' } }], 'Goa ’26', true).body, 'Rahul Sharma says they’re Rahul. Is that them?')
+assert.equal(compose([{ kind: 'claim.approved', data: { by: 'Asha', spot: 'Rahul' } }], 'Goa ’26', true).body, 'Asha confirmed it’s you. Rahul’s spot and its balance are yours.')
+assert.equal(compose([{ kind: 'claim.declined', data: { by: 'Asha', spot: 'Rahul' } }], 'Goa ’26', true).body, 'Asha says Rahul’s spot isn’t you. You can still join as yourself.')
 assert.equal(compose([{ kind: 'payment.unverified', data: { by: 'Bala', amount: 84000 } }], 'Goa ’26', true).body, 'Did Bala’s ₹840 payment arrive? It already counts, so say if it didn’t.')
 assert.equal(compose([{ kind: 'payment.verified', data: { by: 'Bala', amount: 84000 } }], 'Goa ’26', true).body, 'Bala paid you ₹840 in Goa ’26 · checked from their UPI receipt')
 const batch = compose([

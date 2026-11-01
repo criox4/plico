@@ -192,7 +192,7 @@ export function Friends({ s }: { s: State }) {
           </ol>
         ) : <p className="muted-p">Nobody here{t ? ` matching “${q.trim()}”` : ''}.</p>
       ) : (
-        <div className="empty-state"><Plico mood="empty" size={72} watch boop="Boop Plico" /><p><strong>No friends yet.</strong> Everyone you share a group with shows up here. Add a friend to split a cab or a dinner for two, outside any group.</p></div>
+        <div className="empty-state"><Plico mood="empty" size={72} watch /><p><strong>No friends yet.</strong> Everyone you share a group with shows up here. Add a friend to split a cab or a dinner for two, outside any group.</p></div>
       )}
       {!rows.length && !adding && <button className="btn primary" onClick={() => setAdding(true)}><Icon n="plus" size={18} />Add a friend</button>}
     </Screen>

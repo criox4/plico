@@ -37,10 +37,6 @@ export function changed<T extends Record<string, unknown>>(a: T, b: T) {
 export const linkByEmail = (userId: string, email: string) =>
   linkSpots(userId, { email: { equals: email.trim(), mode: 'insensitive' } }, m => ({ name: m.name, email: m.email, how: 'email' }))
 
-/** The same for a number proven over WhatsApp (server/whatsapp.ts). Spots store +<country><number>, as verifiedPhone does. */
-export const linkByPhone = (userId: string, phone: string) =>
-  linkSpots(userId, { phone }, m => ({ name: m.name, phone: m.phone, how: 'phone' }))
-
 type Spot = { name: string; email: string | null; phone: string | null }
 async function linkSpots(userId: string, match: Prisma.MemberWhereInput, after: (m: Spot) => object) {
   const user = await db.user.findUnique({ where: { id: userId }, select: { name: true } })

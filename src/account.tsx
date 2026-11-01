@@ -1,21 +1,17 @@
 // Account: splash, welcome + sign-in flows, password reset, verification, the account hub and its pages, claim links.
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { inr, isVpa, type Kind, type Tone } from './logic'
 import { update, type State } from './store'
 import { api, isPhone, pull, refreshUser, signOut, signedIn, syncNow, uploadImage, useSync } from './sync'
 import { API, authClient, token } from './auth-client'
-import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
+import { ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
-import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, SegPill } from './ui'
+import { Avatar, EMOJI, Ornament, Plico, Screen, ThemePicker, TONES, Wordmark, calm, go, randomSeed, useTicker, useBack, useBars, SegPill } from './ui'
 import { crashReportsOn, setCrashReports } from './sentry'
 import { lingers } from './anim'
 import { disablePush, enablePush, pushState, type PushState } from './push'
-import { ClaimPreviewOut, InvitePreviewOut, NotifyOut, PhoneStartOut, PhoneStatusOut, type NotifyPrefs, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
-import type { z } from 'zod/mini'
-
-export type PhoneStatus = z.infer<typeof PhoneStatusOut>
-type PhoneStart = z.infer<typeof PhoneStartOut>
+import { ClaimPreviewOut, InvitePreviewOut, NotifyOut, type NotifyPrefs, type ClaimPreview, type InvitePreview as InvitePreviewData } from './schema'
 
 const origin = () => location.origin + location.pathname.replace(/index\.html$/, '')
 const msg = (e: unknown, fallback = 'That didn’t work. Your balances are safe. Try again.') =>
@@ -66,6 +62,7 @@ export function InvitePreview({ s, kind, code }: { s: State; kind: 'join' | 'cla
 
 // ---------- splash ----------
 export function Splash({ out }: { out?: boolean }) {
+  useBars(true)
   return (
     <div className={`splash${out ? ' out' : ''}`} role="status" aria-label="Plico is starting">
       <Plico mood="settled" size={112} />
@@ -219,6 +216,7 @@ export function Onboarding({ s }: { s: State }) {
     catch (e) { setErr(navigator.onLine ? msg(e) : 'Almost there: this last step needs a connection.') } finally { setBusy(false) }
   }
   const steps = ['You', 'Your face', 'Getting paid']
+  useBack(step > 0 && (() => setStep(step - 1)))
   return (
     <Screen t={s.theme} title="Set up your profile">
       <form className="form onboard" onSubmit={e => { e.preventDefault(); if (step < 2) setStep(step + 1); else void finish() }}>
@@ -226,7 +224,7 @@ export function Onboarding({ s }: { s: State }) {
           {steps.map((x, i) => <li key={x} className={i < step ? 'done' : i === step ? 'on' : ''} aria-current={i === step ? 'step' : undefined}><span>{x}</span></li>)}
         </ol>
         {step === 0 && <>
-          <div className="hello"><Plico mood="idle" size={56} watch boop="Boop Plico" /><p><strong>Hi{first ? `, ${first}` : ''}! Let’s get you set up.</strong>Three quick things, so your friends know it’s you and can pay you back.</p></div>
+          <div className="hello"><Plico mood="idle" size={56} watch /><p><strong>Hi{first ? `, ${first}` : ''}! Let’s get you set up.</strong>Three quick things, so your friends know it’s you and can pay you back.</p></div>
           <label className="field"><span>What should friends call you?</span>
             <input value={s.me.name} maxLength={40} autoComplete="name" autoFocus required onChange={e => update(d => { d.me.name = e.target.value })} /></label>
           <label className="field"><span>Phone <em>optional</em></span>
@@ -235,13 +233,13 @@ export function Onboarding({ s }: { s: State }) {
           <button className="btn primary" disabled={!s.me.name.trim() || (!!s.me.phone && !isPhone(s.me.phone))}>Continue</button>
         </>}
         {step === 1 && <>
-          <div className="hello"><Plico mood="owed" size={56} watch boop="Boop Plico" /><p><strong>Pick your face.</strong>A photo, an emoji or a Plico. It’s how you show up in groups and on reminders.</p></div>
+          <div className="hello"><Plico mood="owed" size={56} watch /><p><strong>Pick your face.</strong>A photo, an emoji or a Plico. It’s how you show up in groups and on reminders.</p></div>
           <AvatarPicker s={s} />
           <button className="btn primary">Continue</button>
           <button type="button" className="link center-link" onClick={() => setStep(0)}>Back</button>
         </>}
         {step === 2 && <>
-          <div className="hello"><Plico mood="settled" size={56} watch boop="Boop Plico" /><p><strong>Where do friends pay you?</strong>Your UPI ID goes on your pay links and QR codes. Plico shows your name above it, so nobody pays the wrong person.</p></div>
+          <div className="hello"><Plico mood="settled" size={56} watch /><p><strong>Where do friends pay you?</strong>Your UPI ID goes on your pay links and QR codes. Plico shows your name above it, so nobody pays the wrong person.</p></div>
           <label className="field"><span>UPI ID</span>
             <input value={s.me.upi} placeholder="name@okhdfcbank" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus
               aria-invalid={upiBad} onChange={e => update(d => { d.me.upi = e.target.value.trim() })} />
@@ -378,6 +376,80 @@ export function Showcase() {
   )
 }
 
+// ---------- welcome: four swipeable slides on Plico Purple, the last one is the way in ----------
+const INTRO = 'plico-intro-seen'
+const sawIntro = () => { try { return localStorage.getItem(INTRO) === '1' } catch { return false } }
+const FRIENDS = [['Rohan', '#C9C1FA'], ['Isha', '#EA6673'], ['Karan', '#22B983'], ['Meera', '#F4A340']] as const
+
+function Intro({ notice, children }: { notice: string; children: ReactNode }) {
+  const track = useRef<HTMLDivElement>(null)
+  const last = 3
+  // Seen it before, or arriving from an invite: open on the way in. The earlier slides are still a swipe away.
+  const [at, setAt] = useState(() => (notice || sawIntro() ? last : 0))
+  const show = (i: number, smooth = true) => {
+    const t = track.current
+    if (t) t.scrollTo({ left: i * t.clientWidth, behavior: smooth && !calm() ? 'smooth' : 'auto' })
+  }
+  useEffect(() => { if (at) show(at, false) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (at === last) try { localStorage.setItem(INTRO, '1') } catch { /* private mode */ } }, [at])
+  useBack(at > 0 && (() => show(at - 1)))
+  const onScroll = () => {
+    const t = track.current
+    if (t) setAt(Math.round(t.scrollLeft / t.clientWidth))
+  }
+  const pay = theme('classic')
+  useBars(true)
+  const slide = (i: number, title: ReactNode, line: ReactNode, art: ReactNode, extra?: ReactNode) => (
+    <section className={`intro-slide${at === i ? ' on' : ''}`} role="group" aria-roledescription="slide" aria-label={`${i + 1} of 4`} inert={at !== i}>
+      <div className="intro-art" aria-hidden>{art}</div>
+      <div className="intro-copy"><h1>{title}</h1><p>{line}</p></div>
+      {extra}
+    </section>
+  )
+  return (
+    <div className="intro" data-theme="classic" style={{ ...themeVars('classic'), '--brand': '#FFFFFF' } as CSSProperties} aria-roledescription="carousel" aria-label="Welcome to Plico">
+      <header className="intro-head"><Wordmark /></header>
+      <div className="intro-track" ref={track} onScroll={onScroll}>
+        {slide(0, 'Hisaab sorted.', 'Hi, I’m Plico. I keep track of the awkward money stuff, so trips, rent and dinners stay fun.',
+          <div className="ia ia-meet">
+            <span className="ia-disc" />
+            {FRIENDS.map(([n, c], i) => <span key={n} className={`ia-friend f${i}`} style={{ '--brand': c } as CSSProperties}><Avatar name={n} size={58} /></span>)}
+            <Plico mood="idle" size={132} watch boop="Boop Plico" />
+          </div>)}
+        {slide(1, 'Add it once. Everyone’s share, done.', 'Split equally, by amount, by shares or item by item. Type it like a text, or scan the bill.',
+          <div className="ia ia-split">
+            <p className="ia-said">Dinner at Toit 3600, split with everyone</p>
+            <div className="ia-card">
+              <span className="ia-sample">Sample</span>
+              <div className="ia-bill-head"><span className="ia-tile"><Icon n="food" /></span><strong>Dinner at Toit</strong><b>₹3,600</b></div>
+              <p className="ia-how">Split equally · 4 people</p>
+              <ul>{FRIENDS.map(([n, c]) => <li key={n}><span style={{ '--brand': c } as CSSProperties}><Avatar name={n} size={30} /></span>{n}<b>₹900</b></li>)}</ul>
+            </div>
+          </div>)}
+        {slide(2, 'Settle over UPI, to a name you can see.', 'Friends pay from a link, no app needed. The money goes straight to you; Plico never touches it.',
+          <div className="ia ia-pay">
+            <div className="ia-card">
+              <span className="ia-sample">Sample</span>
+              <p className="ia-paying">You’re paying</p>
+              <strong className="ia-payee">Meera Iyer</strong>
+              <span className="vpa">meera@okaxis</span>
+              <p className="ia-amt">₹840</p>
+              <span className="btn primary ia-paybtn">Pay ₹840 via UPI</span>
+              <span className="ia-stamp">{pay.celebrate}</span>
+            </div>
+          </div>)}
+        {slide(3, 'Money together, sorted.', 'Start a group for the trip, the flat or Friday football, and invite friends by email or WhatsApp.', <Showcase />,
+          <div className="intro-actions">{notice && <p className="notice" role="status">{notice}</p>}{children}</div>)}
+      </div>
+      <footer className={`intro-foot${at === last ? ' gone' : ''}`} inert={at === last}>
+        <button className="intro-skip" onClick={() => show(last)}>Skip</button>
+        <ol className="intro-dots">{[0, 1, 2, 3].map(i => <li key={i}><button className={i === at ? 'on' : ''} aria-label={`Slide ${i + 1} of 4`} aria-current={i === at ? 'step' : undefined} onClick={() => show(i)} /></li>)}</ol>
+        <button className="intro-next" aria-label="Next" onClick={() => show(Math.min(at + 1, last))}><Icon n="arrow" /></button>
+      </footer>
+    </div>
+  )
+}
+
 // ---------- welcome + auth ----------
 type Step = 'welcome' | 'signup' | 'signin' | 'forgot' | 'sent'
 
@@ -436,38 +508,26 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
   </>
   const hasSocial = showApple || sync.google
   const to = (next: Step) => { setStep(next); setErr('') }
+  const backTo: Step = returning && step === 'signin' ? 'signin' : 'welcome'
+  useBack(step !== backTo && (() => to(backTo)))
 
   useEffect(() => ensureFonts(['classic']), [])
   if (step === 'welcome')
     return (
-      <div className="welcome" data-theme="classic" style={themeVars('classic')}>
-        <div className="welcome-top">
-          <Wordmark />
-          <h1>Hisaab sorted.</h1>
-          <div className="hello"><Plico mood="idle" size={52} watch boop="Boop Plico" /><p><strong>Hi. I’m Plico.</strong>I keep track of the awkward money stuff, so trips, rent and dinners stay fun.</p></div>
-          {(notice || invited) && <p className="notice" role="status">{notice || 'You’ve been invited to a group. Create an account or sign in to join it.'}</p>}
-          <Showcase />
-          <ul className="points">
-            <li><Icon n="send" />Friends pay from a link. No app needed.</li>
-            <li><Icon n="check" />Works offline. Syncs when you’re back.</li>
-            <li><Icon n="qr" />Pay by UPI or QR, to a name you can see.</li>
-          </ul>
-        </div>
-        <div className="welcome-actions">
-          {social}
-          <button className="btn primary" onClick={() => to('signup')}>Create an account</button>
-          <button className="btn secondary" onClick={() => to('signin')}>I already have an account</button>
-          {err && <p className="error" role="alert">{err}</p>}
-          <p className="legal-line center"><a href={legalUrl('privacy')} target="_blank" rel="noopener">Privacy</a> · <a href={legalUrl('terms')} target="_blank" rel="noopener">Terms</a></p>
-        </div>
-      </div>
+      <Intro notice={notice || (invited ? 'You’ve been invited to a group. Create an account or sign in to join it.' : '')}>
+        {social}
+        <button className="btn intro-create" onClick={() => to('signup')}>Create an account</button>
+        <button className="btn intro-signin" onClick={() => to('signin')}>I already have an account</button>
+        {err && <p className="error" role="alert">{err}</p>}
+        <p className="legal-line center"><a href={legalUrl('privacy')} target="_blank" rel="noopener">Privacy</a> · <a href={legalUrl('terms')} target="_blank" rel="noopener">Terms</a></p>
+      </Intro>
     )
 
   const title = { signup: 'Create your account', signin: returning ? 'Welcome back' : 'Sign in', forgot: 'Reset your password', sent: 'Check your email' }[step]
   return (
-    <Screen t="classic" back={() => to(returning && step === 'signin' ? 'signin' : 'welcome')} title={title}>
+    <Screen t="classic" back={() => to(backTo)} title={title}>
       <div className="auth">
-        {step !== 'sent' && <div className="auth-plico"><Plico mood="idle" size={64} watch boop="Boop Plico" look={field === 'email' ? caret : undefined} cover={field === 'password'} /></div>}
+        {step !== 'sent' && <div className="auth-plico"><Plico mood="idle" size={64} watch look={field === 'email' ? caret : undefined} cover={field === 'password'} /></div>}
         {notice && <p className="notice" role="status">{notice}</p>}
         {step === 'sent' ? <>
           <p className="muted-p">If <strong>{email}</strong> has a Plico account, a link to choose a new password is on its way. It works for one hour.</p>
@@ -605,7 +665,7 @@ export function Claim({ s, token }: { s: State; token: string }) {
     setBusy(true)
     try {
       const r = await api<{ id: string }>(`/api/claim/${token}`, { method: 'POST' })
-      await pull()
+      await Promise.all([pull(), refreshUser()])
       location.replace('#/g/' + r.id)
     } catch (e) { setErr(msg(e)); setBusy(false) }
   }
@@ -664,7 +724,6 @@ export function AccountHub({ s }: { s: State }) {
       <SyncLine />
       <button className="btn secondary" onClick={out}>Sign out</button>
       <ol className="ledger danger-zone"><Row icon="trash" title="Delete account" to="/me/delete" danger /></ol>
-      {import.meta.env.DEV && <a className="link center-link" href="#/themes">See all {THEMES.length} themes</a>}
     </Screen>
   )
 }
@@ -754,19 +813,15 @@ export function PrivacyPage({ s }: { s: State }) {
 }
 
 export function ProfilePage({ s }: { s: State }) {
-  const [phone, setPhone] = useState<PhoneStatus | null>(null)
-  useEffect(() => { void api('/api/me/phone').then(r => setPhone(PhoneStatusOut.parse(r)), () => {}) }, [])
-  const verified = !!(phone?.available && phone.phone)
   return (
     <Page s={s} title="Profile">
       <AvatarPicker s={s} />
       <label className="field"><span>Name</span><input value={s.me.name} maxLength={40} autoComplete="name" onChange={e => update(d => { d.me.name = e.target.value })} /></label>
-      {!verified && <label className="field"><span>Phone</span>
+      <label className="field"><span>Phone</span>
         <input type="tel" value={s.me.phone ?? ''} placeholder="+91 98765 43210" autoComplete="tel" aria-invalid={!!s.me.phone && !isPhone(s.me.phone)}
           onChange={e => update(d => { d.me.phone = e.target.value })} />
         <small>Shown to people in your groups so they can reach you.</small>
-      </label>}
-      {phone?.available && <PhoneVerify status={phone} set={setPhone} />}
+      </label>
       <label className="field"><span>UPI ID</span>
         <input value={s.me.upi} placeholder="name@okhdfcbank" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
           aria-invalid={!!s.me.upi && !isVpa(s.me.upi)} onChange={e => update(d => { d.me.upi = e.target.value.trim() })} />
@@ -778,66 +833,6 @@ export function ProfilePage({ s }: { s: State }) {
         <small>Optional, from another bank or app. Friends can switch to it if the first one isn’t working.</small>
       </label>
     </Page>
-  )
-}
-
-const prettyPhone = (p: string) => p.replace(/^\+91(\d{5})(\d{5})$/, '+91 $1 $2')
-
-/** Prove a number by sending Plico a WhatsApp message from it: the app opens WhatsApp with the code typed in,
- *  then checks every 3 seconds (only while the screen is open and in front) until the Yes tap lands or the code runs out. */
-export function PhoneVerify({ status, set }: { status: PhoneStatus; set: (p: PhoneStatus) => void }) {
-  const [wait, setWait] = useState<PhoneStart | null>(null)
-  const [done, setDone] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  useEffect(() => {
-    if (!wait) return
-    let id = 0
-    const tick = async () => {
-      if (Date.now() > Date.parse(wait.expiresAt)) { setWait(null); setErr('That code expired. Start again.'); return }
-      const r = await api('/api/me/phone').then(x => PhoneStatusOut.parse(x), () => null)
-      if (!r || r.pending) return
-      setWait(null); set(r)
-      if (r.phone) { setDone(true); update(d => { d.me.phone = r.phone! }) } // the proven number is the one friends see
-      else setErr('Nothing changed. Start again if you meant to.') // they tapped No
-    }
-    const run = () => { clearInterval(id); if (document.visibilityState === 'visible') { void tick(); id = window.setInterval(tick, 3000) } }
-    run()
-    document.addEventListener('visibilitychange', run)
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', run) }
-  }, [wait, set])
-  const start = async () => {
-    setBusy(true); setErr(''); setDone(false)
-    try {
-      const w = PhoneStartOut.parse(await api('/api/me/phone/start', { method: 'POST' }))
-      setWait(w)
-      window.open(w.link, '_blank') // a browser may block this after the await; the Open WhatsApp link below is the fallback
-    } catch (e) { setErr(msg(e)) } finally { setBusy(false) }
-  }
-  const remove = async () => {
-    if (!confirm('Remove your verified number? People won’t be able to add you by it.')) return
-    setErr(''); setDone(false)
-    try { await api('/api/me/phone', { method: 'DELETE' }); set({ ...status, phone: null, verifiedAt: null }) } catch (e) { setErr(msg(e)) }
-  }
-  const why = <small>So people can add you by your number, and spots added under it become yours.</small>
-  return (
-    <div className="field">
-      <span>Phone</span>
-      {status.phone ? <>
-        <p><strong>{prettyPhone(status.phone)}</strong> <span className="chip-state ok">Verified on WhatsApp</span></p>
-        {done && <p className="notice" role="status">Done. Your number is linked to Plico.</p>}
-        {why}
-        <button type="button" className="link" onClick={() => void remove()}>Remove</button>
-      </> : wait ? <>
-        <p className="notice" role="status">Send the message in WhatsApp, then tap Yes.</p>
-        <a className="btn secondary" href={wait.link} target="_blank" rel="noopener"><Icon n="send" />Open WhatsApp</a>
-        <button type="button" className="link center-link" onClick={() => setWait(null)}>Cancel</button>
-      </> : <>
-        <button type="button" className="btn secondary" disabled={busy} onClick={() => void start()}><Icon n="send" />{busy ? 'Starting…' : 'Verify with WhatsApp'}</button>
-        {why}
-      </>}
-      {err && <p className="error" role="alert">{err}</p>}
-    </div>
   )
 }
 

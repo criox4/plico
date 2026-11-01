@@ -2,18 +2,18 @@ import { resumePush } from './push'
 import { AddScreen, WithPicker } from './add'
 import { commitDraft, type Target } from './draft'
 import { Suspense, lazy, useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
-import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
+import { ME, addMonth, allocate, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { getState, update, useStore, type State } from './store'
 import { API } from './auth-client'
-import { FriendCardOut, PhoneStatusOut } from './schema'
+import { FriendCardOut } from './schema'
 import { addProof, api, photoData, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, calm, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
+import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
-  NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner, PhoneVerify, type PhoneStatus } from './account'
+  NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
@@ -23,6 +23,8 @@ import { FriendPage, FriendSettle, Friends, PeoplePicker, WhatsAppInvite, emailO
 const back = () => (history.length > 1 ? history.back() : go('/'))
 const edit = (gid: Id, fn: (g: Group) => void) => update(d => { const g = d.groups.find(x => x.id === gid); if (g) fn(g) })
 const digits = (v: string) => v.replace(/[^\d.]/g, '')
+/** "100000.5" as it's typed → "1,00,000.5": lakh grouping on the rupees, the decimals left as typed. */
+const grouped = (v: string) => { const [r, p] = v.split('.'); return (r ? Number(r).toLocaleString('en-IN') : '') + (p === undefined ? '' : '.' + p) }
 const num = (v?: string) => parseFloat((v ?? '').replace(/,/g, '')) || 0
 
 // Every theme side by side, for design review. `npm run dev` only: left out of production builds.
@@ -223,6 +225,14 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
 
   useEffect(() => { if (eid && !old) location.replace('#/g/' + g.id) }, [eid, old, g.id])
   const [open, setOpen] = useState<'' | 'payer' | 'split'>('')
+  // An opened editor scrolls up until its last row clears the save bar (keeping its top below the header).
+  useEffect(() => {
+    const panel = open && document.querySelector('.add-panel')?.getBoundingClientRect()
+    if (!panel) return
+    const bar = document.querySelector('.add-foot')?.getBoundingClientRect().height ?? 0
+    const over = Math.min(panel.bottom - (innerHeight - bar - 12), panel.top - 72)
+    if (over > 0) scrollBy({ top: over, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }, [open])
   const [saving, setSaving] = useState(false)
   // A different group or set of friends means different people: start the who-paid and split over.
   useEffect(() => {
@@ -243,7 +253,8 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
       else if (p?.text) { setQuick(p.text.slice(0, 200)); void typeIt(p.text.slice(0, 200)) }
     })
   }, [shared]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (done) return <Converge s={s} g={g} e={done} />
+  const leave = () => (gid ? back() : location.replace('#/g/' + g.id))
+  if (done) return <Converge s={s} g={g} e={done} onDone={leave} />
   if (eid && !old) return null
 
   const del = () => {
@@ -336,7 +347,15 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
     setItems(null); setCapErr('')
   }
 
-  const switchMode = (m: SplitMode) => { setMode(m); setInp(flags(g, m === 'equal' ? '1' : '')) }
+  // A new split method starts from the split on screen (₹250 each → 25% each), and whoever was left out stays out.
+  const switchMode = (m: SplitMode) => {
+    const inIt = (id: Id) => !total || !!owed[id]
+    setMode(m)
+    if (m === 'equal' || m === 'shares') return setInp(Object.fromEntries(g.members.map(x => [x.id, inIt(x.id) ? (m === 'equal' ? '1' : '') : '0'])))
+    if (!total || !Object.keys(owed).length) return setInp(flags(g, ''))
+    const parts = m === 'exact' ? owed : allocate(10000, owed) // percent in hundredths, always summing to 100
+    setInp(Object.fromEntries(g.members.map(x => [x.id, parts[x.id] ? String(parts[x.id] / 100) : ''])))
+  }
 
   const total = toPaise(amt)
   const input: Record<Id, number> = Object.fromEntries(g.members.map(m => {
@@ -374,10 +393,8 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
       else x.expenses.push(e)
       runRecurring(x)
     })
-    const leave = () => (gid ? back() : location.replace('#/g/' + g.id))
-    if (old || calm()) return leave()
-    setDone(e) // a beat to see the split land, then on to the group
-    setTimeout(leave, 1500)
+    if (old) return leave()
+    setDone(e) // the split lands; it closes itself after 5s, or on Done
   }
 
   const n = g.members.filter(m => input[m.id]).length
@@ -426,7 +443,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
         <label className="amount-field">
           <span className="sr-only">Amount in rupees</span>
           <span className="amount-cur" aria-hidden>₹</span>
-          <input className="amount-in" inputMode="decimal" placeholder="0" value={amt} autoFocus={!old && !!target} onChange={e => setAmt(digits(e.target.value))} />
+          <input className="amount-in" inputMode="decimal" placeholder="0" value={grouped(amt)} autoFocus={!old && !!target} onChange={e => setAmt(digits(e.target.value))} />
         </label>
         {!old && sync.ai && s.user?.ai && (
           <label className="scan-bill" title="Scan a bill or UPI screenshot">
@@ -456,9 +473,9 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
                 {g.members.map(m => (
                   <li className="row-in" key={m.id}>
                     <span className="grow">{who(g, m.id)}</span>
+                    <span className="unit pre">₹</span>
                     <input className="num" inputMode="decimal" placeholder="0" aria-label={`${who(g, m.id)} paid, rupees`}
-                      value={paidIn[m.id] ?? ''} onChange={e => setPaidIn({ ...paidIn, [m.id]: digits(e.target.value) })} />
-                    <span className="unit">₹</span>
+                      value={grouped(paidIn[m.id] ?? '')} onChange={e => setPaidIn({ ...paidIn, [m.id]: digits(e.target.value) })} />
                   </li>
                 ))}
               </ul>
@@ -480,11 +497,12 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
                     </label>
                   ) : <>
                     <span className="grow">{who(g, m.id)}</span>
+                    {mode === 'exact' && <span className="unit pre">₹</span>}
                     <input className="num" inputMode="decimal" placeholder={mode === 'shares' ? '1' : '0'} aria-label={`${who(g, m.id)}, ${MODES.find(x => x.id === mode)!.label.toLowerCase()}`}
-                      value={inp[m.id] ?? ''} onChange={e => setInp({ ...inp, [m.id]: digits(e.target.value) })} />
-                    <span className="unit">{MODES.find(x => x.id === mode)!.unit}</span>
+                      value={mode === 'exact' ? grouped(inp[m.id] ?? '') : inp[m.id] ?? ''} onChange={e => setInp({ ...inp, [m.id]: digits(e.target.value) })} />
+                    {mode !== 'exact' && <span className="unit">{MODES.find(x => x.id === mode)!.unit}</span>}
                   </>}
-                  <span className="share">{owed[m.id] ? inr(owed[m.id]) : '–'}</span>
+                  {mode !== 'exact' && <span className="share">{owed[m.id] ? inr(owed[m.id]) : '–'}</span>}
                 </li>
               ))}
             </ul>
@@ -503,8 +521,8 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
           {real && <ReceiptField gid={real.id} name={receipt} onChange={setReceipt} />}
         </details>
       </>}
-      {total > 0 && (error || (target && block)) && <p className="error" role="alert">{error || block}</p>}
       <div className="add-foot">
+        {total > 0 && (error || (target && block)) && <p className="error foot-error" role="alert">{error || block}</p>}
         <button className="btn primary" disabled={!total || !!error || !!block || saving}>{saving ? 'Adding…' : saveLabel}</button>
       </div>
       {old && <button type="button" className="link center-link" onClick={() => go(`/g/${g.id}/e/${old.id}/history`)}>See history: who changed what</button>}
@@ -825,37 +843,32 @@ function Invite({ g, lead }: { g: Group; lead?: boolean }) {
 }
 
 function JoinGroup({ s, code }: { s: State; code: string }) {
-  type Spot = { name: string; phone?: string; email?: string }
+  type Spot = { id: string; name: string; phone?: string; email?: string; confirmBy: string | null; asked: boolean }
   type Inv = { id: string; name: string; kind: Kind; theme: ThemeId; joined: boolean; people: number; spots?: Spot[] }
   const [inv, setInv] = useState<Inv | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [mine, setMine] = useState<Spot | null>(null) // "that's me": proving it before the spot is theirs
-  const [phone, setPhone] = useState<PhoneStatus | null>(null)
-  const load = () => api<Inv>(`/api/invites/${code}`).then(setInv, e => setErr(e.message))
+  const [pick, setPick] = useState<string | null>(null) // "that's me": the spot they say is theirs, until it's confirmed
+  const load = () => api<Inv>(`/api/invites/${code}`).then(r => { setInv(r); const a = r.spots?.find(x => x.asked); if (a) setPick(a.id) }, e => setErr(e.message))
   useEffect(() => { void load() }, [code]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (mine?.phone && !phone) void api('/api/me/phone').then(r => setPhone(PhoneStatusOut.parse(r)), () => {}) }, [mine, phone])
-  // Their number verified: the spot under it is theirs now (linkByPhone), and the group is one of theirs.
-  const proved = async (p: PhoneStatus) => {
-    setPhone(p)
-    if (!p.phone) return
-    await pull()
-    const r = await api<Inv>(`/api/invites/${code}`).catch(() => null)
-    if (r?.joined) location.replace('#/g/' + r.id)
-    else setErr(`That number isn’t the one ${mine!.name} was added with (${mine!.phone}). Ask whoever added you to fix it, or join as yourself.`)
+  const mine = inv?.spots?.find(x => x.id === pick) ?? null
+  const ask = async (x: Spot) => {
+    setBusy(true); setErr('')
+    try { await api(`/api/invites/${code}/spots/${x.id}/ask`, { method: 'POST', body: '{}' }); await load() }
+    catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
   const join = async () => {
     setBusy(true)
     try {
       const r = await api<{ id: string }>(`/api/invites/${code}/join`, { method: 'POST', body: '{}' })
-      await pull()
+      await Promise.all([pull(), refreshUser()])
       location.replace('#/g/' + r.id)
     } catch (e) {
       setErr((e as Error).message)
       setBusy(false)
     }
   }
-  useEffect(() => { if (inv?.joined) location.replace('#/g/' + inv.id) }, [inv])
+  useEffect(() => { if (inv?.joined) void Promise.all([pull(), refreshUser()]).finally(() => location.replace('#/g/' + inv.id)) }, [inv])
   const t = inv?.theme ?? s.theme
   return (
     <Screen t={t} back title="Join group">
@@ -865,18 +878,23 @@ function JoinGroup({ s, code }: { s: State; code: string }) {
           <p className="muted-p">{count(inv.people, 'person is', 'people are')} splitting here.</p>
           {mine ? <>
             <h2 className="form-h">Join as {mine.name}</h2>
-            {mine.phone ? <>
-              <p className="muted-p">{mine.name} was added with the number {mine.phone}. Verify it’s yours on WhatsApp and that spot, with its balance, is yours.</p>
-              {phone?.available ? <PhoneVerify status={{ ...phone, phone: null }} set={p => void proved(p)} />
-                : phone && <p className="muted-p">Ask whoever added you for your personal invite link.</p>}
-            </> : <p className="muted-p">{mine.name} was added with {mine.email}. Sign in with that email (or Google with it) and open this link again, and that spot, with its balance, is yours.</p>}
-            <button type="button" className="link center-link" onClick={() => { setMine(null); setErr('') }}>That’s not me</button>
+            {mine.asked ? <>
+              <p className="notice" role="status">Waiting for {mine.confirmBy} to confirm it’s you. We’ll let you know, and {inv.name} opens here once they do.</p>
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => void load()}>Check again</button>
+            </> : <>
+              <p className="muted-p">{mine.name} was added with {mine.phone ? `the number ${mine.phone}` : mine.email}.{' '}
+                {mine.confirmBy ? `Ask ${mine.confirmBy}, who added them, to confirm it’s you, and that spot, with its balance, is yours.`
+                  : mine.phone ? 'Ask whoever added you for your personal invite link, and that spot, with its balance, is yours.' : ''}
+                {mine.email && ' Or sign in with that email (or Google with it) and open this link again.'}</p>
+              {mine.confirmBy && <button type="button" className="btn primary" disabled={busy} onClick={() => void ask(mine)}>{busy ? 'Asking…' : `Ask ${mine.confirmBy} to confirm`}</button>}
+            </>}
+            <button type="button" className="link center-link" onClick={() => { setPick(null); setErr('') }}>That’s not me</button>
           </> : <>
             {!!inv.spots?.length && <>
               <h2 className="form-h">Is one of these you?</h2>
               <ul className="rows">
-                {inv.spots.map((x, i) => (
-                  <li key={i}><button type="button" className="row-in link-row" onClick={() => { setMine(x); setErr('') }}>
+                {inv.spots.map(x => (
+                  <li key={x.id}><button type="button" className="row-in link-row" onClick={() => { setPick(x.id); setErr('') }}>
                     <Avatar name={x.name} size={36} /><span className="grow"><strong>{x.name}</strong><small>{x.phone ?? x.email}</small></span><Icon n="arrow" size={18} />
                   </button></li>
                 ))}

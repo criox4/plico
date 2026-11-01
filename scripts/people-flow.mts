@@ -1,10 +1,9 @@
-// People without email: spots and friends by phone, personal friend links, and spots claimed by a verified number.
+// People without email: spots and friends by phone, personal friend links, and joining by the group link.
 //   npm run server, then: npx tsx --env-file=.env.development scripts/people-flow.mts
 // Makes throwaway @splittr.test users and groups, and deletes them at the end.
 import assert from 'node:assert/strict'
 import { auth } from '../server/auth.ts'
 import { db } from '../server/db.ts'
-import { linkByPhone } from '../server/audit.ts'
 
 const API = process.env.RACE_API ?? 'http://localhost:8787'
 const run = Date.now()
@@ -21,8 +20,9 @@ async function person(name: string) {
 }
 
 const [A, B, C] = await Promise.all([person('Asha'), person('Bala'), person('Chitra')])
+const extra: string[] = []
 const gid = crypto.randomUUID(), self = crypto.randomUUID(), spot = crypto.randomUUID()
-const groups = () => db.group.findMany({ where: { members: { some: { userId: { in: [A.id, B.id, C.id] } } } }, select: { id: true } })
+const groups = () => db.group.findMany({ where: { members: { some: { userId: { in: [A.id, B.id, C.id, ...extra] } } } }, select: { id: true } })
 try {
   assert.equal((await A.call('PUT', `/api/groups/${gid}`, { name: 'Goa', kind: 'trip', theme: 'classic', selfId: self, create: true })).status, 200)
 
@@ -73,22 +73,11 @@ try {
   assert.equal((await fetch(`${API}/api/public/u/${code}`)).status, 404)
   console.log('✓ personal friend links')
 
-  // Phase 2: a verified number joins by the group link into the spot added under it, and links spots elsewhere.
-  await db.user.update({ where: { id: C.id }, data: { verifiedPhone: '+919000000001', phoneVerifiedAt: new Date() } })
-  const cSpot = crypto.randomUUID()
-  assert.equal((await A.call('PUT', `/api/groups/${gid}/members/${cSpot}`, { name: 'Chitra', phone: '9000000001' })).status, 200)
+  // Chitra joins Goa by the group link, as herself.
   const invite = (await A.call('GET', `/api/groups/${gid}/invite`)).body.code
   assert.equal((await C.call('POST', `/api/invites/${invite}/join`, {})).status, 200)
-  assert.equal((await db.member.findUniqueOrThrow({ where: { id: cSpot } })).userId, C.id, 'joined into the spot with their number')
   assert.equal(await db.member.count({ where: { groupId: gid, userId: C.id } }), 1)
-  const g2 = crypto.randomUUID(), s2 = crypto.randomUUID(), c2 = crypto.randomUUID()
-  await A.call('PUT', `/api/groups/${g2}`, { name: 'Flat', kind: 'home', theme: 'classic', selfId: s2, create: true })
-  await A.call('PUT', `/api/groups/${g2}/members/${c2}`, { name: 'Chitra', phone: '+919000000001' })
-  assert.equal(await linkByPhone(C.id, '+919000000001'), 1)
-  assert.equal((await db.member.findUniqueOrThrow({ where: { id: c2 } })).userId, C.id)
-  r = await C.call('GET', '/api/me/phone')
-  assert.equal(r.status, 200); assert.equal(r.body.phone, '+919000000001')
-  console.log('✓ verified number links spots')
+  console.log('✓ joined by the group link')
 
   // Like Splitwise: sharing a group makes friends that outlive it. Bala and Chitra share only Goa.
   assert.equal(await db.friendship.count({ where: { OR: [{ userId: B.id, friendId: C.id }, { userId: C.id, friendId: B.id }] } }), 2, 'joining made them friends, both ways')
@@ -108,9 +97,43 @@ try {
   assert.ok(!JSON.stringify(r.body.spots).includes('9123456789'), 'never the full number')
   console.log('✓ the group link lists waiting spots, masked')
 
+  // "That's me": a newcomer asks for a phone spot, whoever added it confirms, and the spot, its balance and its number move.
+  const [D, E] = await Promise.all([person('Dhruv'), person('Esha')])
+  extra.push(D.id, E.id)
+  const dSpot = crypto.randomUUID()
+  await A.call('PUT', `/api/groups/${gid}/members/${dSpot}`, { name: 'DB', phone: '9876500001' })
+  const lunch = crypto.randomUUID()
+  assert.equal((await A.call('PUT', `/api/groups/${gid}/expenses/${lunch}`, { title: 'Lunch', cat: 'food', date: '2026-11-01', amount: 20000, paid: { [self]: 20000 }, owed: { [self]: 10000, [dSpot]: 10000 } })).status, 200)
+  r = await D.call('GET', `/api/invites/${invite}`)
+  const db1 = r.body.spots.find((x: any) => x.id === dSpot)
+  assert.equal(db1.confirmBy, 'Asha'); assert.equal(db1.asked, false)
+  assert.equal((await D.call('POST', `/api/invites/${invite}/spots/${dSpot}/ask`, {})).status, 200)
+  assert.equal((await D.call('GET', `/api/invites/${invite}`)).body.spots.find((x: any) => x.id === dSpot).asked, true, 'the wait survives a reload')
+  assert.equal((await E.call('POST', `/api/invites/${invite}/spots/${dSpot}/ask`, {})).status, 409, 'one request per spot')
+  assert.equal((await C.call('GET', `/api/groups/${gid}/claims`)).body.claims.length, 0, 'only whoever added it sees the request')
+  r = await A.call('GET', `/api/groups/${gid}/claims`)
+  assert.deepEqual(r.body.claims.map((x: any) => [x.id, x.by.name, x.phone]), [[dSpot, 'Dhruv', '+919876500001']])
+  assert.equal((await C.call('POST', `/api/groups/${gid}/claims/${dSpot}`, { yes: true })).status, 403)
+  assert.equal((await A.call('POST', `/api/groups/${gid}/claims/${dSpot}`, { yes: true })).status, 200)
+  assert.equal((await db.member.findUniqueOrThrow({ where: { id: dSpot } })).userId, D.id, 'the spot, and the ₹100 it owes, are Dhruv’s')
+  assert.equal((await db.user.findUniqueOrThrow({ where: { id: D.id } })).phone, '+919876500001', 'its number fills in his profile')
+  assert.equal(await db.notification.count({ where: { userId: D.id, kind: 'claim.approved' } }), 1)
+  console.log('✓ a spot confirmed by whoever added it')
+
+  // Not them: the request clears, and they join as themselves.
+  const eSpot = crypto.randomUUID()
+  await A.call('PUT', `/api/groups/${gid}/members/${eSpot}`, { name: 'Ekta', phone: '9876500002' })
+  assert.equal((await E.call('POST', `/api/invites/${invite}/spots/${eSpot}/ask`, {})).status, 200)
+  assert.equal((await A.call('POST', `/api/groups/${gid}/claims/${eSpot}`, { yes: false })).status, 200)
+  assert.equal((await db.member.findUniqueOrThrow({ where: { id: eSpot } })).userId, null)
+  assert.equal(await db.notification.count({ where: { userId: E.id, kind: 'claim.declined' } }), 1)
+  assert.equal((await E.call('POST', `/api/invites/${invite}/join`, {})).status, 200)
+  assert.equal((await A.call('GET', `/api/groups/${gid}/claims`)).body.claims.length, 0)
+  console.log('✓ a request turned down, then joined as themselves')
+
   console.log('\nall people checks passed')
 } finally {
   await db.group.deleteMany({ where: { id: { in: (await groups()).map(g => g.id) } } })
-  await db.user.deleteMany({ where: { id: { in: [A.id, B.id, C.id] } } })
+  await db.user.deleteMany({ where: { id: { in: [A.id, B.id, C.id, ...extra] } } })
   await db.$disconnect()
 }

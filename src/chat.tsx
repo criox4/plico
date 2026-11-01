@@ -3,6 +3,8 @@
 // A receipt can ride along with a message; itemized cards let you fix who had what before adding.
 // History stays on this device (per account) and is cleared on sign-out; photos are never kept in it.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { themeVars } from './themes'
 import { AnimatePresence, useDragControls, type PanInfo } from 'motion/react'
 import { SPRING } from './anim'
 import * as M from 'motion/react-m'
@@ -36,7 +38,10 @@ const key = (s: ReturnType<typeof useStore>) => (s.user ? `${CHAT_KEY}${s.user.i
 /** Phones get a bottom sheet you can drag down to close; wide screens a side panel. */
 const phone = () => !matchMedia('(min-width: 900px)').matches
 
+/** Plico's face in the top bar, beside search; the chat opens over everything (portalled, since the blurred bar
+ *  would otherwise become the containing block of the fixed sheet). */
 export function ChatButton() {
+  const s = useStore()
   const [open, setOpen] = useState(false)
   const btn = useRef<HTMLButtonElement>(null)
   const drag = useDragControls()
@@ -45,25 +50,27 @@ export function ChatButton() {
   // Released after a real pull or a quick flick: close; otherwise the sheet springs back.
   const release = (_: PointerEvent, i: PanInfo) => { if (i.offset.y > 120 || i.velocity.y > 600) close() }
   return <>
-    <button ref={btn} className="chat-fab" aria-label="Ask Plico" aria-expanded={open} onClick={() => setOpen(true)}><Plico mood="idle" size={34} watch /></button>
-    <AnimatePresence>
+    <button ref={btn} className="iconbtn chat-btn" aria-label="Ask Plico" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><Plico mood="idle" size={30} watch /></button>
+    {createPortal(<AnimatePresence>
       {open && (
-        <M.div key="chat" className="chat-scrim" onClick={e => { if (e.target === e.currentTarget) close() }}
+        <M.div key="chat" className="chat-scrim" data-theme={s.theme} style={themeVars(s.theme)} onClick={e => { if (e.target === e.currentTarget) close() }}
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
           <M.section className="chat" role="dialog" aria-modal="true" aria-labelledby="chat-title"
             initial={sheet ? { y: '100%' } : { x: 32, opacity: 0 }} animate={sheet ? { y: 0 } : { x: 0, opacity: 1 }} exit={sheet ? { y: '100%' } : { x: 32, opacity: 0 }} transition={SPRING}
             drag={sheet ? 'y' : false} dragControls={drag} dragListener={false} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }} onDragEnd={release}>
-            <Chat onClose={close} onGrab={sheet ? e => { if (!(e.target as HTMLElement).closest('button')) drag.start(e) } : undefined} />
+            <Chat onClose={close} focus={!sheet} onGrab={sheet ? e => { if (!(e.target as HTMLElement).closest('button')) drag.start(e) } : undefined} />
           </M.section>
         </M.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>, document.body)}
   </>
 }
 
 /** The conversation. `onClose` shows the header (the floating chat); `onSaved` is where the Add screen goes after an expense lands. */
-export function Chat({ onClose, onSaved, onGrab, suggestions = ASK, hint = 'Ask about your balances, spending…' }: {
-  onClose?: () => void; onSaved?: (s: Saved[]) => void; onGrab?: (e: React.PointerEvent) => void; suggestions?: string[]; hint?: string
+export function Chat({ onClose, onSaved, onGrab, focus = true, suggestions = ASK, hint = 'Ask about your balances, spending…' }: {
+  onClose?: () => void; onSaved?: (s: Saved[]) => void; onGrab?: (e: React.PointerEvent) => void
+  /** Focus the input on open. Off for the phone sheet: the keyboard would resize the screen mid-slide. */
+  focus?: boolean; suggestions?: string[]; hint?: string
 }) {
   const s = useStore()
   const k = key(s) + (onSaved ? ':add' : '')
@@ -75,7 +82,7 @@ export function Chat({ onClose, onSaved, onGrab, suggestions = ASK, hint = 'Ask 
   const lastPhoto = useRef<string | null>(null) // the bill being discussed, re-sent with follow-ups (the server caches its reading)
   const input = useRef<HTMLTextAreaElement>(null)
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => { input.current?.focus() }, [])
+  useEffect(() => { if (focus) input.current?.focus({ preventScroll: true }) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { save(k, msgs); end.current?.scrollIntoView({ block: 'end' }) }, [msgs, k])
   useEffect(() => {
     if (!onClose) return

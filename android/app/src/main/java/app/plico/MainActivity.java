@@ -3,6 +3,7 @@ package app.plico;
 import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
+import android.webkit.WebSettings;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginHandle;
@@ -17,6 +18,9 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(ContactPickerPlugin.class); // local plugins must be registered before the bridge starts
     super.onCreate(savedInstanceState);
+    // A WebView ignores the phone's font size setting; hand it to the page, which scales rem by it (src/main.tsx).
+    WebSettings web = getBridge().getWebView().getSettings();
+    web.setUserAgentString(web.getUserAgentString() + " PlicoTextScale/" + getResources().getConfiguration().fontScale);
   }
 
   @Override

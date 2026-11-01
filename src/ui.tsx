@@ -12,7 +12,8 @@ import { enablePush, mayAsk, notNow, pushState, type PushState } from './push'
 import { ChatButton } from './chat'
 import { AnimatePresence } from 'motion/react'
 import { flushSync } from 'react-dom'
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
+import { Browser } from '@capacitor/browser'
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics'
 import * as m from 'motion/react-m'
 import { FADE, ROW, SPRING, gaze } from './anim'
@@ -46,6 +47,61 @@ const tab = (h: string) => { const p = h.replace(/^#\/?/, '').split('/').filter(
 const depth = (h: string) => h.replace(/^#\/?/, '').split('/').filter(Boolean).length
 export const go = (p: string) => (location.hash = p)
 const goBack = () => (history.length > 1 ? history.back() : go('/'))
+
+// The apps have one WebView, so a "new tab" link would swap Plico for a page with no way back. Web pages open in an
+// in-app browser over Plico, photos full screen; WhatsApp links still hand off to WhatsApp.
+export function keepLinksInApp() {
+  document.addEventListener('click', e => {
+    const a = (e.target as Element).closest?.<HTMLAnchorElement>('a[target="_blank"]')
+    if (!a?.href) return
+    const { protocol, hostname } = new URL(a.href)
+    if (protocol === 'blob:' || protocol === 'data:') { e.preventDefault(); showPhoto(a.href, a.querySelector('img')?.alt ?? 'Photo') }
+    else if (/^https?:$/.test(protocol) && hostname !== 'wa.me') { e.preventDefault(); void Browser.open({ url: a.href }) }
+  })
+}
+function showPhoto(src: string, label: string) {
+  const d = document.createElement('dialog'), img = document.createElement('img')
+  d.className = 'photo-view'; d.setAttribute('aria-label', label); img.src = src; img.alt = label
+  d.append(img); d.addEventListener('click', () => d.close()); d.addEventListener('close', () => d.remove())
+  document.body.append(d); d.showModal()
+}
+
+// Status bar icons: the app draws behind them, so they follow whatever is on top (a dark group theme, the purple intro).
+const bars: { dark: boolean }[] = []
+const paintBars = () => { if (Capacitor.isNativePlatform() && bars.length) void SystemBars.setStyle({ style: bars.at(-1)!.dark ? SystemBarsStyle.Dark : SystemBarsStyle.Light }).catch(() => {}) }
+/** Light status bar icons while this is on screen when `dark`, dark icons otherwise; the newest screen wins until it leaves. */
+export function useBars(dark: boolean) {
+  const me = useRef({ dark })
+  useEffect(() => { bars.push(me.current); return () => { bars.splice(bars.indexOf(me.current), 1); paintBars() } }, [])
+  useEffect(() => { me.current.dark = dark; paintBars() }, [dark])
+}
+
+// Android's back button: closes the open sheet, then steps back inside a multi-step screen, then goes back a screen.
+const backs: (() => void)[] = []
+/** While `fn` is set, the back button calls it instead of leaving the screen (sign-in steps, setup steps, intro slides). */
+export function useBack(fn: (() => void) | false | null | undefined) {
+  const f = useRef(fn)
+  f.current = fn
+  const on = !!fn
+  useEffect(() => {
+    if (!on) return
+    const h = () => { if (f.current) f.current() }
+    backs.push(h)
+    return () => { backs.splice(backs.indexOf(h), 1) }
+  }, [on])
+}
+/** False when there's nothing left to go back to (Home, or the first step), so the app should leave. */
+export function handleBack(canGoBack: boolean) {
+  const photo = document.querySelector<HTMLDialogElement>('dialog.photo-view[open]')
+  if (photo) return photo.close(), true
+  if (document.querySelector('[aria-modal="true"]')) return dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })), true
+  const top = backs.at(-1)
+  if (top) return top(), true
+  if (!location.hash.replace(/^#\/?/, '')) return false
+  if (canGoBack) history.back()
+  else go('/')
+  return true
+}
 
 // ---------- copy + names ----------
 export const KINDS: Record<Kind, { label: string; theme: ThemeId; hint: string }> = {
@@ -274,6 +330,8 @@ export function Money({ p, sign, className = '' }: { p: number; sign?: boolean; 
   return <span className={`money ${tone(p)} ${className}`}>{sign && p > 0 ? '+' : sign && p < 0 ? '−' : ''}{inr(p)}</span>
 }
 
+let lastRoute: string | null = null
+
 export function Screen({ t, title, back, action, fab, preview, children }: {
   t: ThemeId; title?: ReactNode; back?: boolean | (() => void); action?: ReactNode; fab?: string
   /** Render signed in with this sample state (the share-card page), whoever is looking. */
@@ -285,6 +343,15 @@ export function Screen({ t, title, back, action, fab, preview, children }: {
   const here = preview ? [''] : location.hash.replace(/^#\/?/, '').split('/')
   // The app's navigation, for anyone signed in and past the age question: a sidebar on wide screens,
   // bottom tabs on phones (only on the top-level screens, which pass `fab`).
+  useBars(!preview && theme(t).dark)
+  // A new screen: screen readers start at its title instead of wherever the tapped row was.
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const route = here.join('/')
+  useEffect(() => {
+    if (preview || route === lastRoute) return
+    if (lastRoute !== null) titleRef.current?.focus({ preventScroll: true })
+    lastRoute = route
+  }, [route, preview])
   const shell = !!preview || (sync.authed && !!s.user?.ageGroup && s.user.onboarded !== false)
   return (
     <div className={`screen${shell ? ' has-nav' : ''}`} data-theme={t} style={themeVars(t)}>
@@ -304,22 +371,25 @@ export function Screen({ t, title, back, action, fab, preview, children }: {
       <header className="bar">
         {back ? <button className="iconbtn" onClick={typeof back === 'function' ? back : goBack} aria-label="Back"><Icon n="back" /></button>
           : !title && <span className="bar-brand"><Wordmark /></span>}
-        {title && <h1 className="bar-title">{title}</h1>}
+        {title && <h1 className="bar-title" ref={titleRef} tabIndex={-1}>{title}</h1>}
         <span className="bar-end">
+          {shell && fab && sync.ai && s.user?.ai && <ChatButton />}
           {shell && here[0] !== 'search' && <button className="iconbtn" aria-label="Search" aria-keyshortcuts="/" onClick={() => go('/search')}><Icon n="search" /></button>}
           {action}
         </span>
       </header>
       <main className="main">{children}</main>
-      {shell && fab && sync.ai && s.user?.ai && <ChatButton />}
       {shell && fab && (
-        <nav className="dock" aria-label="Main">
-          <Tab to="/" icon="home" label="Home" on={!here[0]} />
-          <Tab to="/friends" icon="direct" label="Friends" on={here[0] === 'friends' || here[0] === 'f'} />
+        // Tabs only navigate (HIG): the four tabs are the nav, + is an action that sits between them on screen.
+        <div className="dock">
+          <nav className="dock-tabs" aria-label="Main">
+            <Tab to="/" icon="home" label="Home" on={!here[0]} />
+            <Tab to="/friends" icon="direct" label="Friends" on={here[0] === 'friends' || here[0] === 'f'} />
+            <Tab to="/activity" icon="log" label="Activity" on={here[0] === 'activity'} badge={sync.unread} />
+            <Tab to="/me" icon="user" label="You" on={here[0] === 'me'} />
+          </nav>
           <button className="fab" onClick={() => go(fab)} aria-label="Add expense"><Icon n="plus" size={28} /></button>
-          <Tab to="/activity" icon="log" label="Activity" on={here[0] === 'activity'} badge={sync.unread} />
-          <Tab to="/me" icon="user" label="You" on={here[0] === 'me'} />
-        </nav>
+        </div>
       )}
     </div>
   )
@@ -327,7 +397,8 @@ export function Screen({ t, title, back, action, fab, preview, children }: {
 
 const Badge = ({ n }: { n: number }) => (n ? <span className="badge" aria-label={`${n} new`}>{n > 99 ? '99+' : n}</span> : null)
 function Tab({ to, icon, label, on, badge = 0 }: { to: string; icon: IconName; label: string; on: boolean; badge?: number }) {
-  return <a className={`dock-item${on ? ' on' : ''}`} href={'#' + to} aria-current={on ? 'page' : undefined}><span className="dock-icon"><Icon n={icon} /><Badge n={badge} />{on && <m.span layoutId="dock-dot" className="dock-dot" transition={SPRING} />}</span>{label}</a>
+  const tick = () => { if (!on && Capacitor.isNativePlatform()) void Haptics.impact({ style: ImpactStyle.Light }).catch(() => {}) }
+  return <a className={`dock-item${on ? ' on' : ''}`} href={'#' + to} onClick={tick} aria-current={on ? 'page' : undefined}><span className="dock-icon">{on && <m.span layoutId="dock-pill" className="dock-pill" transition={SPRING} />}<Icon n={icon} /><Badge n={badge} /></span>{label}</a>
 }
 
 /** Wide screens: the app's own theme (not the group's), so navigation stays put as you move between groups. */
@@ -406,28 +477,50 @@ export function Denomination({ t, amount, line, caption }: { t: ThemeId; amount:
 }
 
 const Peaceful = () => (
-  <div className="peaceful"><Plico mood="empty" size={64} watch boop="Boop Plico" /><p><strong>Suspiciously peaceful in here.</strong>Add the first expense with +.</p></div>
+  <div className="peaceful"><Plico mood="empty" size={64} watch /><p><strong>Suspiciously peaceful in here.</strong>Add the first expense with +.</p></div>
 )
 
-/** After adding an expense: everyone in it converges around their share for a beat. */
-export function Converge({ s, g, e }: { s: State; g: Group; e: Expense }) {
-  const ids = Object.keys(e.owed)
-  const vals = Object.values(e.owed)
-  const line = ids.length < 2 ? `${inr(e.amount)} added` : vals.every(v => v === vals[0]) ? `${inr(vals[0])} each` : `${inr(e.amount)}, ${ids.length} ways`
+/** After adding an expense: the split lands in the group's own look and says what it means for you.
+ *  It closes itself after 5 seconds (the Done button fills as it counts down), or on Done. */
+export function Converge({ s, g, e, onDone }: { s: State; g: Group; e: Expense; onDone: () => void }) {
+  const t = pageTheme(s, g), gt = theme(g.theme)
+  useBars(theme(t).dark)
+  const done = useRef(onDone)
+  done.current = onDone
+  useEffect(() => { const id = setTimeout(() => done.current(), 5000); return () => clearTimeout(id) }, [])
+  const ids = Object.keys(e.owed).filter(id => e.owed[id] > 0).sort((a, b) => (a === ME ? -1 : b === ME ? 1 : e.owed[b] - e.owed[a]))
+  const payers = Object.keys(e.paid).filter(id => e.paid[id] > 0)
+  const paidBy = payers.length === 1 ? who(g, payers[0]) : `${payers.length} people`
+  const lent = (e.paid[ME] ?? 0) - (e.owed[ME] ?? 0)
+  const you = e.paid[ME]
+    ? lent > 0 ? <>You paid {inr(e.paid[ME])} · <span className="money pos">you lent {inr(lent)}</span></>
+      : lent < 0 ? <>You paid {inr(e.paid[ME])} · <span className="money neg">you owe {inr(-lent)}</span></>
+      : <>You paid your share</>
+    : e.owed[ME] ? <>{paidBy} paid · <span className="money neg">your share {inr(e.owed[ME])}</span></>
+    : <>{paidBy} paid · you’re not in this one</>
+  const place = g.kind === 'direct' ? `With ${groupTitle(g)}` : `Added to ${groupTitle(g)}`
   return (
-    <div className="converge" data-theme={s.theme} style={themeVars(s.theme)} role="status" aria-label={`Added ${e.title}: ${line}`}>
-      <div className="cv-ring" aria-hidden>
-        {ids.slice(0, 8).map((id, i, a) => {
-          const ang = (i / a.length) * 2 * Math.PI - Math.PI / 2
-          return (
-            <span key={id} className="cv-av" style={{ '--tx': `${Math.round(Math.cos(ang) * 104)}px`, '--ty': `${Math.round(Math.sin(ang) * 104)}px`, '--i': i } as CSSProperties}>
-              <Avatar name={realName(s, g, id)} image={id === ME ? s.user?.image : g.members.find(m => m.id === id)?.image} size={48} />
-            </span>
-          )
-        })}
-        <p className="cv-num">{line}</p>
+    <div className="converge" data-theme={t} style={themeVars(t)} role="status" aria-label={`${place}: ${e.title}, ${inr(e.amount)}`}>
+      <Ornament t={t} />
+      <div className="cv-body">
+        <p className="cv-place">
+          <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
+          {place}
+        </p>
+        <p className="cv-total"><span className="cur">₹</span>{inr(e.amount).replace('₹', '')}</p>
+        <h1 className="cv-title">{e.title}</h1>
+        <p className="cv-you">{you}</p>
+        <ul className="cv-shares">
+          {ids.map((id, i) => (
+            <li key={id} style={{ '--i': i } as CSSProperties}>
+              <Avatar name={realName(s, g, id)} image={id === ME ? s.user?.image : g.members.find(m => m.id === id)?.image} size={32} />
+              <span>{who(g, id)}</span>
+              <span className="money">{inr(e.owed[id])}</span>
+            </li>
+          ))}
+        </ul>
       </div>
-      <p className="cv-title">{e.title} · {groupTitle(g)}</p>
+      <button className="btn primary cv-done" onClick={onDone} autoFocus><span className="cv-fill" aria-hidden />Done</button>
     </div>
   )
 }
@@ -626,7 +719,7 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
     .slice(0, 6)
   const fresh = !rows.length
   return (
-    <Screen t={t} preview={preview ? s : undefined} fab={s.groups.length ? '/add' : '/new'} action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
+    <Screen t={t} title="Home" preview={preview ? s : undefined} fab={s.groups.length ? '/add' : '/new'} action={<button className="iconbtn hide-wide" aria-label="You and settings" onClick={() => go('/me')}><Avatar name={s.me.name} image={s.user?.image} size={32} /></button>}>
       <div className="dash">
         <div className="dash-main">
           <div className="d-hero">
@@ -648,7 +741,7 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
           {!preview && <InstallAsk />}
           {fresh && (
             <section className="d-card d-start" aria-labelledby="d-start">
-              <div className="hello"><Plico mood="idle" size={56} watch boop="Boop Plico" /><p><strong id="d-start">Start your first group.</strong>Pick who’s spending together. You can invite them by email next.</p></div>
+              <div className="hello"><Plico mood="idle" size={56} watch /><p><strong id="d-start">Start your first group.</strong>Pick who’s spending together. You can invite them by email next.</p></div>
               <div className="kinds">
                 {GROUP_KINDS.map(k => <button key={k} className="kind" onClick={() => go('/new/' + k)}><Icon n={k} size={26} /><span>{KINDS[k].label}</span></button>)}
               </div>
@@ -736,7 +829,7 @@ function ThisMonth({ groups }: { groups: Group[] }) {
   return (
     <section className="d-card d-month" aria-labelledby="d-month">
       <p className="d-month-head"><span><small id="d-month">Your share in {now.name}</small><span className="money d-month-num">{inr(a)}</span></span>
-        <small className="d-delta">{!b ? `Nothing in ${prev.name} to compare` : pct === 0 ? `Same as ${prev.name}` : `${Math.abs(pct)}% ${pct > 0 ? 'more' : 'less'} than ${prev.name} (${inr(b)})`}</small></p>
+        <small className="d-delta">{!b ? `Nothing in ${prev.name} to compare` : pct === 0 ? `Same as ${prev.name}` : a >= 2 * b ? `${+(a / b).toFixed(1)}× ${prev.name} (${inr(b)})` : `${Math.abs(pct)}% ${pct > 0 ? 'more' : 'less'} than ${prev.name} (${inr(b)})`}</small></p>
       {a > 0 ? <SpendBar cats={byCat(cur, e => e.owed[ME] ?? 0)} /> : <small>No spending yet this month.</small>}
     </section>
   )
@@ -815,6 +908,7 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
       {spent.length > 0 && !debts.length && <Seal t={t} burst={burst} />}
       <IssuesBanner gid={g.id} />
+      <ClaimRequests g={g} />
       <NotJoined g={g} />
       <PushAsk g={g} />
       <NeedsYou groups={[g]} />
@@ -916,6 +1010,44 @@ function InstallAsk() {
 }
 
 /** Everyone in a group should be on Plico: until they are, a nudge to invite them. */
+type Claim = { id: string; name: string; phone: string | null; email: string | null; by: { name: string; email: string } }
+/** Someone says a spot you added is them: you know them, so you say whether it is. Yes moves that spot, and its balance, to them. */
+function ClaimRequests({ g }: { g: Group }) {
+  const [claims, setClaims] = useState<Claim[]>([])
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const load = () => api<{ claims: Claim[] }>(`/api/groups/${g.id}/claims`).then(r => setClaims(r.claims), () => {})
+  useEffect(() => {
+    if (g.kind === 'direct') return
+    void load()
+    const again = () => { if (document.visibilityState === 'visible') void load() }
+    document.addEventListener('visibilitychange', again)
+    return () => document.removeEventListener('visibilitychange', again)
+  }, [g.id, g.kind]) // eslint-disable-line react-hooks/exhaustive-deps
+  const answer = async (c: Claim, yes: boolean) => {
+    setBusy(c.id); setErr('')
+    try {
+      await api(`/api/groups/${g.id}/claims/${c.id}`, { method: 'POST', body: JSON.stringify({ yes }) })
+      setClaims(xs => xs.filter(x => x.id !== c.id))
+      if (yes) await pull()
+    } catch (e) { setErr((e as Error).message); void load() } finally { setBusy('') }
+  }
+  if (!claims.length) return null
+  return <>
+    {claims.map(c => (
+      <section key={c.id} className="confirm-card" role="status">
+        <p><strong>{c.by.name} says they’re {c.name}</strong>
+          <small>Signed in as {c.by.email}. {c.name} was added with {c.phone ?? c.email}. If it’s them, the spot and its balance become theirs.</small></p>
+        <span className="debt-actions">
+          <button className="btn-sm" disabled={!!busy} onClick={() => void answer(c, true)}>That’s them</button>
+          <button className="btn-sm ghost" disabled={!!busy} onClick={() => void answer(c, false)}>Not them</button>
+        </span>
+      </section>
+    ))}
+    {err && <p className="error" role="alert">{err}</p>}
+  </>
+}
+
 function NotJoined({ g }: { g: Group }) {
   const waiting = g.kind === 'direct' ? [] : g.members.filter(m => m.id !== ME && !m.joined)
   if (!waiting.length) return null
@@ -1012,7 +1144,10 @@ export function Sheet({ open, onClose, label, children }: { open: boolean; onClo
     <AnimatePresence>
       {open && (
         <m.div key="sheet" className="sheet-scrim" data-theme={s.theme} style={themeVars(s.theme)} onClick={e => { if (e.target === e.currentTarget) onClose() }} {...FADE}>
-          <m.section className="sheet" role="dialog" aria-modal="true" aria-label={label} initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={SPRING}>{children}</m.section>
+          <m.section className="sheet" role="dialog" aria-modal="true" aria-label={label} initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={SPRING}
+            drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }} onDragEnd={(_, i) => { if (i.offset.y > 100 || i.velocity.y > 600) onClose() }}>
+            <span className="sheet-grab" aria-hidden />{children}
+          </m.section>
         </m.div>
       )}
     </AnimatePresence>

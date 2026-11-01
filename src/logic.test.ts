@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, friendsIn, findFriend, personKey, verifyLabel, missedChecks, showUtr, toCheck, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, inr, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, friendsIn, findFriend, personKey, verifyLabel, missedChecks, showUtr, toCheck, type Group } from './logic.ts'
 import { gaze, lingers } from './anim.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
 
 assert.deepEqual(allocate(1000, { a: 1, b: 1, c: 1 }), { a: 334, b: 333, c: 333 })
+assert.deepEqual([inr(50), inr(74000), inr(-6251166), inr(1234505)], ['₹0.50', '₹740', '₹62,511.66', '₹12,345.05'])
 assert.equal(sum(allocate(275900, { a: 2, b: 1, c: 1, d: 3 })), 275900)
 assert.deepEqual(split(10000, 'exact', { a: 60, b: 40 }), { owed: { a: 6000, b: 4000 } })
 assert.ok('error' in split(10000, 'exact', { a: 60 }))

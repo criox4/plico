@@ -57,8 +57,10 @@ export const ME = 'me'
 export const uid = () => crypto.randomUUID()
 export const today = () => new Date().toLocaleDateString('en-CA')
 
-const fmt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2, minimumFractionDigits: 0 })
-export const inr = (p: number) => fmt.format(Math.abs(p) / 100)
+const whole = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })
+const paise = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 })
+/** ₹740, or ₹0.50 with both paise digits, never ₹0.5. */
+export const inr = (p: number) => (p % 100 ? paise : whole).format(Math.abs(p) / 100)
 export const toPaise = (s: string | number) => Math.round(parseFloat(String(s).replace(/,/g, '')) * 100) || 0
 
 /** Split `total` proportionally to weights; leftover paise go to the largest remainders so parts always sum to total. */

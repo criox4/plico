@@ -10,7 +10,7 @@ import { ME, enqueue, isVpa, normPhone, rebase, runRecurring, uid, type Expense,
 import type * as z from 'zod/mini'
 import { ConflictOut, GroupsOut, ProofIn, ProofOut, ReadOut, SavedOut, UnreadOut, type ExpenseInput, type Read, type ServerExpense, type ServerGroup, type Snap, type SnapFull } from './schema'
 export type { Read, ServerExpense }
-import { blank, getState, onLocalChange, setRemote, update, type State } from './store'
+import { blank, getState, onLocalChange, setRemote, update, wipe, type State } from './store'
 import { API, authClient, token } from './auth-client'
 
 /** A change the server wouldn't take as-is. Conflict: someone changed it first. Failed: refused outright. */
@@ -488,19 +488,35 @@ function expired() {
 export async function refreshUser() {
   const r = await authClient.getSession().catch(() => null)
   const u = r?.data?.user
-  if (u) setRemote(d => { if (d.user) Object.assign(d.user, { email: u.email, emailVerified: u.emailVerified, image: u.image, ...gates(u as AuthUser) }); d.me.name = u.name || d.me.name })
+  if (u) setRemote(d => {
+    if (d.user) Object.assign(d.user, { email: u.email, emailVerified: u.emailVerified, image: u.image, ...gates(u as AuthUser) })
+    d.me.name = u.name || d.me.name
+    d.me.phone ||= (u as AuthUser).phone || undefined // taking a spot added with a number fills it in on the server
+  })
   return u
 }
 
+/** Device settings that aren't anyone's data: they outlive a sign-out. */
+const KEEP = new Set(['plico-crash-reports', 'plico-intro-seen', 'plico-install-asked'])
+
+/** Nothing of the account stays on the device: its groups, its outbox, Ask Plico history, cached friend codes,
+ *  a screenshot shared in but not yet added, the native copies. Then a reload, so no screen keeps any of it in memory. */
 export async function signOut() {
+  // Signed out first: the wipe below must never read as an edit to queue (a blank profile sent for the next account).
+  clearTimeout(timer); timer = undefined
+  status = { ...status, authed: false }
   await authClient.signOut().catch(() => {})
   token.clear()
-  outbox = []; issues = []
-  saveOutbox(); saveIssues(); setCursor(null)
-  for (const k of Object.keys(localStorage)) if (k.startsWith('plico-chat:')) localStorage.removeItem(k) // Ask Plico history lives on the device only
-  setRemote(d => { Object.assign(d, structuredClone(blank)) })
+  if ('caches' in window) await caches.delete('plico-share').catch(() => false)
+  await wipe()
   snap = getState()
-  setStatus({ authed: false, error: '' })
+  // Last, so nothing still in flight writes back after it (the native copy is restored at boot if it survives).
+  outbox = []; issues = []; cursor = null
+  for (const k of Object.keys(localStorage)) if (!KEEP.has(k)) localStorage.removeItem(k)
+  try { sessionStorage.clear() } catch { /* blocked */ }
+  if (native) await Preferences.clear().catch(() => {})
+  location.hash = '#/'
+  location.reload()
 }
 
 /** Wire up once at boot. */
@@ -510,16 +526,22 @@ export function startSync() {
   status = { ...status, authed: !!getState().user }
   setCursor(null) // a full pull at every launch: cheap insurance against anything a delta could have missed
   onLocalChange(() => { clearTimeout(timer); timer = setTimeout(queueNow, 400) })
-  addEventListener('online', () => { setStatus({ offline: false }); void flush() })
+  // The sign-in options and AI switch: asked at boot, and again on reconnecting or every 30s until an answer arrives,
+  // so a launch on bad signal doesn't hide Ask Plico and Google sign-in for the whole session.
+  let configured = false
+  const loadConfig = () => configured ? Promise.resolve() : fetch(`${API}/api/config`).then(r => r.json()).then(c => {
+    configured = true
+    setStatus({ google: !!c.google, googleWebClientId: c.googleWebClientId, googleIosClientId: c.googleIosClientId, ai: !!c.ai, ...(c.push && { push: c.push }) })
+  }).catch(() => {})
+  addEventListener('online', () => { setStatus({ offline: false }); void loadConfig(); void flush() })
   addEventListener('offline', () => setStatus({ offline: true }))
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') queueNow() // never lose a debounced edit on app close
     else void flush().then(pull)
   })
-  setInterval(() => { if (document.visibilityState === 'visible') void flush().then(pull) }, 30_000)
+  setInterval(() => { if (document.visibilityState === 'visible') { void loadConfig(); void flush().then(pull) } }, 30_000)
   // Boot: learn the sign-in options and confirm the session, but never hold an offline user hostage (800ms cap).
-  const config = fetch(`${API}/api/config`).then(r => r.json())
-    .then(c => setStatus({ google: !!c.google, googleWebClientId: c.googleWebClientId, googleIosClientId: c.googleIosClientId, ai: !!c.ai, ...(c.push && { push: c.push }) })).catch(() => {})
+  const config = loadConfig()
   const session = authClient.getSession().then(async r => {
     const u = r.data?.user
     if (u && !getState().user) return signedIn(u) // back from Google's redirect with a session cookie
