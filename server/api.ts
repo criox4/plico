@@ -880,18 +880,20 @@ api.post('/invites/:code/spots/:mid/ask', async c => {
   return c.json({ ok: true, confirmBy: first(by.name) })
 })
 
-/** Requests waiting on me in this group: who's asking (their account's name and email) and for which spot. */
-api.get('/groups/:gid/claims', async c => {
-  const gid = Id.parse(c.req.param('gid')), uid = c.get('userId')
-  if (!(await membership(gid, uid))) return c.json(notFound, 404)
-  const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { createdById: true, members: true } })
-  const mine = g.members.filter(m => !m.userId && liveClaim(m) && confirmerOf(g.members, m, g.createdById)?.userId === uid)
+/** "That's me" requests waiting on me, in every group I'm in: who's asking (their account's name and email), for which spot. */
+api.get('/me/claims', async c => {
+  const uid = c.get('userId')
+  const groups = await db.group.findMany({
+    where: { members: { some: { userId: uid } }, AND: { members: { some: { userId: null, claimById: { not: null } } } } },
+    select: { id: true, createdById: true, members: true },
+  })
+  const mine = groups.flatMap(g => g.members.filter(m => !m.userId && liveClaim(m) && confirmerOf(g.members, m, g.createdById)?.userId === uid))
   const who = await db.user.findMany({ where: { id: { in: mine.map(m => m.claimById!) } }, select: { id: true, name: true, email: true } })
   return c.json({ claims: mine.flatMap(m => {
     const u = who.find(x => x.id === m.claimById)
     // Full contact only to whoever added them, as everywhere else.
     const own = m.addedById === uid
-    return u ? [{ id: m.id, name: m.name, phone: m.phone && (own ? m.phone : maskPhone(m.phone)), email: m.email && (own ? m.email : maskEmail(m.email)),
+    return u ? [{ id: m.id, groupId: m.groupId, name: m.name, phone: m.phone && (own ? m.phone : maskPhone(m.phone)), email: m.email && (own ? m.email : maskEmail(m.email)),
       by: { name: u.name, email: u.email }, at: m.claimAt!.toISOString() }] : []
   }) })
 })

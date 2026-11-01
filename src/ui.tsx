@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
 import { ME, balances, missedChecks, pairwise, showUtr, simplify, toCheck, today, verifyLabel, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import { update, useStore, type State } from './store'
@@ -682,12 +682,58 @@ export function ConfirmCard({ g, e, showGroup }: { g: Group; e: Expense; showGro
     </m.li>
   )
 }
+// ---------- "that's me" requests waiting on you (server-side only: they aren't part of the synced ledger) ----------
+type Claim = { id: string; groupId: string; name: string; phone: string | null; email: string | null; by: { name: string; email: string } }
+let claims: Claim[] = []
+const claimSubs = new Set<() => void>()
+const setClaims = (c: Claim[]) => { claims = c; claimSubs.forEach(f => f()) }
+const loadClaims = () => api<{ claims: Claim[] }>('/api/me/claims').then(r => setClaims(r.claims), () => {})
+/** Fetched when a screen showing them opens and whenever the app comes back to the front. */
+function useClaims() {
+  const list = useSyncExternalStore(f => (claimSubs.add(f), () => { claimSubs.delete(f) }), () => claims)
+  useEffect(() => {
+    void loadClaims()
+    const again = () => { if (document.visibilityState === 'visible') void loadClaims() }
+    document.addEventListener('visibilitychange', again)
+    return () => document.removeEventListener('visibilitychange', again)
+  }, [])
+  return list
+}
+
+/** Someone says a spot you added is them: you know them, so you say whether it is. Yes moves that spot, and its balance, to them. */
+function ClaimCard({ c, g, showGroup }: { c: Claim; g?: Group; showGroup?: boolean }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const answer = async (yes: boolean) => {
+    setBusy(true); setErr('')
+    try {
+      await api(`/api/groups/${c.groupId}/claims/${c.id}`, { method: 'POST', body: JSON.stringify({ yes }) })
+      setClaims(claims.filter(x => x.id !== c.id))
+      if (yes) void pull()
+    } catch (e) { setErr((e as Error).message); setBusy(false); void loadClaims() }
+  }
+  return (
+    <m.li className="confirm-card" {...ROW}>
+      <p><strong>{c.by.name} says they’re {c.name}</strong>
+        <small>{showGroup && g ? `${groupTitle(g)} · ` : ''}Signed in as {c.by.email}. {c.name} was added with {c.phone ?? c.email}. If it’s them, the spot and its balance become theirs.</small>
+        {err && <small className="error" role="alert">{err}</small>}</p>
+      <span className="debt-actions">
+        <button className="btn-sm" disabled={busy} onClick={() => void answer(true)}><Icon n="check" size={16} />That’s them</button>
+        <button className="btn-sm ghost" disabled={busy} onClick={() => void answer(false)}>Not them</button>
+      </span>
+    </m.li>
+  )
+}
+const claimCards = (list: Claim[], groups: Group[], showGroup?: boolean) =>
+  list.flatMap(c => { const g = groups.find(x => x.id === c.groupId); return g ? [<ClaimCard key={'c' + c.id} c={c} g={g} showGroup={showGroup} />] : [] })
+
 const waitingFor = (g: Group) => g.expenses.filter(toCheck)
 const bounced = (g: Group) => g.expenses.filter(e => e.rejected && ends(e).from === ME)
 /** Settlements that need you: say whether money arrived, or deal with money that didn't. */
 function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean }) {
-  const items = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup={showGroup} />),
-    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup={showGroup} />)])
+  const list = useClaims()
+  const items = [...claimCards(list, groups, showGroup), ...groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup={showGroup} />),
+    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup={showGroup} />)])]
   return (
     <AnimatePresence initial={false}>
       {items.length > 0 && <m.div key="needs" {...FADE}><SectionHead title="Needs you" /><ol className="debts"><AnimatePresence initial={false}>{items}</AnimatePresence></ol></m.div>}
@@ -839,8 +885,9 @@ function ThisMonth({ groups }: { groups: Group[] }) {
  *  (if Bala owes you more elsewhere, you don't owe Bala). Tracking-only groups never ask for money. */
 function DashNeeds({ s }: { s: State }) {
   const groups = s.groups
-  const cards = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup />),
-    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup />)])
+  const list = useClaims()
+  const cards = [...claimCards(list, groups, true), ...groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup />),
+    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup />)])]
   const owe = friendsOf(s)
     .map(f => {
       const live = f.spots.filter(x => !x.g.track)
@@ -908,7 +955,6 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
       {spent.length > 0 && !debts.length && <Seal t={t} burst={burst} />}
       <IssuesBanner gid={g.id} />
-      <ClaimRequests g={g} />
       <NotJoined g={g} />
       <PushAsk g={g} />
       <NeedsYou groups={[g]} />
@@ -1010,44 +1056,6 @@ function InstallAsk() {
 }
 
 /** Everyone in a group should be on Plico: until they are, a nudge to invite them. */
-type Claim = { id: string; name: string; phone: string | null; email: string | null; by: { name: string; email: string } }
-/** Someone says a spot you added is them: you know them, so you say whether it is. Yes moves that spot, and its balance, to them. */
-function ClaimRequests({ g }: { g: Group }) {
-  const [claims, setClaims] = useState<Claim[]>([])
-  const [busy, setBusy] = useState('')
-  const [err, setErr] = useState('')
-  const load = () => api<{ claims: Claim[] }>(`/api/groups/${g.id}/claims`).then(r => setClaims(r.claims), () => {})
-  useEffect(() => {
-    if (g.kind === 'direct') return
-    void load()
-    const again = () => { if (document.visibilityState === 'visible') void load() }
-    document.addEventListener('visibilitychange', again)
-    return () => document.removeEventListener('visibilitychange', again)
-  }, [g.id, g.kind]) // eslint-disable-line react-hooks/exhaustive-deps
-  const answer = async (c: Claim, yes: boolean) => {
-    setBusy(c.id); setErr('')
-    try {
-      await api(`/api/groups/${g.id}/claims/${c.id}`, { method: 'POST', body: JSON.stringify({ yes }) })
-      setClaims(xs => xs.filter(x => x.id !== c.id))
-      if (yes) await pull()
-    } catch (e) { setErr((e as Error).message); void load() } finally { setBusy('') }
-  }
-  if (!claims.length) return null
-  return <>
-    {claims.map(c => (
-      <section key={c.id} className="confirm-card" role="status">
-        <p><strong>{c.by.name} says they’re {c.name}</strong>
-          <small>Signed in as {c.by.email}. {c.name} was added with {c.phone ?? c.email}. If it’s them, the spot and its balance become theirs.</small></p>
-        <span className="debt-actions">
-          <button className="btn-sm" disabled={!!busy} onClick={() => void answer(c, true)}>That’s them</button>
-          <button className="btn-sm ghost" disabled={!!busy} onClick={() => void answer(c, false)}>Not them</button>
-        </span>
-      </section>
-    ))}
-    {err && <p className="error" role="alert">{err}</p>}
-  </>
-}
-
 function NotJoined({ g }: { g: Group }) {
   const waiting = g.kind === 'direct' ? [] : g.members.filter(m => m.id !== ME && !m.joined)
   if (!waiting.length) return null
