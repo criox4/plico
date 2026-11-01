@@ -58,7 +58,7 @@ export function ChatButton() {
           <M.section className="chat" role="dialog" aria-modal="true" aria-labelledby="chat-title"
             initial={sheet ? { y: '100%' } : { x: 32, opacity: 0 }} animate={sheet ? { y: 0 } : { x: 0, opacity: 1 }} exit={sheet ? { y: '100%' } : { x: 32, opacity: 0 }} transition={SPRING}
             drag={sheet ? 'y' : false} dragControls={drag} dragListener={false} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }} onDragEnd={release}>
-            <Chat onClose={close} onGrab={sheet ? e => { if (!(e.target as HTMLElement).closest('button')) drag.start(e) } : undefined} />
+            <Chat onClose={close} focus={!sheet} onGrab={sheet ? e => { if (!(e.target as HTMLElement).closest('button')) drag.start(e) } : undefined} />
           </M.section>
         </M.div>
       )}
@@ -67,8 +67,10 @@ export function ChatButton() {
 }
 
 /** The conversation. `onClose` shows the header (the floating chat); `onSaved` is where the Add screen goes after an expense lands. */
-export function Chat({ onClose, onSaved, onGrab, suggestions = ASK, hint = 'Ask about your balances, spending…' }: {
-  onClose?: () => void; onSaved?: (s: Saved[]) => void; onGrab?: (e: React.PointerEvent) => void; suggestions?: string[]; hint?: string
+export function Chat({ onClose, onSaved, onGrab, focus = true, suggestions = ASK, hint = 'Ask about your balances, spending…' }: {
+  onClose?: () => void; onSaved?: (s: Saved[]) => void; onGrab?: (e: React.PointerEvent) => void
+  /** Focus the input on open. Off for the phone sheet: the keyboard would resize the screen mid-slide. */
+  focus?: boolean; suggestions?: string[]; hint?: string
 }) {
   const s = useStore()
   const k = key(s) + (onSaved ? ':add' : '')
@@ -80,7 +82,7 @@ export function Chat({ onClose, onSaved, onGrab, suggestions = ASK, hint = 'Ask 
   const lastPhoto = useRef<string | null>(null) // the bill being discussed, re-sent with follow-ups (the server caches its reading)
   const input = useRef<HTMLTextAreaElement>(null)
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => { input.current?.focus({ preventScroll: true }) }, [])
+  useEffect(() => { if (focus) input.current?.focus({ preventScroll: true }) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { save(k, msgs); end.current?.scrollIntoView({ block: 'end' }) }, [msgs, k])
   useEffect(() => {
     if (!onClose) return
