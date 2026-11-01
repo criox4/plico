@@ -11,7 +11,7 @@ import { addProof, api, photoData, pull, readExpense, refreshUser, uploadImage, 
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
+import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, count, useGroupImage, ThemePicker, GroupView, GroupsPage, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
@@ -89,6 +89,7 @@ function Page() {
   if (r[0] === 'import') return <ImportSplitwise s={s} />
   if (r[0] === 'sync') return <SyncIssues s={s} />
   if (r[0] === 'friends') return <Friends s={s} />
+  if (r[0] === 'groups') return <GroupsPage s={s} />
   if (r[0] === 'activity' || r[0] === 'log') return <Activity s={s} />
   if (r[0] === 'search') return <Search s={s} />
   if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} k={decodeURIComponent(r[1])} /> : <FriendPage s={s} k={decodeURIComponent(r[1])} />

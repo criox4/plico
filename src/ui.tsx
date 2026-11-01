@@ -414,7 +414,7 @@ function Sidebar({ s, add, unread, here }: { s: State; add: string; unread: numb
       {item('/', 'home', 'Home', !here[0])}
       {item('/friends', 'direct', 'Friends', here[0] === 'friends' || here[0] === 'f')}
       {item('/activity', 'log', 'Activity', here[0] === 'activity', unread)}
-      <p className="side-head"><span>Groups</span><a href="#/new" className="link">New</a></p>
+      <p className="side-head"><a href="#/groups" className={here[0] === 'groups' ? 'on' : undefined} aria-current={here[0] === 'groups' ? 'page' : undefined}>Groups</a><a href="#/new" className="link">New</a></p>
       <ul className="side-groups">
         {groups.map(g => {
           const n = balances(g)[ME] ?? 0, gt = theme(g.theme)
@@ -741,6 +741,69 @@ function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean 
   )
 }
 
+/** Home shows this many groups and people; the rest are a tap away on their own pages. */
+const HOME_ROWS = 4
+type GroupRow = { g: Group; net: number }
+const lastDate = (g: Group) => g.expenses.reduce((a, e) => (e.date > a ? e.date : a), '')
+/** Most recent activity first; a group without expenses by when it was made (newest first). */
+const byRecent = (rows: GroupRow[]) => rows.map((r, i) => ({ r, i, d: lastDate(r.g) }))
+  .sort((a, b) => b.d.localeCompare(a.d) || b.i - a.i).map(x => x.r)
+
+function GroupSlips({ rows }: { rows: GroupRow[] }) {
+  return (
+    <ol className="slips">
+      {rows.map(({ g, net }, i) => {
+        const gt = theme(g.theme)
+        const last = lastDate(g)
+        return (
+          <li key={g.id} style={{ '--i': i, '--gnum': `${gt.num}, ${gt.ui}, system-ui` } as CSSProperties}>
+            <button className="slip" onClick={() => go('/g/' + g.id)}>
+              <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
+              <span className="slip-body">
+                <span className="serial">No. {String(i + 1).padStart(2, '0')}</span>
+                <strong>{g.name}</strong>
+                <small>{count(g.members.length, 'person', 'people')}{last ? ` · ${ago(last)}` : ' · no expenses yet'}</small>
+              </span>
+              <span className="slip-amt">{net ? <Money p={net} /> : <span className="money settled-ink"><Icon n="check" size={20} /></span>}<small>{g.track ? 'tracking' : verbShort(g, net)}</small></span>
+            </button>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+type GroupFilter = 'all' | 'owed' | 'owe' | 'even'
+/** Every group (not friends' balances), newest activity first, with filters and search once the list gets long. */
+export function GroupsPage({ s }: { s: State }) {
+  const rows = byRecent(s.groups.filter(g => g.kind !== 'direct').map(g => ({ g, net: g.track ? 0 : balances(g)[ME] ?? 0 })))
+  const [filter, setFilter] = useState<GroupFilter>('all')
+  const [q, setQ] = useState('')
+  const t = q.trim().toLowerCase()
+  const is = (f: GroupFilter, n: number) => f === 'all' || (f === 'owed' ? n > 0 : f === 'owe' ? n < 0 : !n)
+  const shown = rows.filter(r => is(filter, r.net) && (!t || r.g.name.toLowerCase().includes(t)))
+  const counts = { all: rows.length, owed: rows.filter(r => r.net > 0).length, owe: rows.filter(r => r.net < 0).length, even: rows.filter(r => !r.net).length }
+  return (
+    <Screen t={s.theme} back fab={rows.length ? '/add' : '/new'} title="Groups">
+      <SectionHead title={rows.length ? count(rows.length, 'group', 'groups') : 'Groups'} action={<button className="link" onClick={() => go('/new')}>New group</button>} />
+      {rows.length > 3 && (
+        <div className="seg friend-filter" role="tablist" aria-label="Show">
+          {([['all', 'All'], ['owed', 'Owe you'], ['owe', 'You owe'], ['even', 'Settled']] as [GroupFilter, string][]).map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>{filter === id && <SegPill id="groups" />}{label}<small>{counts[id]}</small></button>
+          ))}
+        </div>
+      )}
+      {rows.length > 8 && (
+        <label className="field search-field"><span className="sr-only">Find a group</span><Icon n="search" />
+          <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Find a group" /></label>
+      )}
+      {rows.length ? (shown.length ? <GroupSlips rows={shown} /> : <p className="muted-p">No groups here{t ? ` matching “${q.trim()}”` : ''}.</p>)
+        : <div className="empty-state"><Plico mood="empty" size={72} watch /><p><strong>No groups yet.</strong> Start one for a trip, the flat or Friday football.</p>
+          <button className="btn primary" onClick={() => go('/new')}><Icon n="plus" size={18} />New group</button></div>}
+    </Screen>
+  )
+}
+
 /** The dashboard: where your money stands, what needs you, and every group and person at a glance.
  *  Computed on the phone from the synced ledger, so it works offline. Phones stack it; wide screens add a right rail. */
 export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?: ReactNode; preview?: boolean }) {
@@ -758,7 +821,8 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
   const collect = total + pay
   const open = rows.filter(r => r.net && !r.g.track).length
   const people = friends
-    .map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name)).slice(0, 6)
+    .map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name)).slice(0, HOME_ROWS)
+  const latest = byRecent(rows).slice(0, HOME_ROWS)
   const recent = s.groups
     .flatMap(g => g.expenses.map((e, i) => ({ g, e, i })))
     .sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
@@ -795,33 +859,17 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
           )}
           <ThisMonth groups={s.groups} />
           {!fresh && <section className="d-groups" aria-labelledby="d-groups">
-            <SectionHead title="Groups" id="d-groups" action={<button className="link" onClick={() => go('/new')}>New group</button>} />
-            <ol className="slips">
-              {rows.map(({ g, net }, i) => {
-                const gt = theme(g.theme)
-                const last = g.expenses.reduce((a, e) => (e.date > a ? e.date : a), '')
-                return (
-                  <li key={g.id} style={{ '--i': i, '--gnum': `${gt.num}, ${gt.ui}, system-ui` } as CSSProperties}>
-                    <button className="slip" onClick={() => go('/g/' + g.id)}>
-                      <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
-                      <span className="slip-body">
-                        <span className="serial">No. {String(i + 1).padStart(2, '0')}</span>
-                        <strong>{g.name}</strong>
-                        <small>{count(g.members.length, 'person', 'people')}{last ? ` · ${ago(last)}` : ' · no expenses yet'}</small>
-                      </span>
-                      <span className="slip-amt">{net ? <Money p={net} /> : <span className="money settled-ink"><Icon n="check" size={20} /></span>}<small>{g.track ? 'tracking' : verbShort(g, net)}</small></span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ol>
+            <SectionHead title="Groups" id="d-groups" action={rows.length > HOME_ROWS
+              ? <button className="link" onClick={() => go('/groups')}>All groups ({rows.length})</button>
+              : <button className="link" onClick={() => go('/new')}>New group</button>} />
+            <GroupSlips rows={latest} />
           </section>}
         </div>
 
         <aside className="dash-rail" aria-label="People and activity">
           {(!fresh || s.groups.length > 0) && <DashNeeds s={s} />}
           {people.length > 0 && <section className="d-people" aria-labelledby="d-people">
-            <SectionHead title="People" id="d-people" action={<button className="link" onClick={() => go('/friends')}>All friends</button>} />
+            <SectionHead title="People" id="d-people" action={<button className="link" onClick={() => go('/friends')}>{friends.length > HOME_ROWS ? `All friends (${friends.length})` : 'All friends'}</button>} />
             <ol className="d-list">
               {people.map(({ f, n }) => (
                 <li key={f.key}><button className="d-row" onClick={() => go(friendPath(f))}>
