@@ -829,7 +829,7 @@ function ThisMonth({ groups }: { groups: Group[] }) {
   return (
     <section className="d-card d-month" aria-labelledby="d-month">
       <p className="d-month-head"><span><small id="d-month">Your share in {now.name}</small><span className="money d-month-num">{inr(a)}</span></span>
-        <small className="d-delta">{!b ? `Nothing in ${prev.name} to compare` : pct === 0 ? `Same as ${prev.name}` : `${Math.abs(pct)}% ${pct > 0 ? 'more' : 'less'} than ${prev.name} (${inr(b)})`}</small></p>
+        <small className="d-delta">{!b ? `Nothing in ${prev.name} to compare` : pct === 0 ? `Same as ${prev.name}` : a >= 2 * b ? `${+(a / b).toFixed(1)}× ${prev.name} (${inr(b)})` : `${Math.abs(pct)}% ${pct > 0 ? 'more' : 'less'} than ${prev.name} (${inr(b)})`}</small></p>
       {a > 0 ? <SpendBar cats={byCat(cur, e => e.owed[ME] ?? 0)} /> : <small>No spending yet this month.</small>}
     </section>
   )

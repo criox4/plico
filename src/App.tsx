@@ -2,7 +2,7 @@ import { resumePush } from './push'
 import { AddScreen, WithPicker } from './add'
 import { commitDraft, type Target } from './draft'
 import { Suspense, lazy, useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
-import { ME, addMonth, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
+import { ME, addMonth, allocate, fromSplitwise, itemSplit, matchMember, needsConfirm, parseQuick, parseSplitwise, type Item, type Quick, type Splitwise, decodeShare, inr, isVpa, runRecurring, split, toPaise, today, uid, upiLink,
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { getState, update, useStore, type State } from './store'
 import { API } from './auth-client'
@@ -23,6 +23,8 @@ import { FriendPage, FriendSettle, Friends, PeoplePicker, WhatsAppInvite, emailO
 const back = () => (history.length > 1 ? history.back() : go('/'))
 const edit = (gid: Id, fn: (g: Group) => void) => update(d => { const g = d.groups.find(x => x.id === gid); if (g) fn(g) })
 const digits = (v: string) => v.replace(/[^\d.]/g, '')
+/** "100000.5" as it's typed → "1,00,000.5": lakh grouping on the rupees, the decimals left as typed. */
+const grouped = (v: string) => { const [r, p] = v.split('.'); return (r ? Number(r).toLocaleString('en-IN') : '') + (p === undefined ? '' : '.' + p) }
 const num = (v?: string) => parseFloat((v ?? '').replace(/,/g, '')) || 0
 
 // Every theme side by side, for design review. `npm run dev` only: left out of production builds.
@@ -223,6 +225,14 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
 
   useEffect(() => { if (eid && !old) location.replace('#/g/' + g.id) }, [eid, old, g.id])
   const [open, setOpen] = useState<'' | 'payer' | 'split'>('')
+  // An opened editor scrolls up until its last row clears the save bar (keeping its top below the header).
+  useEffect(() => {
+    const panel = open && document.querySelector('.add-panel')?.getBoundingClientRect()
+    if (!panel) return
+    const bar = document.querySelector('.add-foot')?.getBoundingClientRect().height ?? 0
+    const over = Math.min(panel.bottom - (innerHeight - bar - 12), panel.top - 72)
+    if (over > 0) scrollBy({ top: over, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }, [open])
   const [saving, setSaving] = useState(false)
   // A different group or set of friends means different people: start the who-paid and split over.
   useEffect(() => {
@@ -337,7 +347,15 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
     setItems(null); setCapErr('')
   }
 
-  const switchMode = (m: SplitMode) => { setMode(m); setInp(flags(g, m === 'equal' ? '1' : '')) }
+  // A new split method starts from the split on screen (₹250 each → 25% each), and whoever was left out stays out.
+  const switchMode = (m: SplitMode) => {
+    const inIt = (id: Id) => !total || !!owed[id]
+    setMode(m)
+    if (m === 'equal' || m === 'shares') return setInp(Object.fromEntries(g.members.map(x => [x.id, inIt(x.id) ? (m === 'equal' ? '1' : '') : '0'])))
+    if (!total || !Object.keys(owed).length) return setInp(flags(g, ''))
+    const parts = m === 'exact' ? owed : allocate(10000, owed) // percent in hundredths, always summing to 100
+    setInp(Object.fromEntries(g.members.map(x => [x.id, parts[x.id] ? String(parts[x.id] / 100) : ''])))
+  }
 
   const total = toPaise(amt)
   const input: Record<Id, number> = Object.fromEntries(g.members.map(m => {
@@ -425,7 +443,7 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
         <label className="amount-field">
           <span className="sr-only">Amount in rupees</span>
           <span className="amount-cur" aria-hidden>₹</span>
-          <input className="amount-in" inputMode="decimal" placeholder="0" value={amt} autoFocus={!old && !!target} onChange={e => setAmt(digits(e.target.value))} />
+          <input className="amount-in" inputMode="decimal" placeholder="0" value={grouped(amt)} autoFocus={!old && !!target} onChange={e => setAmt(digits(e.target.value))} />
         </label>
         {!old && sync.ai && s.user?.ai && (
           <label className="scan-bill" title="Scan a bill or UPI screenshot">
@@ -455,9 +473,9 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
                 {g.members.map(m => (
                   <li className="row-in" key={m.id}>
                     <span className="grow">{who(g, m.id)}</span>
+                    <span className="unit pre">₹</span>
                     <input className="num" inputMode="decimal" placeholder="0" aria-label={`${who(g, m.id)} paid, rupees`}
-                      value={paidIn[m.id] ?? ''} onChange={e => setPaidIn({ ...paidIn, [m.id]: digits(e.target.value) })} />
-                    <span className="unit">₹</span>
+                      value={grouped(paidIn[m.id] ?? '')} onChange={e => setPaidIn({ ...paidIn, [m.id]: digits(e.target.value) })} />
                   </li>
                 ))}
               </ul>
@@ -479,11 +497,12 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
                     </label>
                   ) : <>
                     <span className="grow">{who(g, m.id)}</span>
+                    {mode === 'exact' && <span className="unit pre">₹</span>}
                     <input className="num" inputMode="decimal" placeholder={mode === 'shares' ? '1' : '0'} aria-label={`${who(g, m.id)}, ${MODES.find(x => x.id === mode)!.label.toLowerCase()}`}
-                      value={inp[m.id] ?? ''} onChange={e => setInp({ ...inp, [m.id]: digits(e.target.value) })} />
-                    <span className="unit">{MODES.find(x => x.id === mode)!.unit}</span>
+                      value={mode === 'exact' ? grouped(inp[m.id] ?? '') : inp[m.id] ?? ''} onChange={e => setInp({ ...inp, [m.id]: digits(e.target.value) })} />
+                    {mode !== 'exact' && <span className="unit">{MODES.find(x => x.id === mode)!.unit}</span>}
                   </>}
-                  <span className="share">{owed[m.id] ? inr(owed[m.id]) : '–'}</span>
+                  {mode !== 'exact' && <span className="share">{owed[m.id] ? inr(owed[m.id]) : '–'}</span>}
                 </li>
               ))}
             </ul>
@@ -502,8 +521,8 @@ function ExpenseForm({ s, gid, eid, shared, friend }: { s: State; gid?: Id; eid?
           {real && <ReceiptField gid={real.id} name={receipt} onChange={setReceipt} />}
         </details>
       </>}
-      {total > 0 && (error || (target && block)) && <p className="error" role="alert">{error || block}</p>}
       <div className="add-foot">
+        {total > 0 && (error || (target && block)) && <p className="error foot-error" role="alert">{error || block}</p>}
         <button className="btn primary" disabled={!total || !!error || !!block || saving}>{saving ? 'Adding…' : saveLabel}</button>
       </div>
       {old && <button type="button" className="link center-link" onClick={() => go(`/g/${g.id}/e/${old.id}/history`)}>See history: who changed what</button>}
