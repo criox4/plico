@@ -908,6 +908,7 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
       {spent.length > 0 && !debts.length && <Seal t={t} burst={burst} />}
       <IssuesBanner gid={g.id} />
+      <ClaimRequests g={g} />
       <NotJoined g={g} />
       <PushAsk g={g} />
       <NeedsYou groups={[g]} />
@@ -1009,6 +1010,44 @@ function InstallAsk() {
 }
 
 /** Everyone in a group should be on Plico: until they are, a nudge to invite them. */
+type Claim = { id: string; name: string; phone: string | null; email: string | null; by: { name: string; email: string } }
+/** Someone says a spot you added is them: you know them, so you say whether it is. Yes moves that spot, and its balance, to them. */
+function ClaimRequests({ g }: { g: Group }) {
+  const [claims, setClaims] = useState<Claim[]>([])
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const load = () => api<{ claims: Claim[] }>(`/api/groups/${g.id}/claims`).then(r => setClaims(r.claims), () => {})
+  useEffect(() => {
+    if (g.kind === 'direct') return
+    void load()
+    const again = () => { if (document.visibilityState === 'visible') void load() }
+    document.addEventListener('visibilitychange', again)
+    return () => document.removeEventListener('visibilitychange', again)
+  }, [g.id, g.kind]) // eslint-disable-line react-hooks/exhaustive-deps
+  const answer = async (c: Claim, yes: boolean) => {
+    setBusy(c.id); setErr('')
+    try {
+      await api(`/api/groups/${g.id}/claims/${c.id}`, { method: 'POST', body: JSON.stringify({ yes }) })
+      setClaims(xs => xs.filter(x => x.id !== c.id))
+      if (yes) await pull()
+    } catch (e) { setErr((e as Error).message); void load() } finally { setBusy('') }
+  }
+  if (!claims.length) return null
+  return <>
+    {claims.map(c => (
+      <section key={c.id} className="confirm-card" role="status">
+        <p><strong>{c.by.name} says they’re {c.name}</strong>
+          <small>Signed in as {c.by.email}. {c.name} was added with {c.phone ?? c.email}. If it’s them, the spot and its balance become theirs.</small></p>
+        <span className="debt-actions">
+          <button className="btn-sm" disabled={!!busy} onClick={() => void answer(c, true)}>That’s them</button>
+          <button className="btn-sm ghost" disabled={!!busy} onClick={() => void answer(c, false)}>Not them</button>
+        </span>
+      </section>
+    ))}
+    {err && <p className="error" role="alert">{err}</p>}
+  </>
+}
+
 function NotJoined({ g }: { g: Group }) {
   const waiting = g.kind === 'direct' ? [] : g.members.filter(m => m.id !== ME && !m.joined)
   if (!waiting.length) return null
