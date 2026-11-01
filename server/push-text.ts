@@ -16,8 +16,8 @@ export type Prefs = { payments: boolean; activity: boolean; reminders: boolean; 
 export const PREFS: Prefs = { payments: true, activity: true, reminders: true, nudge: true, quiet: true, amounts: true }
 export const prefsOf = (v: unknown): Prefs => ({ ...PREFS, ...(v && typeof v === 'object' ? v : {}) })
 
-/** Payments are time-sensitive: sent at once and outside the daily cap (quiet hours still hold them). */
-export const URGENT = new Set(['payment.claimed', 'payment.confirmed', 'payment.rejected'])
+/** Payments, and someone waiting on a "that's me", are time-sensitive: sent at once and outside the daily cap (quiet hours still hold them). */
+export const URGENT = new Set(['payment.claimed', 'payment.confirmed', 'payment.rejected', 'claim.asked', 'claim.approved', 'claim.declined'])
 /** Rows of these kinds for the same person and group are merged into one push. */
 export const BATCHED = new Set(['expense.created', 'expense.changed', 'member.joined'])
 /** Rows of these kinds wait this long before they're due. The worker drops a reminder whose payment was verified,
@@ -94,6 +94,9 @@ export function compose(rows: Row[], group: string | null, amounts: boolean): { 
       case 'member.added': return { title, body: `${d.by} added you to ${group ?? 'a group'}.` }
       case 'member.joined': return { title, body: `${d.by} joined.` }
       case 'friend.added': return { title, body: `${d.by} added you as a friend.` }
+      case 'claim.asked': return { title, body: `${d.by} says they’re ${d.spot}. Is that them?` }
+      case 'claim.approved': return { title, body: `${d.by} confirmed it’s you. ${d.spot}’s spot and its balance are yours.` }
+      case 'claim.declined': return { title, body: `${d.by} says ${d.spot}’s spot isn’t you. You can still join as yourself.` }
       case 'remind': return { title, body: `${d.by} sent a reminder: ${amounts ? `${amt(d.amount)} ` : ''}to settle up.` }
       case 'nudge': return { title: 'Plico', body: amounts ? `You owe ${amt(d.amount)} across ${d.groups === 1 ? '1 group' : `${d.groups} groups`}. Settle up in a tap.` : 'You have payments waiting. Settle up in a tap.' }
       case 'expense.created': return { title, body: `${d.by} added “${d.title}”${amounts && d.share ? ` · your share ${amt(d.share)}` : ''}` }
