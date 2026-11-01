@@ -502,14 +502,19 @@ const KEEP = new Set(['plico-crash-reports', 'plico-intro-seen', 'plico-install-
 /** Nothing of the account stays on the device: its groups, its outbox, Ask Plico history, cached friend codes,
  *  a screenshot shared in but not yet added, the native copies. Then a reload, so no screen keeps any of it in memory. */
 export async function signOut() {
+  // Signed out first: the wipe below must never read as an edit to queue (a blank profile sent for the next account).
+  clearTimeout(timer); timer = undefined
+  status = { ...status, authed: false }
   await authClient.signOut().catch(() => {})
   token.clear()
+  if ('caches' in window) await caches.delete('plico-share').catch(() => false)
+  await wipe()
+  snap = getState()
+  // Last, so nothing still in flight writes back after it (the native copy is restored at boot if it survives).
   outbox = []; issues = []; cursor = null
   for (const k of Object.keys(localStorage)) if (!KEEP.has(k)) localStorage.removeItem(k)
   try { sessionStorage.clear() } catch { /* blocked */ }
-  if ('caches' in window) await caches.delete('plico-share').catch(() => false)
   if (native) await Preferences.clear().catch(() => {})
-  await wipe()
   location.hash = '#/'
   location.reload()
 }
