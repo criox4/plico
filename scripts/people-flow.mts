@@ -1,10 +1,9 @@
-// People without email: spots and friends by phone, personal friend links, and spots claimed by a verified number.
+// People without email: spots and friends by phone, personal friend links, and joining by the group link.
 //   npm run server, then: npx tsx --env-file=.env.development scripts/people-flow.mts
 // Makes throwaway @splittr.test users and groups, and deletes them at the end.
 import assert from 'node:assert/strict'
 import { auth } from '../server/auth.ts'
 import { db } from '../server/db.ts'
-import { linkByPhone } from '../server/audit.ts'
 
 const API = process.env.RACE_API ?? 'http://localhost:8787'
 const run = Date.now()
@@ -73,22 +72,11 @@ try {
   assert.equal((await fetch(`${API}/api/public/u/${code}`)).status, 404)
   console.log('✓ personal friend links')
 
-  // Phase 2: a verified number joins by the group link into the spot added under it, and links spots elsewhere.
-  await db.user.update({ where: { id: C.id }, data: { verifiedPhone: '+919000000001', phoneVerifiedAt: new Date() } })
-  const cSpot = crypto.randomUUID()
-  assert.equal((await A.call('PUT', `/api/groups/${gid}/members/${cSpot}`, { name: 'Chitra', phone: '9000000001' })).status, 200)
+  // Chitra joins Goa by the group link, as herself.
   const invite = (await A.call('GET', `/api/groups/${gid}/invite`)).body.code
   assert.equal((await C.call('POST', `/api/invites/${invite}/join`, {})).status, 200)
-  assert.equal((await db.member.findUniqueOrThrow({ where: { id: cSpot } })).userId, C.id, 'joined into the spot with their number')
   assert.equal(await db.member.count({ where: { groupId: gid, userId: C.id } }), 1)
-  const g2 = crypto.randomUUID(), s2 = crypto.randomUUID(), c2 = crypto.randomUUID()
-  await A.call('PUT', `/api/groups/${g2}`, { name: 'Flat', kind: 'home', theme: 'classic', selfId: s2, create: true })
-  await A.call('PUT', `/api/groups/${g2}/members/${c2}`, { name: 'Chitra', phone: '+919000000001' })
-  assert.equal(await linkByPhone(C.id, '+919000000001'), 1)
-  assert.equal((await db.member.findUniqueOrThrow({ where: { id: c2 } })).userId, C.id)
-  r = await C.call('GET', '/api/me/phone')
-  assert.equal(r.status, 200); assert.equal(r.body.phone, '+919000000001')
-  console.log('✓ verified number links spots')
+  console.log('✓ joined by the group link')
 
   // Like Splitwise: sharing a group makes friends that outlive it. Bala and Chitra share only Goa.
   assert.equal(await db.friendship.count({ where: { OR: [{ userId: B.id, friendId: C.id }, { userId: C.id, friendId: B.id }] } }), 2, 'joining made them friends, both ways')

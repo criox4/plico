@@ -23,8 +23,6 @@ model User {
   upi           String?
   upi2          String? /// backup UPI ID, for when the first bank's UPI is down
   phone         String?
-  verifiedPhone   String?   @unique /// +<country><number>, proven by a WhatsApp message from it; links spots added under it
-  phoneVerifiedAt DateTime?
   friendCode      String?   @unique /// personal "add me on Plico" link (/#/u/<code>); made on first use, resettable
   onboardedAt   DateTime? /// finished the first-run profile (name, face, UPI IDs)
   theme         String?   @default("classic")

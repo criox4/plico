@@ -13,7 +13,6 @@ import { Prisma } from './generated/prisma/client.ts'
 import { audit, changed } from './audit.ts'
 import { prefsOf } from './push-text.ts'
 import { chat } from './chat.ts'
-import { mePhone } from './whatsapp.ts'
 import { clientIp, limiter } from './ip.ts'
 import { count } from './otel.ts'
 import { createHash, randomInt } from 'node:crypto'
@@ -113,7 +112,6 @@ api.use('*', async (c, next) => {
   await next()
 })
 
-api.route('/me/phone', mePhone) // verifying a phone number over WhatsApp (server/whatsapp.ts)
 
 // ---------- age, parental consent, AI consent, data export ----------
 async function askGuardian(uid: string) {
@@ -419,11 +417,11 @@ api.put('/groups/:gid/members/:mid', async c => {
     if (dup) return c.json({ error: `${dup.name} is already in this group with that email.` }, 409)
   }
   if (phone && phone !== m?.phone) {
-    const dup = await db.member.findFirst({ where: { groupId: gid, id: { not: mid }, OR: [{ phone }, { user: { verifiedPhone: phone } }] } })
+    const dup = await db.member.findFirst({ where: { groupId: gid, id: { not: mid }, phone } })
     if (dup) return c.json({ error: `${dup.name} is already in this group with that number.` }, 409)
   }
   // Until someone joins, their UPI IDs, phone and email belong to whoever added them. Anyone else changing them could send
-  // everyone's "Pay Riya" to their own UPI ID, or move Riya's invite (and spot: a verified phone claims it) to one they control.
+  // everyone's "Pay Riya" to their own UPI ID, or move Riya's invite (and spot) to one they control.
   if (m && !m.userId && m.addedById && m.addedById !== uid && (data.upi !== m.upi || data.upi2 !== m.upi2 || data.email !== m.email || data.phone !== m.phone)) {
     const adder = await db.member.findFirst({ where: { groupId: gid, userId: m.addedById }, select: { name: true } })
     if (adder) return c.json({ error: `Only ${adder.name}, who added ${m.name}, can change their UPI ID, phone or email.`, code: 'not-yours' }, 403)
@@ -814,10 +812,9 @@ api.post('/invites/:code/join', async c => {
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
   const uid = c.get('userId')
   if (g.members.some(m => m.userId === uid)) return c.json({ id: g.id })
-  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, emailVerified: true, name: true, verifiedPhone: true } })
-  // Their spot by verified email, else by the number they proved on WhatsApp.
-  const spot = (me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined)
-    ?? (me.verifiedPhone ? g.members.find(m => !m.userId && m.phone === me.verifiedPhone) : undefined)
+  const me = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { email: true, emailVerified: true, name: true } })
+  // Their spot by verified email. (A spot added by phone is claimed by its personal link, or confirmed by whoever added it.)
+  const spot = me.emailVerified ? g.members.find(m => !m.userId && m.email?.toLowerCase() === me.email.toLowerCase()) : undefined
   await db.$transaction(async tx => {
     if (spot) {
       const { count } = await tx.member.updateMany({ where: { id: spot.id, userId: null }, data: { userId: uid, inviteToken: null, name: me.name } })
@@ -835,13 +832,13 @@ type Me = { id: string; name: string; email: string }
 /** Who the friend is: an account (joined from the start), or an email or phone number they'll join with. */
 type Friend = { name: string; userId?: string; email?: string; phone?: string }
 const directKey = (a: string, b: string) => createHash('sha256').update([a, b].sort().join('\n')).digest('hex')
-const meFor = (uid: string) => db.user.findUniqueOrThrow({ where: { id: uid }, select: { id: true, email: true, name: true, verifiedPhone: true } })
+const meFor = (uid: string) => db.user.findUniqueOrThrow({ where: { id: uid }, select: { id: true, email: true, name: true } })
 /** The friends group with this person, made if there isn't one yet. `made` is the friend's new spot. */
 async function directWith(me: Me, f: Friend): Promise<{ id: string; made?: string }> {
   // Found by membership, not by key: older email-keyed groups, and spots that have since joined, still match.
   const them: Prisma.MemberWhereInput = f.userId ? { userId: f.userId }
     : f.email ? { OR: [{ email: { equals: f.email, mode: 'insensitive' } }, { user: { email: { equals: f.email, mode: 'insensitive' } } }] }
-    : { OR: [{ phone: f.phone }, { user: { verifiedPhone: f.phone } }] }
+    : { phone: f.phone }
   const found = await db.group.findFirst({ where: { kind: 'direct', AND: [{ members: { some: { userId: me.id } } }, { members: { some: them } }] }, select: { id: true } })
   if (found) return found
   // ponytail: the key only stops the same add racing itself. Two people adding each other at the same moment by
@@ -879,7 +876,6 @@ api.post('/friends', async c => {
   }
   if (b.phone) {
     // Never matched to an account here: that would tell anyone whether a number is on Plico, and whose it is.
-    if (b.phone === me.verifiedPhone) return c.json({ error: 'That’s your own number.' }, 400)
     const g = await directWith(me, { name: b.name, phone: b.phone })
     // Still waiting for them: their personal link, so the app can open WhatsApp straight to them.
     const spot = await db.member.findFirst({ where: { groupId: g.id, userId: null, phone: b.phone }, select: { id: true } })

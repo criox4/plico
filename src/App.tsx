@@ -6,14 +6,14 @@ import { ME, addMonth, allocate, fromSplitwise, itemSplit, matchMember, needsCon
   type Expense, type Group, type Id, type Kind, type SplitMode, type Tone } from './logic'
 import { getState, update, useStore, type State } from './store'
 import { API } from './auth-client'
-import { FriendCardOut, PhoneStatusOut } from './schema'
+import { FriendCardOut } from './schema'
 import { addProof, api, photoData, pull, readExpense, refreshUser, uploadImage, useSync, type Read } from './sync'
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
 import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
-  NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner, PhoneVerify, type PhoneStatus } from './account'
+  NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
 import { Capacitor } from '@capacitor/core'
 import { Activity, AuditLog, ExpenseHistory, IssuesBanner, SyncIssues } from './history'
@@ -849,19 +849,8 @@ function JoinGroup({ s, code }: { s: State; code: string }) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [mine, setMine] = useState<Spot | null>(null) // "that's me": proving it before the spot is theirs
-  const [phone, setPhone] = useState<PhoneStatus | null>(null)
   const load = () => api<Inv>(`/api/invites/${code}`).then(setInv, e => setErr(e.message))
   useEffect(() => { void load() }, [code]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (mine?.phone && !phone) void api('/api/me/phone').then(r => setPhone(PhoneStatusOut.parse(r)), () => {}) }, [mine, phone])
-  // Their number verified: the spot under it is theirs now (linkByPhone), and the group is one of theirs.
-  const proved = async (p: PhoneStatus) => {
-    setPhone(p)
-    if (!p.phone) return
-    await pull()
-    const r = await api<Inv>(`/api/invites/${code}`).catch(() => null)
-    if (r?.joined) location.replace('#/g/' + r.id)
-    else setErr(`That number isn’t the one ${mine!.name} was added with (${mine!.phone}). Ask whoever added you to fix it, or join as yourself.`)
-  }
   const join = async () => {
     setBusy(true)
     try {
@@ -884,9 +873,7 @@ function JoinGroup({ s, code }: { s: State; code: string }) {
           {mine ? <>
             <h2 className="form-h">Join as {mine.name}</h2>
             {mine.phone ? <>
-              <p className="muted-p">{mine.name} was added with the number {mine.phone}. Verify it’s yours on WhatsApp and that spot, with its balance, is yours.</p>
-              {phone?.available ? <PhoneVerify status={{ ...phone, phone: null }} set={p => void proved(p)} />
-                : phone && <p className="muted-p">Ask whoever added you for your personal invite link.</p>}
+              <p className="muted-p">{mine.name} was added with the number {mine.phone}. Ask whoever added you for your personal invite link, and that spot, with its balance, is yours.</p>
             </> : <p className="muted-p">{mine.name} was added with {mine.email}. Sign in with that email (or Google with it) and open this link again, and that spot, with its balance, is yours.</p>}
             <button type="button" className="link center-link" onClick={() => { setMine(null); setErr('') }}>That’s not me</button>
           </> : <>

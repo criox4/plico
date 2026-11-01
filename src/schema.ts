@@ -61,9 +61,6 @@ export const FriendCode = z.string().check(z.regex(/^[a-z0-9]{10}$/))
 export const FriendCodeOut = z.object({ code: FriendCode })
 /** What a friend link shows before you add them: just a name and a face. */
 export const FriendCardOut = z.object({ name: z.string(), image: z.nullable(z.string()) })
-/** Phone verification over WhatsApp (Phase 2): the code the person sends, and where things stand. */
-export const PhoneStartOut = z.object({ code: z.string(), link: z.string(), expiresAt: When })
-export const PhoneStatusOut = z.object({ available: z.boolean(), phone: z.nullable(z.string()), verifiedAt: z.nullable(When), pending: z.boolean() })
 export const SeenIn = z.object({ at: z.iso.datetime() })
 /** Web Push endpoints must belong to a browser's push service: the server POSTs to them. */
 const PUSH_HOSTS = /^https:\/\/([\w-]+\.)*(fcm\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)\//
