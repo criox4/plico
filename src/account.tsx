@@ -497,6 +497,7 @@ export function AuthFlow({ s, notice, prefill, start }: { s: State; notice?: str
       : r.error.message)
     if (step === 'signup') await saveAge(age, guardian)
     await signedIn(r.data.user)
+    if (location.hash.startsWith('#/signin')) location.replace('#/') // the address shouldn't still say sign-in
     if (step === 'signup') await refreshUser() // pick up the age just saved
   })
   const google = () => run(() => socialSignIn('google', sync))
