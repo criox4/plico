@@ -12,6 +12,18 @@ self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C && k !== SHARE).map(k => caches.delete(k)))).then(() => self.clients.claim()))
 })
 
+// Every deploy leaves its hashed build files behind. One that was last fetched over a month ago (each use while
+// online refreshes it) belongs to a build nobody runs any more.
+async function prune() {
+  const c = await caches.open(C)
+  for (const req of await c.keys()) {
+    if (!new URL(req.url).pathname.startsWith('/assets/')) continue
+    const at = Date.parse((await c.match(req))?.headers.get('date') ?? '')
+    if (at && Date.now() - at > 30 * 864e5) await c.delete(req)
+  }
+}
+prune().catch(() => {}) // whenever the worker starts: cheap, and it needn't finish
+
 self.addEventListener('fetch', e => {
   const r = e.request
   // Web Share Target (manifest): stash what was shared, then open the add screen, which picks it up.
