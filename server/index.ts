@@ -28,17 +28,19 @@ app.use('/api/*', cors({
 }))
 // The caller's IP, from a source they can't forge, for Better Auth's per-IP limits and ours.
 app.use('/api/*', async (c, next) => { c.req.raw.headers.set(IP_HEADER, clientIp(c)); await next() })
-// Per account, on top of per IP: someone guessing one person's password from many addresses still stops after 10 misses.
-// Keyed by the email typed, so a lockout lasts 15 minutes at most and a reset link always works.
-const misses = limiter(15 * 60_000, 10)
+// Per account, on top of per IP: 10 wrong passwords for one account from one address stop that address, and 50 from
+// anywhere stop everyone (someone guessing from many addresses). The first is what a stranger can trigger alone, so
+// they can't lock a person out of their own account with ten tries. 15 minutes at most; a reset link always works.
+const misses = limiter('signin', 15 * 60_000, 10), missesAll = limiter('signin-all', 15 * 60_000, 50)
 app.post('/api/auth/sign-in/email', async (c, next) => {
   const body = await c.req.raw.clone().json().catch(() => null) as { email?: unknown } | null
   const who = String(body?.email ?? '').trim().toLowerCase().slice(0, 254)
-  if (who && misses.full(who)) return c.json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many wrong passwords for this account. Wait 15 minutes, or reset your password.' }, 429)
+  const here = `${who}|${clientIp(c)}`
+  if (who && (await misses.full(here) || await missesAll.full(who))) return c.json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many wrong passwords for this account. Wait 15 minutes, or reset your password.' }, 429)
   await next()
   if (!who) return
-  if (c.res.status === 401) misses.hit(who)
-  else if (c.res.ok) misses.clear(who)
+  if (c.res.status === 401) await Promise.all([misses.hit(here), missesAll.hit(who)])
+  else if (c.res.ok) await misses.clear(here)
 })
 app.on(['GET', 'POST'], '/api/auth/*', c => auth.handler(c.req.raw))
 // Public: which sign-in methods exist (the client hides Google until it's configured).

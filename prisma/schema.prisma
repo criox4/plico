@@ -292,6 +292,18 @@ model Notification {
   @@schema("splittr")
 }
 
+/// One counted try for a rate limit (sign-in misses, AI reads, uploads, invite peeks). Rows older than a day are pruned.
+model RateHit {
+  id  String   @id @default(uuid())
+  key String /// "<limit>:<who>": who is an account id, an email or an IP address
+  at  DateTime @default(now())
+
+  @@index([key, at])
+  @@index([at])
+  @@map("rate_hit")
+  @@schema("splittr")
+}
+
 /// Invite emails sent, for the daily caps (they carry text the sender typed, to any address). Kept a day or so.
 model EmailLog {
   id   String   @id @default(uuid())

@@ -38,7 +38,7 @@ function signedIn(c: Context) {
 }
 
 // Five wrong tries per address per 15 minutes; the rest wait.
-const tries = limiter(15 * 60_000, 5)
+const tries = limiter('admin', 15 * 60_000, 5)
 
 export const admin = new Hono()
 
@@ -54,12 +54,12 @@ admin.get('/', async c => (signedIn(c) ? c.html(page('Plico admin', await dashbo
 
 admin.post('/login', async c => {
   const ip = clientIp(c)
-  if (tries.full(ip)) return c.html(page('Plico admin', login('Too many tries. Wait 15 minutes.')), 429)
+  if (await tries.full(ip)) return c.html(page('Plico admin', login('Too many tries. Wait 15 minutes.')), 429)
   const f = await c.req.parseBody()
   const email = String(f.email ?? '').trim().toLowerCase()
   const ok = email === EMAIL && (await passwordOk(String(f.password ?? '')))
-  if (!ok) { tries.hit(ip); return c.html(page('Plico admin', login('That email and password don’t match.')), 401) }
-  tries.clear(ip)
+  if (!ok) { await tries.hit(ip); return c.html(page('Plico admin', login('That email and password don’t match.')), 401) }
+  await tries.clear(ip)
   const exp = String(Date.now() + HOURS * 3600_000)
   setCookie(c, COOKIE, `${exp}.${sign(exp)}`, { path: '/', httpOnly: true, secure: true, sameSite: 'Strict', maxAge: HOURS * 3600 })
   return c.redirect('/admin', 303)

@@ -201,7 +201,7 @@ export async function nudge(at = new Date()) {
     if (!due.length) return 0
     // ponytail: "owed for over a week" = owes now in a group whose oldest expense is over 7 days old. Replay balances by date if that's too loose.
     const owing = await tx.$queryRaw<{ userId: string; net: number }[]>`
-      SELECT m."userId", SUM(s."paid" - s."owed")::int AS net
+      SELECT m."userId", SUM(s."paid" - s."owed")::float8 AS net
       FROM "splittr"."member" m
       JOIN "splittr"."expense_share" s ON s."memberId" = m."id"
       JOIN "splittr"."expense" e ON e."id" = s."expenseId"
