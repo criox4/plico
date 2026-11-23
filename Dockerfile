@@ -16,5 +16,5 @@ ENV NODE_ENV=production PORT=8787
 USER node
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s CMD node -e "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
-# ponytail: tsx at runtime (imports are extensionless, so plain Node can't resolve them); compile ahead if startup time matters.
-CMD ["node_modules/.bin/tsx", "server/index.ts"]
+# Node runs the TypeScript itself (type stripping, Node 24): no build step and no tsx in the image.
+CMD ["node", "server/index.ts"]
