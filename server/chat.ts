@@ -55,7 +55,8 @@ export async function loadWorld(uid: string, today: string): Promise<World> {
       id: g.id, name: g.name, kind: g.kind as World['groups'][number]['kind'], theme: g.theme as World['groups'][number]['theme'], track: g.track,
       meId: g.members.find(m => m.userId === uid)!.id,
       members: g.members.map(m => ({ id: m.id, name: m.name })),
-      people: g.members.map(m => ({ id: m.id, name: m.name, email: (m.user?.email ?? m.email)?.toLowerCase() ?? null, joined: !!m.userId })),
+      // Someone else's waiting person: their contact is masked in the app, so it never reaches the model or a card either.
+      people: g.members.map(m => ({ id: m.id, name: m.name, email: m.userId || m.addedById === uid ? (m.user?.email ?? m.email)?.toLowerCase() ?? null : null, joined: !!m.userId })),
       expenses: g.expenses.map(e => ({
         id: e.id, v: e.version, title: e.title, cat: e.cat, date: e.date, amount: e.amount, ...(e.settle && { settle: true as const }), ...(e.pending && { pending: true as const }), ...(e.rejected && { rejected: true as const }),
         paid: Object.fromEntries(e.shares.filter(s => s.paid).map(s => [s.memberId, s.paid])), owed: Object.fromEntries(e.shares.filter(s => s.owed).map(s => [s.memberId, s.owed])),

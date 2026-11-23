@@ -264,8 +264,9 @@ async function draftExpense(w: World, a: Args): Promise<ToolOut> {
     const res = itemSplit(items.map(i => ({ name: i.name, amount: i.amount, who: i.who })), r.extras)
     if ('error' in res) return { result: { error: res.error } }
     owed = res.owed; amount = Object.values(owed).reduce((x, y) => x + y, 0)
+    if (amount < 100 || amount > 1e9) return { result: { error: 'Need an amount between ₹1 and ₹1,00,00,000.' } }
   } else {
-    amount = Math.round((num(a.amount) ?? (w.receipt?.amount ? w.receipt.amount / 100 : 0)) * 100)
+    amount = Math.round((num(a.amount) || (w.receipt?.amount ? w.receipt.amount / 100 : 0)) * 100) // 0: not given, so the receipt's total
     if (amount < 100 || amount > 1e9) return { result: { error: 'Need an amount between ₹1 and ₹1,00,00,000.' } }
     owed = allocate(amount, Object.fromEntries(everyone.map(k => [k, 1])))
   }
@@ -432,7 +433,7 @@ const MORE: Record<string, (w: World, a: Args) => Out> = {
 Object.assign(TOOLS, MORE)
 
 export async function runTool(w: World, name: string, args: Args): Promise<ToolOut> {
-  const t = TOOLS[name]
+  const t = Object.hasOwn(TOOLS, name) ? TOOLS[name] : undefined // own names only: "constructor" is not a tool
   if (!t) return { result: { error: `No tool called ${clean(name, 40)}.` } }
   try { return await t(w, args && typeof args === 'object' ? args : {}) } catch { return { result: { error: 'That didn’t work. Try asking another way.' } } }
 }
