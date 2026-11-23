@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, inr, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, friendsIn, findFriend, personKey, verifyLabel, missedChecks, showUtr, toCheck, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, inr, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, between, planOf, friendsIn, findFriend, personKey, verifyLabel, missedChecks, showUtr, toCheck, type Group } from './logic.ts'
 import { gaze, lingers } from './anim.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
@@ -182,6 +182,30 @@ assert.equal(pairwise(trio, 'r', 'k'), 0)
 // the pairwise balances add up to the group balance
 const bb = balances(trio)
 assert.equal(pairwise(trio, ME, 'r') + pairwise(trio, ME, 'k'), bb[ME])
+
+// Friends and Home follow the group's settle-up plan: paying what the group asks leaves nothing owed anywhere.
+{
+  const mk = (me: string, selfId?: string): Group => ({ id: 'chain', name: 'C', kind: 'trip', theme: 'goa', selfId, members: [me, 'b', 'c'].map(id => ({ id, name: id })), expenses: [
+    { id: '1', title: '', cat: '', date: '2026-01-01', amount: 300, paid: { b: 300 }, owed: { [me]: 300 } }, // B paid for me
+    { id: '2', title: '', cat: '', date: '2026-01-01', amount: 300, paid: { c: 300 }, owed: { b: 300 } },    // C paid for B
+  ] })
+  const c = mk(ME)
+  assert.deepEqual(planOf(c), [{ from: ME, to: 'c', amount: 300 }])
+  assert.equal(between(c, ME, 'c'), -300); assert.equal(between(c, ME, 'b'), 0); assert.equal(between(c, 'c', ME), 300)
+  c.expenses.push({ id: 's', title: 'Settlement', cat: 'check', date: '2026-01-02', amount: 300, paid: { [ME]: 300 }, owed: { c: 300 }, settle: true })
+  assert.deepEqual([between(c, ME, 'b'), between(c, ME, 'c')], [0, 0], 'settled in the group = settled with each friend')
+  assert.notEqual(pairwise(c, ME, 'b'), 0, 'the expenses alone would still say I owe B')
+  // Everyone gets the same plan: my phone calls me ME, the server and my friends' phones use my member id.
+  const tie = (me: string, selfId?: string): Group => ({ id: 'tie', name: 'T', kind: 'trip', theme: 'goa', selfId, members: [me, 'a1', 'c1', 'd1'].map(id => ({ id, name: id })), expenses: [
+    { id: '1', title: '', cat: '', date: '2026-01-01', amount: 200, paid: { c1: 100, d1: 100 }, owed: { [me]: 100, a1: 100 } },
+  ] })
+  const onServer = planOf(tie('b1')), onPhone = planOf(tie(ME, 'b1')).map(t => ({ ...t, from: t.from === ME ? 'b1' : t.from, to: t.to === ME ? 'b1' : t.to }))
+  assert.deepEqual(onPhone, onServer)
+  // what I owe or am owed across the plan is my group balance
+  const bt = balances(trio)
+  assert.equal(between(trio, ME, 'r') + between(trio, ME, 'k'), bt[ME])
+}
+console.log('settle plan ok')
 
 // audit: canonical JSON ignores key order; effects sum to zero and follow confirmations
 assert.equal(canon({ b: 1, a: { d: [2, { y: 1, x: null }], c: 'x' } }), canon({ a: { c: 'x', d: [2, { x: null, y: 1 }] }, b: 1 }))

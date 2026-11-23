@@ -160,14 +160,16 @@ export function simplify(bal: Record<Id, number>): Transfer[] {
   return out
 }
 
-/** Greedy largest-debtor → largest-creditor: at most n-1 payments. */
+/** Greedy largest-debtor → largest-creditor: at most n-1 payments. Equal amounts go by id, so the answer never
+ * depends on the order the balances came in. */
 export function greedy(bal: Record<Id, number>): Transfer[] {
   const cr = Object.entries(bal).filter(([, v]) => v > 0).map(([k, v]) => ({ k, v }))
   const dr = Object.entries(bal).filter(([, v]) => v < 0).map(([k, v]) => ({ k, v: -v }))
   const out: Transfer[] = []
+  const big = (a: { k: Id; v: number }, b: { k: Id; v: number }) => b.v - a.v || (a.k < b.k ? -1 : 1)
   while (cr.length && dr.length) {
-    cr.sort((a, b) => b.v - a.v)
-    dr.sort((a, b) => b.v - a.v)
+    cr.sort(big)
+    dr.sort(big)
     const amount = Math.min(cr[0].v, dr[0].v)
     out.push({ from: dr[0].k, to: cr[0].k, amount })
     cr[0].v -= amount
@@ -177,6 +179,27 @@ export function greedy(bal: Record<Id, number>): Transfer[] {
   }
   return out
 }
+
+/** A group's settle-up plan: the one list of payments every screen (and Ask Plico) shows. Worked out on the server's
+ * member ids, so everyone in the group gets the same plan on their own phone, whichever way ties could have gone. */
+const plans = new Map<Id, { key: string; plan: Transfer[] }>()
+export function planOf(g: Group): Transfer[] {
+  const bal = balances(g), key = `${g.selfId ?? ''}|${JSON.stringify(bal)}`
+  const hit = plans.get(g.id)
+  if (hit?.key === key) return hit.plan
+  const self = g.selfId && g.selfId !== ME && !(g.selfId in bal) ? g.selfId : ME // on the phone I'm ME; on the server I'm selfId
+  const real = (k: Id) => (k === ME ? self : k), mine = (k: Id) => (k === self ? ME : k)
+  const plan = simplify(Object.fromEntries(Object.entries(bal).map(([k, v]) => [real(k), v])))
+    .map(t => ME in bal ? { ...t, from: mine(t.from), to: mine(t.to) } : t)
+  if (plans.size > 500) plans.clear()
+  plans.set(g.id, { key, plan })
+  return plan
+}
+/** What b pays a (positive) or a pays b (negative) in the group's settle-up plan. This is the balance between two
+ * people everywhere: settling what the group page asks for clears it on Friends and Home too. (pairwise() is the
+ * same question answered from the expenses themselves; Ask Plico uses it to explain where a balance came from.) */
+export const between = (g: Group, a: Id, b: Id) =>
+  planOf(g).reduce((n, t) => n + (t.from === b && t.to === a ? t.amount : t.from === a && t.to === b ? -t.amount : 0), 0)
 
 export function addMonth(date: string, day: number): string {
   const [y, m] = date.split('-').map(Number) // m is 1-based, so Date.UTC(y, m) is next month

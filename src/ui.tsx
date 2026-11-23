@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
-import { ME, balances, missedChecks, pairwise, showUtr, simplify, toCheck, today, verifyLabel, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
+import { ME, balances, missedChecks, between, planOf, showUtr, toCheck, today, verifyLabel, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import { update, useStore, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
@@ -815,8 +815,8 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
   // nothing to pay. Collect is derived so the tiles always add up to the total.
   // Grouped with friendsOf, so a spot waiting under a friend's email counts as that friend; anyone else on their own.
   const friends = friendsOf(s), theirs = new Set(friends.flatMap(f => f.spots.map(x => `${x.g.id}:${x.id}`)))
-  const nets = friends.map(f => f.spots.reduce((a, x) => a + (x.g.track ? 0 : pairwise(x.g, ME, x.id)), 0))
-  for (const { g } of live) for (const m of g.members) if (m.id !== ME && !theirs.has(`${g.id}:${m.id}`)) nets.push(pairwise(g, ME, m.id))
+  const nets = friends.map(f => f.spots.reduce((a, x) => a + (x.g.track ? 0 : between(x.g, ME, x.id)), 0))
+  for (const { g } of live) for (const m of g.members) if (m.id !== ME && !theirs.has(`${g.id}:${m.id}`)) nets.push(between(g, ME, m.id))
   const pay = nets.reduce((a, n) => a + Math.max(-n, 0), 0)
   const collect = total + pay
   const open = rows.filter(r => r.net && !r.g.track).length
@@ -939,8 +939,8 @@ function DashNeeds({ s }: { s: State }) {
   const owe = friendsOf(s)
     .map(f => {
       const live = f.spots.filter(x => !x.g.track)
-      const n = live.reduce((a, x) => a + pairwise(x.g, ME, x.id), 0)
-      const where = live.filter(x => pairwise(x.g, ME, x.id) !== 0)
+      const n = live.reduce((a, x) => a + between(x.g, ME, x.id), 0)
+      const where = live.filter(x => between(x.g, ME, x.id) !== 0)
       return { f, n, where }
     })
     .filter(x => x.n < 0).sort((a, b) => a.n - b.n)
@@ -986,7 +986,7 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
   const total = spent.reduce((a, e) => a + e.amount, 0)
   const share = spent.reduce((a, e) => a + (e.owed[ME] ?? 0), 0)
   const paid = spent.reduce((a, e) => a + (e.paid[ME] ?? 0), 0)
-  const debts = simplify(bal)
+  const debts = planOf(g)
   const toMe = debts.filter(d => d.to === ME)
   const friends = friendsOf(s)
   const burst = useJustSettled(g.id, debts.length)

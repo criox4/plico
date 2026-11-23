@@ -2,7 +2,7 @@
 // model runs. The model can name groups and people, but only inside this world: nothing else is reachable from here.
 // Money is computed and written out here, so the model never does arithmetic. Drafts only describe an action; the
 // app performs it when the person taps.
-import { ME, allocate, balances, friendParts, inr, itemSplit, pairwise, simplify, type Expense, type Group } from '../src/logic.ts'
+import { ME, allocate, balances, friendParts, inr, itemSplit, between, planOf, type Expense, type Group } from '../src/logic.ts'
 
 export type WMember = { id: string; name: string; email: string | null; joined: boolean }
 export type WGroup = Group & { meId: string; people: WMember[]; kind: string }
@@ -38,13 +38,13 @@ const findGroup = (w: World, name: string) => pick(w.groups, name, gname, 'group
 const isMe = (s: string) => /^(me|i|myself|you|self)$/i.test(s.trim())
 const findPerson = (g: WGroup, name: string) => (isMe(name) ? { ok: g.people.find(p => p.id === g.meId)! } : pick(g.people.filter(p => p.id !== g.meId), name, p => p.name, `person in ${gname(g)}`))
 
-/** Friends across groups, by email, with the pairwise balance (positive: they owe you). */
+/** Friends across groups, by email, with the balance between you by each group's settle-up plan, as the app shows it (positive: they owe you). */
 function friends(w: World) {
   const by = new Map<string, { name: string; n: number; groups: string[] }>()
   for (const g of w.groups) for (const p of g.people) {
     if (p.id === g.meId || !p.email) continue
     const f = by.get(p.email) ?? { name: p.name, n: 0, groups: [] }
-    f.n += pairwise(g, g.meId, p.id); f.groups.push(gname(g))
+    f.n += between(g, g.meId, p.id); f.groups.push(gname(g))
     by.set(p.email, f)
   }
   return [...by.values()]
@@ -88,7 +88,7 @@ const TOOLS: Record<string, (w: World, a: Args) => Out> = {
     if (str(a.group)) {
       const f = findGroup(w, str(a.group)); if ('error' in f) return { result: f }
       const g = f.ok, bal = balances(g)
-      return { result: { group: gname(g), your_balance: signed(bal[g.meId] ?? 0), settle_plan: simplify(bal).map(d => ({ from: who(g, d.from), to: who(g, d.to), amount: rs(d.amount) })) } }
+      return { result: { group: gname(g), your_balance: signed(bal[g.meId] ?? 0), settle_plan: planOf(g).map(d => ({ from: who(g, d.from), to: who(g, d.to), amount: rs(d.amount) })) } }
     }
     const fr = friends(w).filter(f => f.n).sort((x, y) => Math.abs(y.n) - Math.abs(x.n))
     const nets = w.groups.filter(g => !g.track).map(g => balances(g)[g.meId] ?? 0)
@@ -164,7 +164,7 @@ const TOOLS: Record<string, (w: World, a: Args) => Out> = {
     for (const g of gs.ok) {
       if (g.track) continue
       const p = findPerson(g, str(a.person)); if ('error' in p) continue
-      const d = simplify(balances(g)).find(t => (t.from === g.meId && t.to === p.ok.id) || (t.to === g.meId && t.from === p.ok.id))
+      const d = planOf(g).find(t => (t.from === g.meId && t.to === p.ok.id) || (t.to === g.meId && t.from === p.ok.id))
       if (!d) continue
       const summary = d.from === g.meId ? `You pay ${who(g, d.to)} ${rs(d.amount)} in ${gname(g)}.` : `${who(g, d.from)} pays you ${rs(d.amount)} in ${gname(g)}.`
       return { result: { drafted: summary, next: 'Shown as a card that opens the settle-up screen.' }, card: { type: 'settle', groupId: g.id, group: gname(g), from: d.from, to: d.to, amount: d.amount, summary } }
@@ -178,7 +178,7 @@ const TOOLS: Record<string, (w: World, a: Args) => Out> = {
     for (const g of gs.ok) {
       if (g.track) continue
       const p = findPerson(g, str(a.person)); if ('error' in p || p.ok.id === g.meId) continue
-      const d = simplify(balances(g)).find(t => t.from === p.ok.id && t.to === g.meId)
+      const d = planOf(g).find(t => t.from === p.ok.id && t.to === g.meId)
       if (!d) continue
       const summary = `Remind ${who(g, d.from)} about ${rs(d.amount)} in ${gname(g)}.`
       return { result: { drafted: summary, next: 'Shown as a card with a Send button.' }, card: { type: 'remind', groupId: g.id, group: gname(g), memberId: d.from, name: who(g, d.from), amount: d.amount, summary } }
@@ -310,11 +310,10 @@ const MORE: Record<string, (w: World, a: Args) => Out> = {
     const groups = f.ok.spots.filter(x => !x.g.track).map(({ g, id }) => {
       const rows = g.expenses.map(e => ({ e, n: pairOf(e, g.meId, id) })).filter(r => r.n)
       const total = rows.reduce((t, r) => t + r.n, 0)
-      const plan = simplify(balances(g)).find(t => (t.from === id && t.to === g.meId) || (t.from === g.meId && t.to === id))
-      const planN = plan ? (plan.to === g.meId ? plan.amount : -plan.amount) : 0
+      const planN = between(g, g.meId, id)
       return {
-        group: gname(g), from_expenses: signed(total), meaning: total > 0 ? `${clean(f.ok.name, 40)} owes you` : total < 0 ? `you owe ${clean(f.ok.name, 40)}` : 'even',
-        ...(planN !== total && { settle_plan: signed(planN), why_different: 'The group’s settle-up plan combines everyone’s debts into the fewest payments, so it can ask this person for a different amount than their share of what you paid. Each person’s total in the group is the same either way.' }),
+        group: gname(g), balance: signed(planN), meaning: planN > 0 ? `${clean(f.ok.name, 40)} owes you` : planN < 0 ? `you owe ${clean(f.ok.name, 40)}` : 'even',
+        ...(planN !== total && { from_expenses_alone: signed(total), why_different: 'The balance is what the group’s settle-up plan asks of you two: it combines everyone’s debts into the fewest payments, so it can differ from this person’s share of what you paid for each other. Each person’s total in the group is the same either way.' }),
         biggest: rows.sort((x, y) => Math.abs(y.n) - Math.abs(x.n)).slice(0, 12).map(r => ({
           date: r.e.date, title: clean(r.e.title), kind: r.e.settle ? 'payment' : 'expense', amount: rs(r.e.amount), paid_by: Object.keys(r.e.paid).map(k => who(g, k)).join(', '),
           effect: r.n > 0 ? `${clean(f.ok.name, 40)} owes you ${rs(r.n)} more` : `you owe ${clean(f.ok.name, 40)} ${rs(-r.n)} more (or they’re owed less)`,
@@ -322,7 +321,7 @@ const MORE: Record<string, (w: World, a: Args) => Out> = {
         ...(rows.length > 12 && { note: `The ${rows.length - 12} smaller entries aren’t listed.` }),
       }
     })
-    const total = f.ok.spots.filter(x => !x.g.track).reduce((t, { g, id }) => t + g.expenses.reduce((u, e) => u + pairOf(e, g.meId, id), 0), 0)
+    const total = f.ok.spots.filter(x => !x.g.track).reduce((t, { g, id }) => t + between(g, g.meId, id), 0)
     return { result: { person: clean(f.ok.name, 40), overall: signed(total), overall_meaning: total > 0 ? 'they owe you' : total < 0 ? 'you owe them' : 'even', groups } }
   },
 
@@ -359,7 +358,7 @@ const MORE: Record<string, (w: World, a: Args) => Out> = {
     if (!live.length) return { result: { error: `You don’t share a group that tracks balances with ${clean(f.ok.name, 40)}.` } }
     // What the settle-up plan says between you two in each group (positive: they pay you).
     const owing = live.map(({ g, id }) => {
-      const t = simplify(balances(g)).find(x => (x.from === id && x.to === g.meId) || (x.from === g.meId && x.to === id))
+      const t = planOf(g).find(x => (x.from === id && x.to === g.meId) || (x.from === g.meId && x.to === id))
       return { g, id, n: t ? (t.to === g.meId ? t.amount : -t.amount) : 0 }
     }).filter(x => x.n && (!dir || (dir === 'in') === (x.n > 0)))
     let pickd = owing.length === 1 ? owing[0] : undefined
@@ -467,7 +466,7 @@ export const TOOL_DEFS = [
   }, ['title'])],
   ['draft_settlement', 'Prepare settling up between the person and someone. Opens the settle-up screen when tapped.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
   ['draft_reminder', 'Prepare a reminder to someone who owes the person money. Sent only when tapped.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
-  ['explain_balance', 'Why the person and someone owe what they do: the balance from the expenses themselves, group by group, the entries that moved it most, and the group’s settle-up plan when that differs.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
+  ['explain_balance', 'Why the person and someone owe what they do: the balance between them group by group (the group’s settle-up plan), the entries that moved it most, and what the expenses alone would say when that differs.', S('', { person: s('Their name'), group: GROUP }, ['person'])],
   ['pending', 'Payments their payee hasn’t verified yet (they already count in balances), and ones marked as not arrived (those don’t count), with ids.', S('No arguments.')],
   ['confirm_payment', 'Prepare verifying a payment someone says they made to the person (only payments to the person). It already counts; a card with Got it (verifies it) / Not yet (stops it counting).', S('', { person: s('Who paid'), group: GROUP, amount: n('Rupees'), expense_id: s('Id from pending') })],
   ['mark_paid', 'Prepare recording a payment between the person and someone (money already paid, e.g. by UPI or cash). Defaults to what the group’s settle-up plan says. This is how to bring a balance to zero; there is no other way to change a balance.', S('', {
