@@ -5,7 +5,8 @@ WORKDIR /app
 COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
 # Scripts off: postinstall would run prisma generate before the schema's env is known. Generate needs no real database.
-RUN npm ci --ignore-scripts && DIRECT_URL=postgresql://build@localhost/build npx prisma generate
+RUN npm ci --ignore-scripts && DIRECT_URL=postgresql://build@localhost/build npx prisma generate \
+  && npm prune --omit=dev --ignore-scripts # the build tools (vite, typescript, the prisma CLI) stay out of the running image
 
 COPY tsconfig.json ./
 COPY server ./server
