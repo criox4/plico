@@ -36,7 +36,7 @@ type Status = {
 const OUT = 'plico-signout-pending'
 /** Starting a sign-in that leaves the page (Google on the web): it supersedes a sign-out still waiting. */
 export const signingIn = () => localStorage.removeItem(OUT)
-const OKEY = 'splittr-outbox', IKEY = 'plico-issues', WKEY = 'plico-outbox-owner', CKEY = 'plico-cursor'
+const OKEY = 'splittr-outbox', IKEY = 'plico-issues', WKEY = 'plico-outbox-owner', CKEY = 'plico-cursor', FKEY = 'plico-full-at'
 const native = Capacitor.isNativePlatform()
 const read = <T>(k: string, empty: T): T => { try { return JSON.parse(localStorage.getItem(k) ?? '') ?? empty } catch { return empty } }
 const keep = (k: string, v: unknown) => {
@@ -278,10 +278,18 @@ export function toClient(sg: ServerGroup, userId: string): Group {
   }
 }
 
-export async function pull() {
+/** One pull at a time. Asked for again while one is on the wire (launch does this two or three times over): the
+ *  callers share a single follow-up pull, which starts after it, so what they get is never older than their ask. */
+let pulling: Promise<void> | null = null, next: Promise<void> | null = null
+export function pull(): Promise<void> {
+  if (!pulling) return (pulling = pullNow().finally(() => { pulling = null }))
+  return (next ??= pulling.then(() => { next = null; return pull() }))
+}
+async function pullNow(): Promise<void> {
   const user = getState().user
   if (outbox.length || !user || !status.authed) return
   const known = getState().groups.map(g => g.id)
+  const full = !cursor
   const q = cursor ? `?since=${encodeURIComponent(cursor)}&known=${known.join(',')}` : ''
   let res: Response
   try { res = await req('/api/groups' + q) } catch { return setStatus({ offline: true }) }
@@ -312,6 +320,7 @@ export async function pull() {
     d.friends = data.friends ?? []
   })
   setCursor(gap ? null : data.now)
+  if (full) localStorage.setItem(FKEY, String(Date.now()))
   snap = getState()
   setStatus({ offline: false, synced: true })
   void req('/api/me/activity?peek=1').then(r => (r.ok ? r.json() : null)).then(j => { const u = UnreadOut.safeParse(j); if (u.success) setStatus({ unread: u.data.unread }) }).catch(() => {})
@@ -541,7 +550,9 @@ export function startSync() {
   // The store hydrates from IndexedDB before this runs: start from what it loaded.
   snap = getState()
   status = { ...status, authed: !!getState().user }
-  setCursor(null) // a full pull at every launch: cheap insurance against anything a delta could have missed
+  // A full pull once a day, as insurance against anything a delta could have missed; launches in between only fetch
+  // what changed since the last pull, however much history the groups hold.
+  if (Date.now() - Number(localStorage.getItem(FKEY) ?? 0) > 864e5) setCursor(null)
   onLocalChange(() => { clearTimeout(timer); timer = setTimeout(queueNow, 400) })
   // The sign-in options and AI switch: asked at boot, and again on reconnecting or every 30s until an answer arrives,
   // so a launch on bad signal doesn't hide Ask Plico and Google sign-in for the whole session.
