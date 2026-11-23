@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, inr, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, friendsIn, findFriend, personKey, verifyLabel, missedChecks, showUtr, toCheck, type Group } from './logic.ts'
+import { ME, pairwise, canon, effectOf, auditPayload, enqueue, rebase, changes, summary, type Op, type Snap, allocate, inr, sharesError, split, balances, simplify, addMonth, runRecurring, toPaise, encodeShare, decodeShare, needsConfirm, parseSplitwise, fromSplitwise, parseQuick, itemSplit, friendParts, greedy, scrub, normPhone, between, planOf, friendsIn, findFriend, personKey, verifyLabel, missedChecks, showUtr, toCheck, type Group } from './logic.ts'
 import { gaze, lingers } from './anim.ts'
 
 const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
@@ -49,6 +49,9 @@ assert.equal(g.expenses[2].repeat!.next, '2026-04-30')
 const sh = { g: "Goa '26 🌴", f: 'Karan', t: 'Arjun', v: 'arjun@okhdfc', a: 184200 }
 assert.deepEqual(decodeShare(encodeShare(sh)), sh)
 assert.equal(decodeShare('garbage'), null)
+assert.equal(decodeShare(encodeShare({ ...sh, g: 5 as unknown as string })), null, 'a pay link with a non-text field is refused')
+assert.equal(decodeShare(encodeShare({ ...sh, t: 'x'.repeat(500) })), null)
+assert.equal(decodeShare(encodeShare({ ...sh, a: 1.5 })), null)
 const m = new Set(['a', 'b'])
 assert.equal(sharesError(1000, { a: 1000 }, { a: 500, b: 500 }, m), null)
 assert.ok(sharesError(1000, { a: 900 }, { a: 500, b: 500 }, m))
@@ -180,6 +183,30 @@ assert.equal(pairwise(trio, 'r', 'k'), 0)
 const bb = balances(trio)
 assert.equal(pairwise(trio, ME, 'r') + pairwise(trio, ME, 'k'), bb[ME])
 
+// Friends and Home follow the group's settle-up plan: paying what the group asks leaves nothing owed anywhere.
+{
+  const mk = (me: string, selfId?: string): Group => ({ id: 'chain', name: 'C', kind: 'trip', theme: 'goa', selfId, members: [me, 'b', 'c'].map(id => ({ id, name: id })), expenses: [
+    { id: '1', title: '', cat: '', date: '2026-01-01', amount: 300, paid: { b: 300 }, owed: { [me]: 300 } }, // B paid for me
+    { id: '2', title: '', cat: '', date: '2026-01-01', amount: 300, paid: { c: 300 }, owed: { b: 300 } },    // C paid for B
+  ] })
+  const c = mk(ME)
+  assert.deepEqual(planOf(c), [{ from: ME, to: 'c', amount: 300 }])
+  assert.equal(between(c, ME, 'c'), -300); assert.equal(between(c, ME, 'b'), 0); assert.equal(between(c, 'c', ME), 300)
+  c.expenses.push({ id: 's', title: 'Settlement', cat: 'check', date: '2026-01-02', amount: 300, paid: { [ME]: 300 }, owed: { c: 300 }, settle: true })
+  assert.deepEqual([between(c, ME, 'b'), between(c, ME, 'c')], [0, 0], 'settled in the group = settled with each friend')
+  assert.notEqual(pairwise(c, ME, 'b'), 0, 'the expenses alone would still say I owe B')
+  // Everyone gets the same plan: my phone calls me ME, the server and my friends' phones use my member id.
+  const tie = (me: string, selfId?: string): Group => ({ id: 'tie', name: 'T', kind: 'trip', theme: 'goa', selfId, members: [me, 'a1', 'c1', 'd1'].map(id => ({ id, name: id })), expenses: [
+    { id: '1', title: '', cat: '', date: '2026-01-01', amount: 200, paid: { c1: 100, d1: 100 }, owed: { [me]: 100, a1: 100 } },
+  ] })
+  const onServer = planOf(tie('b1')), onPhone = planOf(tie(ME, 'b1')).map(t => ({ ...t, from: t.from === ME ? 'b1' : t.from, to: t.to === ME ? 'b1' : t.to }))
+  assert.deepEqual(onPhone, onServer)
+  // what I owe or am owed across the plan is my group balance
+  const bt = balances(trio)
+  assert.equal(between(trio, ME, 'r') + between(trio, ME, 'k'), bt[ME])
+}
+console.log('settle plan ok')
+
 // audit: canonical JSON ignores key order; effects sum to zero and follow confirmations
 assert.equal(canon({ b: 1, a: { d: [2, { y: 1, x: null }], c: 'x' } }), canon({ a: { c: 'x', d: [2, { x: null, y: 1 }] }, b: 1 }))
 assert.equal(canon({ a: undefined, b: 1 }), '{"b":1}')
@@ -253,6 +280,7 @@ console.log('simplify ok')
   assert.deepEqual(scrub(['#/u/ab12cd34ef', '/api/public/u/ab12cd34ef', '/api/friends/code/ab12cd34ef', '/api/friends']), ['#/u/[hidden]', '/api/public/u/[hidden]', '/api/friends/code/[hidden]', '/api/friends'])
   assert.equal(scrub({ release: 'plico@0.1.0' }).release, 'plico@0.1.0', 'a release name is not an email')
   assert.equal(scrub('A.B@Mail.Example.IN').toString(), '[email]')
+  assert.equal(scrub('https://plico.space/#/s/eyJnIjoiR29hIn0'), 'https://plico.space/#/s/[hidden]', 'pay links carry names and a UPI ID')
   assert.equal(scrub('#/u/abc123xyz0 /api/public/u/abc123xyz0'), '#/u/[hidden] /api/public/u/[hidden]', 'friend links are secrets too')
   assert.equal(scrub('No spot for +919876543210 or +91 98765 43210').toString(), 'No spot for [phone] or [phone]')
   console.log('crash report scrubbing ok')
@@ -297,7 +325,7 @@ assert.equal(normPhone('riya@x.com'), null)
   // Settle first, verify after: the label says how sure we are; the payee's list holds only unanswered payments to them.
   const e = { id: 'x', title: 'Settlement', cat: 'check', date: '2026-10-01', amount: 500, paid: { a: 500 }, owed: { [ME]: 500 }, settle: true as const }
   assert.equal(verifyLabel({ ...e, pending: true }), 'Not verified')
-  assert.equal(verifyLabel({ ...e, verifiedBy: 'screenshot' }), 'Verified · screenshot')
+  assert.equal(verifyLabel({ ...e, verifiedBy: 'screenshot' }), 'Receipt matched')
   assert.equal(verifyLabel({ ...e, verifiedBy: 'payee' }), 'Verified')
   assert.equal(verifyLabel({ ...e, pending: true, rejected: true }), '')
   assert.equal(missedChecks({ method: 'upi', checks: { amount: false, payee: true, time: false, fresh: true } }), 'amount / time')

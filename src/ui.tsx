@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
-import { ME, balances, missedChecks, pairwise, showUtr, simplify, toCheck, today, verifyLabel, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
+import { ME, balances, missedChecks, between, planOf, showUtr, toCheck, today, verifyLabel, type Expense, inr, upiLink, isVpa, encodeShare, type Group, type Id, type Kind, type Transfer } from './logic'
 import { update, useStore, type State } from './store'
 import { THEMES, ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
@@ -414,7 +414,7 @@ function Sidebar({ s, add, unread, here }: { s: State; add: string; unread: numb
       {item('/', 'home', 'Home', !here[0])}
       {item('/friends', 'direct', 'Friends', here[0] === 'friends' || here[0] === 'f')}
       {item('/activity', 'log', 'Activity', here[0] === 'activity', unread)}
-      <p className="side-head"><span>Groups</span><a href="#/new" className="link">New</a></p>
+      <p className="side-head"><a href="#/groups" className={here[0] === 'groups' ? 'on' : undefined} aria-current={here[0] === 'groups' ? 'page' : undefined}>Groups</a><a href="#/new" className="link">New</a></p>
       <ul className="side-groups">
         {groups.map(g => {
           const n = balances(g)[ME] ?? 0, gt = theme(g.theme)
@@ -682,16 +682,125 @@ export function ConfirmCard({ g, e, showGroup }: { g: Group; e: Expense; showGro
     </m.li>
   )
 }
+// ---------- "that's me" requests waiting on you (server-side only: they aren't part of the synced ledger) ----------
+type Claim = { id: string; groupId: string; name: string; phone: string | null; email: string | null; by: { name: string; email: string } }
+let claims: Claim[] = []
+const claimSubs = new Set<() => void>()
+const setClaims = (c: Claim[]) => { claims = c; claimSubs.forEach(f => f()) }
+const loadClaims = () => api<{ claims: Claim[] }>('/api/me/claims').then(r => setClaims(r.claims), () => {})
+/** Fetched when a screen showing them opens and whenever the app comes back to the front. */
+function useClaims() {
+  const list = useSyncExternalStore(f => (claimSubs.add(f), () => { claimSubs.delete(f) }), () => claims)
+  useEffect(() => {
+    void loadClaims()
+    const again = () => { if (document.visibilityState === 'visible') void loadClaims() }
+    document.addEventListener('visibilitychange', again)
+    return () => document.removeEventListener('visibilitychange', again)
+  }, [])
+  return list
+}
+
+/** Someone says a spot you added is them: you know them, so you say whether it is. Yes moves that spot, and its balance, to them. */
+function ClaimCard({ c, g, showGroup }: { c: Claim; g?: Group; showGroup?: boolean }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const answer = async (yes: boolean) => {
+    setBusy(true); setErr('')
+    try {
+      await api(`/api/groups/${c.groupId}/claims/${c.id}`, { method: 'POST', body: JSON.stringify({ yes }) })
+      setClaims(claims.filter(x => x.id !== c.id))
+      if (yes) void pull()
+    } catch (e) { setErr((e as Error).message); setBusy(false); void loadClaims() }
+  }
+  return (
+    <m.li className="confirm-card" {...ROW}>
+      <p><strong>{c.by.name} says they’re {c.name}</strong>
+        <small>{showGroup && g ? `${groupTitle(g)} · ` : ''}Signed in as {c.by.email}. {c.name} was added with {c.phone ?? c.email}. If it’s them, the spot and its balance become theirs.</small>
+        {err && <small className="error" role="alert">{err}</small>}</p>
+      <span className="debt-actions">
+        <button className="btn-sm" disabled={busy} onClick={() => void answer(true)}><Icon n="check" size={16} />That’s them</button>
+        <button className="btn-sm ghost" disabled={busy} onClick={() => void answer(false)}>Not them</button>
+      </span>
+    </m.li>
+  )
+}
+const claimCards = (list: Claim[], groups: Group[], showGroup?: boolean) =>
+  list.flatMap(c => { const g = groups.find(x => x.id === c.groupId); return g ? [<ClaimCard key={'c' + c.id} c={c} g={g} showGroup={showGroup} />] : [] })
+
 const waitingFor = (g: Group) => g.expenses.filter(toCheck)
 const bounced = (g: Group) => g.expenses.filter(e => e.rejected && ends(e).from === ME)
 /** Settlements that need you: say whether money arrived, or deal with money that didn't. */
 function NeedsYou({ groups, showGroup }: { groups: Group[]; showGroup?: boolean }) {
-  const items = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup={showGroup} />),
-    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup={showGroup} />)])
+  const list = useClaims()
+  const items = [...claimCards(list, groups, showGroup), ...groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup={showGroup} />),
+    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup={showGroup} />)])]
   return (
     <AnimatePresence initial={false}>
       {items.length > 0 && <m.div key="needs" {...FADE}><SectionHead title="Needs you" /><ol className="debts"><AnimatePresence initial={false}>{items}</AnimatePresence></ol></m.div>}
     </AnimatePresence>
+  )
+}
+
+/** Home shows this many groups and people; the rest are a tap away on their own pages. */
+const HOME_ROWS = 4
+type GroupRow = { g: Group; net: number }
+const lastDate = (g: Group) => g.expenses.reduce((a, e) => (e.date > a ? e.date : a), '')
+/** Most recent activity first; a group without expenses by when it was made (newest first). */
+const byRecent = (rows: GroupRow[]) => rows.map((r, i) => ({ r, i, d: lastDate(r.g) }))
+  .sort((a, b) => b.d.localeCompare(a.d) || b.i - a.i).map(x => x.r)
+
+function GroupSlips({ rows }: { rows: GroupRow[] }) {
+  return (
+    <ol className="slips">
+      {rows.map(({ g, net }, i) => {
+        const gt = theme(g.theme)
+        const last = lastDate(g)
+        return (
+          <li key={g.id} style={{ '--i': i, '--gnum': `${gt.num}, ${gt.ui}, system-ui` } as CSSProperties}>
+            <button className="slip" onClick={() => go('/g/' + g.id)}>
+              <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
+              <span className="slip-body">
+                <span className="serial">No. {String(i + 1).padStart(2, '0')}</span>
+                <strong>{g.name}</strong>
+                <small>{count(g.members.length, 'person', 'people')}{last ? ` · ${ago(last)}` : ' · no expenses yet'}</small>
+              </span>
+              <span className="slip-amt">{net ? <Money p={net} /> : <span className="money settled-ink"><Icon n="check" size={20} /></span>}<small>{g.track ? 'tracking' : verbShort(g, net)}</small></span>
+            </button>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+type GroupFilter = 'all' | 'owed' | 'owe' | 'even'
+/** Every group (not friends' balances), newest activity first, with filters and search once the list gets long. */
+export function GroupsPage({ s }: { s: State }) {
+  const rows = byRecent(s.groups.filter(g => g.kind !== 'direct').map(g => ({ g, net: g.track ? 0 : balances(g)[ME] ?? 0 })))
+  const [filter, setFilter] = useState<GroupFilter>('all')
+  const [q, setQ] = useState('')
+  const t = q.trim().toLowerCase()
+  const is = (f: GroupFilter, n: number) => f === 'all' || (f === 'owed' ? n > 0 : f === 'owe' ? n < 0 : !n)
+  const shown = rows.filter(r => is(filter, r.net) && (!t || r.g.name.toLowerCase().includes(t)))
+  const counts = { all: rows.length, owed: rows.filter(r => r.net > 0).length, owe: rows.filter(r => r.net < 0).length, even: rows.filter(r => !r.net).length }
+  return (
+    <Screen t={s.theme} back fab={rows.length ? '/add' : '/new'} title="Groups">
+      <SectionHead title={rows.length ? count(rows.length, 'group', 'groups') : 'Groups'} action={<button className="link" onClick={() => go('/new')}>New group</button>} />
+      {rows.length > 3 && (
+        <div className="seg friend-filter" role="tablist" aria-label="Show">
+          {([['all', 'All'], ['owed', 'Owe you'], ['owe', 'You owe'], ['even', 'Settled']] as [GroupFilter, string][]).map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>{filter === id && <SegPill id="groups" />}{label}<small>{counts[id]}</small></button>
+          ))}
+        </div>
+      )}
+      {rows.length > 8 && (
+        <label className="field search-field"><span className="sr-only">Find a group</span><Icon n="search" />
+          <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Find a group" /></label>
+      )}
+      {rows.length ? (shown.length ? <GroupSlips rows={shown} /> : <p className="muted-p">No groups here{t ? ` matching “${q.trim()}”` : ''}.</p>)
+        : <div className="empty-state"><Plico mood="empty" size={72} watch /><p><strong>No groups yet.</strong> Start one for a trip, the flat or Friday football.</p>
+          <button className="btn primary" onClick={() => go('/new')}><Icon n="plus" size={18} />New group</button></div>}
+    </Screen>
   )
 }
 
@@ -706,13 +815,14 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
   // nothing to pay. Collect is derived so the tiles always add up to the total.
   // Grouped with friendsOf, so a spot waiting under a friend's email counts as that friend; anyone else on their own.
   const friends = friendsOf(s), theirs = new Set(friends.flatMap(f => f.spots.map(x => `${x.g.id}:${x.id}`)))
-  const nets = friends.map(f => f.spots.reduce((a, x) => a + (x.g.track ? 0 : pairwise(x.g, ME, x.id)), 0))
-  for (const { g } of live) for (const m of g.members) if (m.id !== ME && !theirs.has(`${g.id}:${m.id}`)) nets.push(pairwise(g, ME, m.id))
+  const nets = friends.map(f => f.spots.reduce((a, x) => a + (x.g.track ? 0 : between(x.g, ME, x.id)), 0))
+  for (const { g } of live) for (const m of g.members) if (m.id !== ME && !theirs.has(`${g.id}:${m.id}`)) nets.push(between(g, ME, m.id))
   const pay = nets.reduce((a, n) => a + Math.max(-n, 0), 0)
   const collect = total + pay
   const open = rows.filter(r => r.net && !r.g.track).length
   const people = friends
-    .map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name)).slice(0, 6)
+    .map(f => ({ f, n: friendBalance(f) })).sort((a, b) => Math.abs(b.n) - Math.abs(a.n) || a.f.name.localeCompare(b.f.name)).slice(0, HOME_ROWS)
+  const latest = byRecent(rows).slice(0, HOME_ROWS)
   const recent = s.groups
     .flatMap(g => g.expenses.map((e, i) => ({ g, e, i })))
     .sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
@@ -749,33 +859,17 @@ export function Home({ s, t, banner, preview }: { s: State; t: ThemeId; banner?:
           )}
           <ThisMonth groups={s.groups} />
           {!fresh && <section className="d-groups" aria-labelledby="d-groups">
-            <SectionHead title="Groups" id="d-groups" action={<button className="link" onClick={() => go('/new')}>New group</button>} />
-            <ol className="slips">
-              {rows.map(({ g, net }, i) => {
-                const gt = theme(g.theme)
-                const last = g.expenses.reduce((a, e) => (e.date > a ? e.date : a), '')
-                return (
-                  <li key={g.id} style={{ '--i': i, '--gnum': `${gt.num}, ${gt.ui}, system-ui` } as CSSProperties}>
-                    <button className="slip" onClick={() => go('/g/' + g.id)}>
-                      <span className="slip-kind" style={{ background: gt.c.accent, color: gt.c.onAccent }}>{g.emoji ? <span className="slip-emoji">{g.emoji}</span> : <Icon n={g.kind} />}</span>
-                      <span className="slip-body">
-                        <span className="serial">No. {String(i + 1).padStart(2, '0')}</span>
-                        <strong>{g.name}</strong>
-                        <small>{count(g.members.length, 'person', 'people')}{last ? ` · ${ago(last)}` : ' · no expenses yet'}</small>
-                      </span>
-                      <span className="slip-amt">{net ? <Money p={net} /> : <span className="money settled-ink"><Icon n="check" size={20} /></span>}<small>{g.track ? 'tracking' : verbShort(g, net)}</small></span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ol>
+            <SectionHead title="Groups" id="d-groups" action={rows.length > HOME_ROWS
+              ? <button className="link" onClick={() => go('/groups')}>All groups ({rows.length})</button>
+              : <button className="link" onClick={() => go('/new')}>New group</button>} />
+            <GroupSlips rows={latest} />
           </section>}
         </div>
 
         <aside className="dash-rail" aria-label="People and activity">
           {(!fresh || s.groups.length > 0) && <DashNeeds s={s} />}
           {people.length > 0 && <section className="d-people" aria-labelledby="d-people">
-            <SectionHead title="People" id="d-people" action={<button className="link" onClick={() => go('/friends')}>All friends</button>} />
+            <SectionHead title="People" id="d-people" action={<button className="link" onClick={() => go('/friends')}>{friends.length > HOME_ROWS ? `All friends (${friends.length})` : 'All friends'}</button>} />
             <ol className="d-list">
               {people.map(({ f, n }) => (
                 <li key={f.key}><button className="d-row" onClick={() => go(friendPath(f))}>
@@ -839,13 +933,14 @@ function ThisMonth({ groups }: { groups: Group[] }) {
  *  (if Bala owes you more elsewhere, you don't owe Bala). Tracking-only groups never ask for money. */
 function DashNeeds({ s }: { s: State }) {
   const groups = s.groups
-  const cards = groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup />),
-    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup />)])
+  const list = useClaims()
+  const cards = [...claimCards(list, groups, true), ...groups.flatMap(g => [...waitingFor(g).map(e => <ConfirmCard key={e.id} g={g} e={e} showGroup />),
+    ...bounced(g).map(e => <NotReceivedCard key={e.id} g={g} e={e} showGroup />)])]
   const owe = friendsOf(s)
     .map(f => {
       const live = f.spots.filter(x => !x.g.track)
-      const n = live.reduce((a, x) => a + pairwise(x.g, ME, x.id), 0)
-      const where = live.filter(x => pairwise(x.g, ME, x.id) !== 0)
+      const n = live.reduce((a, x) => a + between(x.g, ME, x.id), 0)
+      const where = live.filter(x => between(x.g, ME, x.id) !== 0)
       return { f, n, where }
     })
     .filter(x => x.n < 0).sort((a, b) => a.n - b.n)
@@ -891,7 +986,7 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
   const total = spent.reduce((a, e) => a + e.amount, 0)
   const share = spent.reduce((a, e) => a + (e.owed[ME] ?? 0), 0)
   const paid = spent.reduce((a, e) => a + (e.paid[ME] ?? 0), 0)
-  const debts = simplify(bal)
+  const debts = planOf(g)
   const toMe = debts.filter(d => d.to === ME)
   const friends = friendsOf(s)
   const burst = useJustSettled(g.id, debts.length)
@@ -908,7 +1003,6 @@ export function GroupView({ s, g, t = pageTheme(s, g) }: { s: State; g: Group; t
         caption={<>{inr(total)} spent · your share {inr(share)} · you paid {inr(paid)}</>} />
       {spent.length > 0 && !debts.length && <Seal t={t} burst={burst} />}
       <IssuesBanner gid={g.id} />
-      <ClaimRequests g={g} />
       <NotJoined g={g} />
       <PushAsk g={g} />
       <NeedsYou groups={[g]} />
@@ -1010,44 +1104,6 @@ function InstallAsk() {
 }
 
 /** Everyone in a group should be on Plico: until they are, a nudge to invite them. */
-type Claim = { id: string; name: string; phone: string | null; email: string | null; by: { name: string; email: string } }
-/** Someone says a spot you added is them: you know them, so you say whether it is. Yes moves that spot, and its balance, to them. */
-function ClaimRequests({ g }: { g: Group }) {
-  const [claims, setClaims] = useState<Claim[]>([])
-  const [busy, setBusy] = useState('')
-  const [err, setErr] = useState('')
-  const load = () => api<{ claims: Claim[] }>(`/api/groups/${g.id}/claims`).then(r => setClaims(r.claims), () => {})
-  useEffect(() => {
-    if (g.kind === 'direct') return
-    void load()
-    const again = () => { if (document.visibilityState === 'visible') void load() }
-    document.addEventListener('visibilitychange', again)
-    return () => document.removeEventListener('visibilitychange', again)
-  }, [g.id, g.kind]) // eslint-disable-line react-hooks/exhaustive-deps
-  const answer = async (c: Claim, yes: boolean) => {
-    setBusy(c.id); setErr('')
-    try {
-      await api(`/api/groups/${g.id}/claims/${c.id}`, { method: 'POST', body: JSON.stringify({ yes }) })
-      setClaims(xs => xs.filter(x => x.id !== c.id))
-      if (yes) await pull()
-    } catch (e) { setErr((e as Error).message); void load() } finally { setBusy('') }
-  }
-  if (!claims.length) return null
-  return <>
-    {claims.map(c => (
-      <section key={c.id} className="confirm-card" role="status">
-        <p><strong>{c.by.name} says they’re {c.name}</strong>
-          <small>Signed in as {c.by.email}. {c.name} was added with {c.phone ?? c.email}. If it’s them, the spot and its balance become theirs.</small></p>
-        <span className="debt-actions">
-          <button className="btn-sm" disabled={!!busy} onClick={() => void answer(c, true)}>That’s them</button>
-          <button className="btn-sm ghost" disabled={!!busy} onClick={() => void answer(c, false)}>Not them</button>
-        </span>
-      </section>
-    ))}
-    {err && <p className="error" role="alert">{err}</p>}
-  </>
-}
-
 function NotJoined({ g }: { g: Group }) {
   const waiting = g.kind === 'direct' ? [] : g.members.filter(m => m.id !== ME && !m.joined)
   if (!waiting.length) return null
@@ -1172,7 +1228,7 @@ export function ProofSheet({ gid, eid, payee, method: m0 = 'upi', onClose }: { g
     try {
       const r = await addProof(gid, eid, await body())
       const miss = missedChecks(r.proof)
-      setDone(r.verifiedBy ? 'Verified from your receipt.' : miss ? `Couldn’t match it (${miss}). ${payee} will be asked to check.` : `Saved. ${payee} will be asked to check.`)
+      setDone(r.verifiedBy ? 'Your receipt matches this payment.' : miss ? `Couldn’t match it (${miss}). ${payee} will be asked to check.` : `Saved. ${payee} will be asked to check.`)
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
   return (

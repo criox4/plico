@@ -11,7 +11,7 @@ import { addProof, api, photoData, pull, readExpense, refreshUser, uploadImage, 
 import { takeShared } from './share'
 import { ensureFonts, theme, type ThemeId } from './themes'
 import { CATS, Icon } from './icons'
-import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, count, useGroupImage, ThemePicker, GroupView, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
+import { Avatar, Converge, Denomination, EMOJI, GROUP_KINDS, count, useGroupImage, ThemePicker, GroupView, GroupsPage, Home, KINDS, PUBLIC, Plico, Screen, Settle, SettlementProof, PaidCheck, askPaid, go, useQr, useRoute, wa, who, SegPill } from './ui'
 import { AccountHub, AgeGate, InvitePreview, AppearancePage, AuthFlow, Claim, GuardianConsent, GuardianWait, PrivacyPage, DeleteConfirm, DeletePage, DevicesPage, ProfilePage,
   NotificationsPage, Onboarding, ResetPassword, SecurityPage, Splash, Verified, VerifyBanner } from './account'
 import { Landing } from './Landing'
@@ -22,6 +22,8 @@ import { FriendPage, FriendSettle, Friends, PeoplePicker, WhatsAppInvite, emailO
 
 const back = () => (history.length > 1 ? history.back() : go('/'))
 const edit = (gid: Id, fn: (g: Group) => void) => update(d => { const g = d.groups.find(x => x.id === gid); if (g) fn(g) })
+/** A route segment, decoded; a malformed one ("%") stays as typed instead of crashing the screen. */
+const dec = (v: string) => { try { return decodeURIComponent(v) } catch { return v } }
 const digits = (v: string) => v.replace(/[^\d.]/g, '')
 /** "100000.5" as it's typed → "1,00,000.5": lakh grouping on the rupees, the decimals left as typed. */
 const grouped = (v: string) => { const [r, p] = v.split('.'); return (r ? Number(r).toLocaleString('en-IN') : '') + (p === undefined ? '' : '.' + p) }
@@ -89,11 +91,12 @@ function Page() {
   if (r[0] === 'import') return <ImportSplitwise s={s} />
   if (r[0] === 'sync') return <SyncIssues s={s} />
   if (r[0] === 'friends') return <Friends s={s} />
+  if (r[0] === 'groups') return <GroupsPage s={s} />
   if (r[0] === 'activity' || r[0] === 'log') return <Activity s={s} />
   if (r[0] === 'search') return <Search s={s} />
-  if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} k={decodeURIComponent(r[1])} /> : <FriendPage s={s} k={decodeURIComponent(r[1])} />
+  if (r[0] === 'f' && r[1]) return r[2] === 'settle' ? <FriendSettle s={s} k={dec(r[1])} /> : <FriendPage s={s} k={dec(r[1])} />
   if (r[0] === 'new' || (r[0] === 'add' && !s.groups.length)) return <NewGroup key={r[1]} s={s} preset={r[0] === 'new' ? r[1] : undefined} />
-  if (r[0] === 'add') return <ExpenseForm key={r.slice(1).join('/') || 'add'} s={s} shared={r[1] === 'shared'} friend={r[1] === 'f' && r[2] ? decodeURIComponent(r[2]) : undefined} />
+  if (r[0] === 'add') return <ExpenseForm key={r.slice(1).join('/') || 'add'} s={s} shared={r[1] === 'shared'} friend={r[1] === 'f' && r[2] ? dec(r[2]) : undefined} />
   const g = r[0] === 'g' ? s.groups.find(x => x.id === r[1]) : undefined
   if (g) {
     if (r[2] === 'add') return <ExpenseForm key="add" s={s} gid={g.id} />
@@ -103,7 +106,7 @@ function Page() {
     if (r[2] === 'e' && r[3]) return <ExpenseForm key={r[3]} s={s} gid={g.id} eid={r[3]} />
     if (r[2] === 'edit') return <GroupSettings s={s} g={g} />
     if (r[2] === 'invite' && g.kind !== 'direct') return <GetEveryoneIn s={s} g={g} />
-    if (r[2] === 'pay' && r[3] && r[4] && +r[5] > 0) {
+    if (r[2] === 'pay' && +r[5] > 0 && Number.isInteger(+r[5]) && +r[5] <= 2e9 && [r[3], r[4]].every(id => g.members.some(m => m.id === id))) {
       const [from, to] = [r[3], r[4]]
       const record = (p: number) => {
         const id = uid(), check = needsConfirm(g, to)

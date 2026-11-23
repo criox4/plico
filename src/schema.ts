@@ -2,8 +2,8 @@
 // The server validates requests with these; the app takes its types from them (z.infer) and checks the responses
 // that could corrupt its local copy (sync, conflicts, the audit log). zod/mini keeps the phone bundle small.
 import * as z from 'zod/mini'
-import { isVpa, normPhone } from './logic'
-import { THEMES, type ThemeId } from './themes'
+import { isVpa, normPhone } from './logic.ts'
+import { THEMES, type ThemeId } from './themes.ts'
 
 // ---------- building blocks ----------
 export const Id = z.string().check(z.regex(/^[\w:-]{1,64}$/))

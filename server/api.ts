@@ -21,6 +21,10 @@ import { sharesError } from '../src/logic.ts'
 type Env = { Variables: { userId: string; userName: string; sessionId: string } }
 const maskPhone = (p: string) => '•••• ' + p.slice(-4)
 const maskEmail = (e: string) => { const [u, d] = e.split('@'); return `${u[0]}•••@${d}` }
+/** The email and phone in an object, masked (other keys untouched; absent ones stay absent). */
+const maskContact = <T extends { email?: unknown; phone?: unknown }>(o: T) => ({
+  ...o, ...(typeof o.email === 'string' && { email: maskEmail(o.email) }), ...(typeof o.phone === 'string' && { phone: maskPhone(o.phone) }),
+})
 
 /** Bad input is the caller's mistake (400), not ours (500). Both routers use it. */
 const onError = (e: Error, c: Context) => {
@@ -61,20 +65,20 @@ publicApi.post('/guardian/:token', async c => {
 
 // Invite previews: what a link shows before anyone signs up. Just enough to decide (the group, who invited you),
 // never member names, emails or amounts, so a forwarded link doesn't leak the group.
-const peeks = limiter(60_000, 30)
-const peekLimit = (c: Context) => { const ip = clientIp(c); if (peeks.full(ip)) return true; peeks.hit(ip); return false }
+const peeks = limiter('peek', 60_000, 30)
+const peekLimit = (c: Context) => peeks.over(clientIp(c))
 const inviterOf = async (groupId: string, memberId?: string) => {
   const e = await db.auditEvent.findFirst({ where: { groupId, ...(memberId ? { memberId, kind: 'member.invited' } : { kind: 'group.created' }) }, orderBy: { seq: 'asc' }, select: { byName: true } })
   return e?.byName ?? 'A friend'
 }
 publicApi.get('/public/invites/:code', async c => {
-  if (peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
+  if (await peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
   const g = await db.group.findUnique({ where: { inviteCode: InviteCode.parse(c.req.param('code')) }, select: { id: true, name: true, kind: true, theme: true, _count: { select: { members: true } } } })
   if (!g || g.kind === 'direct') return c.json({ error: 'This invite link is no longer valid' }, 404)
   return c.json({ group: { name: g.name, kind: g.kind, theme: g.theme, people: g._count.members }, invitedBy: await inviterOf(g.id) })
 })
 publicApi.get('/public/claim/:token', async c => {
-  if (peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
+  if (await peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
   const token = c.req.param('token')
   if (!/^[a-f0-9]{32}$/.test(token)) return c.json({ error: 'This invite was already used or is no longer valid' }, 404)
   const m = await db.member.findUnique({ where: { inviteToken: token }, select: { id: true, name: true, email: true, userId: true, group: { select: { id: true, name: true, kind: true, theme: true } } } })
@@ -85,7 +89,7 @@ publicApi.get('/public/claim/:token', async c => {
 })
 // A personal friend link: who you'd be adding, a name and a face, nothing else.
 publicApi.get('/public/u/:code', async c => {
-  if (peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
+  if (await peekLimit(c)) return c.json({ error: 'Too many tries. Wait a minute.' }, 429)
   const code = FriendCode.safeParse(c.req.param('code'))
   const u = code.success ? await db.user.findUnique({ where: { friendCode: code.data }, select: { name: true, image: true } }) : null
   return u ? c.json(u) : c.json({ error: 'This link is no longer valid' }, 404)
@@ -174,10 +178,12 @@ api.get('/me/export', async c => {
   const groups = await db.group.findMany({
     where: { members: { some: { userId: uid } } },
     select: { id: true, name: true, kind: true, theme: true, emoji: true, createdAt: true,
-      members: { select: { id: true, name: true, upi: true, upi2: true, email: true, phone: true, userId: true } },
+      members: { select: { id: true, name: true, upi: true, upi2: true, email: true, phone: true, userId: true, addedById: true } },
       expenses: { select: { id: true, title: true, cat: true, date: true, amount: true, settle: true, pending: true, rejected: true, verifiedBy: true, proof: true, receipt: true, createdAt: true, version: true, deletedAt: true, shares: { select: { memberId: true, paid: true, owed: true } } } } },
   })
   const history = await db.auditEvent.findMany({ where: { byId: uid }, orderBy: { at: 'asc' }, select: { groupId: true, seq: true, kind: true, expenseId: true, memberId: true, at: true, before: true, after: true, effect: true } })
+  // Someone else's waiting person stays masked here too, as in /groups.
+  for (const g of groups) g.members = g.members.map(m => (!m.userId && m.addedById !== uid ? { ...m, ...maskContact(m) } : m))
   const data = { exportedAt: new Date(), note: 'Amounts are in paise (₹1 = 100 paise). Photos are listed by file name; download them from the app. "history" lists the changes you made.', user, signIns: accounts, sessions, groups, history }
   return c.body(JSON.stringify(data, null, 2), 200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="plico-export.json"' })
 })
@@ -200,6 +206,8 @@ const snapOf = (e: Omit<Stored, 'id' | 'groupId' | 'createdById' | 'createdAt' |
 })
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 class Stale extends Error {}
+const utrTaken = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002'
+const usedUtr = 'That transaction ID was just used to prove another payment.'
 
 /** 409: someone changed (or deleted) it after the version this edit started from. Carries their version and who made it. */
 async function conflict(c: { json: (b: unknown, s: 409) => Response }, eid: string) {
@@ -422,14 +430,16 @@ api.put('/groups/:gid/members/:mid', async c => {
   }
   // Until someone joins, their UPI IDs, phone and email belong to whoever added them. Anyone else changing them could send
   // everyone's "Pay Riya" to their own UPI ID, or move Riya's invite (and spot) to one they control.
-  if (m && !m.userId && m.addedById && m.addedById !== uid && (data.upi !== m.upi || data.upi2 !== m.upi2 || data.email !== m.email || data.phone !== m.phone)) {
-    const adder = await db.member.findFirst({ where: { groupId: gid, userId: m.addedById }, select: { name: true } })
-    if (adder) return c.json({ error: `Only ${adder.name}, who added ${m.name}, can change their UPI ID, phone or email.`, code: 'not-yours' }, 403)
+  // Nobody added them (they left the group, or an old group), or whoever did has gone: then it's the group's creator.
+  if (m && !m.userId && (data.upi !== m.upi || data.upi2 !== m.upi2 || data.email !== m.email || data.phone !== m.phone)) {
+    const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { createdById: true, members: { select: { userId: true, name: true, addedById: true } } } })
+    const owner = confirmerOf(g.members, m, g.createdById)
+    if (owner && owner.userId !== uid) return c.json({ error: `Only ${owner.name}${owner.userId === m.addedById ? `, who added ${m.name},` : ''} can change ${m.name}’s UPI ID, phone or email.`, code: 'not-yours' }, 403)
   }
   if (!m) {
     await db.$transaction(async tx => {
       await tx.member.create({ data: { id: mid, groupId: gid, addedById: uid, ...data } })
-      await audit(tx, gid, { kind: 'member.invited', memberId: mid, ...by, after: { name: data.name, email, ...(phone && { phone }) } })
+      await audit(tx, gid, { kind: 'member.invited', memberId: mid, ...by, after: maskContact({ name: data.name, email, ...(phone && { phone }) }) })
     })
   } else {
     const diff = changed({ name: m.name, upi: m.upi, upi2: m.upi2, email: m.email, phone: m.phone }, data)
@@ -438,7 +448,8 @@ api.put('/groups/:gid/members/:mid', async c => {
     const retire = !m.userId && (email !== m.email || phone !== m.phone) ? { inviteToken: null, invitedAt: null } : {}
     await db.$transaction(async tx => {
       await tx.member.update({ where: { id: mid }, data: { ...data, ...retire } })
-      await audit(tx, gid, { kind: 'member.edited', memberId: mid, ...by, ...diff })
+      // Everyone in the group reads the log: a waiting person's contact goes in masked.
+      await audit(tx, gid, { kind: 'member.edited', memberId: mid, ...by, before: maskContact(diff.before), after: maskContact(diff.after) })
     })
   }
   // A new email: link now if that person already has a verified account, otherwise email an invite.
@@ -494,16 +505,22 @@ async function ensureToken(mid: string) {
 // Invite link for one person (WhatsApp for phones), and a throttled email resend.
 api.post('/groups/:gid/members/:mid/invite', async c => {
   const [gid, mid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('mid'))]
-  if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
-  const m = await db.member.findUnique({ where: { id: mid } })
-  if (!m || m.groupId !== gid) return c.json(notFound, 404)
+  const uid = c.get('userId')
+  if (!(await membership(gid, uid))) return c.json(notFound, 404)
+  const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { createdById: true, members: true } })
+  const m = g.members.find(x => x.id === mid)
+  if (!m) return c.json(notFound, 404)
   if (m.userId) return c.json({ error: 'Already joined' }, 409)
+  // The link hands the spot (its balance, its UPI IDs) to whoever opens it, and shows its email: only for whoever
+  // would confirm a "that's me" for it. Anyone else can still have the invite re-sent to the address on file.
+  const mine = confirmerOf(g.members, m, g.createdById)?.userId === uid
+  const link = async () => (mine ? { link: claimUrl(await ensureToken(mid)) } : {})
   const { email } = InviteResendIn.parse(await c.req.json().catch(() => ({})))
   if (email && m.email) {
     if (m.invitedAt && Date.now() - m.invitedAt.getTime() < 60_000) return c.json({ error: 'Invite just sent. Try again in a minute.' }, 429)
-    if (!(await inviteByEmail(gid, mid, m.email, { id: c.get('userId'), name: c.get('userName') }))) return c.json({ error: capped, link: claimUrl(await ensureToken(mid)) }, 429)
+    if (!(await inviteByEmail(gid, mid, m.email, { id: uid, name: c.get('userName') }))) return c.json({ error: capped, ...(await link()) }, 429)
   }
-  return c.json({ link: claimUrl(await ensureToken(mid)) })
+  return c.json(await link())
 })
 
 api.delete('/groups/:gid/members/:mid', async c => {
@@ -514,7 +531,7 @@ api.delete('/groups/:gid/members/:mid', async c => {
   if (m.userId || m._count.shares) return c.json({ error: 'People with expenses or an account can’t be removed' }, 409)
   await db.$transaction(async tx => {
     await tx.member.delete({ where: { id: mid } })
-    await audit(tx, gid, { kind: 'member.removed', memberId: mid, byId: c.get('userId'), byName: c.get('userName'), before: { name: m.name, email: m.email } })
+    await audit(tx, gid, { kind: 'member.removed', memberId: mid, byId: c.get('userId'), byName: c.get('userName'), before: { name: m.name, email: m.email && maskEmail(m.email) } })
   })
   return c.json({ ok: true })
 })
@@ -539,7 +556,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   // verified one stays verified while it's the same payment.
   const payee = b.settle ? all.find(m => m.id === payeeId[0]) : undefined
   // Same payment as before: same amount, same payer, same payee. Changing who paid whom needs the new payee to confirm.
-  const samePay = existing && existing.amount === b.amount && existing.shares.find(s => s.paid > 0)?.memberId === payer[0] && existing.shares.find(s => s.owed > 0)?.memberId === payeeId[0]
+  const samePay = existing && existing.settle && existing.amount === b.amount && existing.shares.find(s => s.paid > 0)?.memberId === payer[0] && existing.shares.find(s => s.owed > 0)?.memberId === payeeId[0]
   const canConfirm = !payee?.userId || payee.userId === uid
   const pending = !!b.settle && (canConfirm ? !!b.pending : !(samePay && !existing.pending))
   // Only the payee can say it hasn't arrived: the one thing that stops a settlement counting.
@@ -623,6 +640,7 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
   let file = prev?.file, read: ReceiptRead | null = prev?.read ?? null
   if (b.image) {
     if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
+    if (await uploadFull(uid)) return c.json({ error: tooMany }, 429)
     const buf = Buffer.from(b.image.slice(b.image.indexOf(',') + 1), 'base64'), type = imageType(buf)
     if (!type) return c.json({ error: 'That isn’t a photo we can use (JPEG, PNG or WebP)' }, 400)
     if (buf.length > 6 << 20) return c.json({ error: 'Images up to 6 MB' }, 400)
@@ -631,13 +649,13 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
     read = null
     // AI off (or at the hourly limit): the receipt is kept for people to look at, but nothing reads or verifies it.
     const u = await db.user.findUnique({ where: { id: uid }, select: { aiOffAt: true } })
-    if (aiReady() && u && !u.aiOffAt && aiTurn(uid)) {
+    if (aiReady() && u && !u.aiOffAt && await aiTurn(uid)) {
       try { read = await readReceipt(b.image); count.ai.add(1, { result: 'receipt' }) }
       catch (err) { count.ai.add(1, { result: 'error' }); console.error('[ai]', (err as Error).message) }
     }
   }
   const utr = read?.utr ?? b.utr ?? null // the ID on the receipt wins: a typed one isn't proof
-  // ponytail: checked, not enforced: two proofs racing with the same transaction ID could both pass. A unique index on utr if that's ever seen.
+  // Checked here for the answer, and enforced by a unique index (expense_utr_live_key) for two proofs racing.
   const used = !!utr && (await db.expense.count({ where: { utr, id: { not: eid }, settle: true, deletedAt: null } })) > 0
   const payee = await db.member.findUniqueOrThrow({ where: { id: e.shares.find(s => s.owed > 0)!.memberId }, select: { name: true, upi: true, upi2: true } })
   const r = read || utr ? checkReceipt(read ?? { ...NO_READ, utr }, { amount: e.amount, createdAt: e.createdAt, payee }, used) : null
@@ -652,12 +670,15 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
         if (!count) throw new Stale()
         await audit(tx, gid, { kind: 'expense.edited', expenseId: eid, version: e.version + 1, byId: uid, byName: c.get('userName'), before: snapOf(e), after: snapOf({ ...e, pending: false, verifiedBy: 'screenshot' }) })
       })
-    } catch (err) { if (err instanceof Stale) return conflict(c, eid); throw err }
+    } catch (err) { if (err instanceof Stale) return conflict(c, eid); if (utrTaken(err)) return c.json({ error: usedUtr }, 409); throw err }
     dropOld()
     return c.json({ verifiedBy: 'screenshot', proof, version: e.version + 1, pending: false })
   }
   // Proof alone moves no money and changes no version: phones pick it up by its update time.
-  const saved = await db.expense.update({ where: { id: eid }, data: { proof, utr }, select: { verifiedBy: true, version: true, pending: true } })
+  // An ID that already proves another payment isn't kept on this one (the receipt's own reading stays in the proof).
+  const saved = await db.expense.update({ where: { id: eid }, data: { proof, utr: used ? null : utr }, select: { verifiedBy: true, version: true, pending: true } })
+    .catch(err => { if (utrTaken(err)) return null; throw err })
+  if (!saved) return c.json({ error: usedUtr }, 409)
   dropOld()
   return c.json({ verifiedBy: saved.verifiedBy, proof, version: saved.version, pending: saved.pending })
 })
@@ -700,6 +721,10 @@ api.post('/groups/:gid/expenses/:eid/restore', async c => {
 
 // ---------- files: images only, sniffed, stored under our names ----------
 const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
+/** Photos one person can upload in an hour: storage isn't free, and nothing else caps it. */
+const uploads = limiter('upload', 3600_000, 60)
+const uploadFull = (uid: string) => uploads.over(uid)
+const tooMany = 'That’s a lot of photos for one hour. Try again a little later.'
 async function readImage(c: { req: { arrayBuffer: () => Promise<ArrayBuffer> } }, max: number) {
   const buf = Buffer.from(await c.req.arrayBuffer())
   if (!buf.length || buf.length > max) return { error: `Images up to ${max >> 20} MB` }
@@ -710,6 +735,7 @@ async function readImage(c: { req: { arrayBuffer: () => Promise<ArrayBuffer> } }
 // Profile picture: replaces the old upload, sets user.image.
 api.post('/me/avatar', bodyLimit({ maxSize: 3 << 20, onError: c => c.json({ error: 'Images up to 3 MB' }, 413) }), async c => {
   if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
+  if (await uploadFull(c.get('userId'))) return c.json({ error: tooMany }, 429)
   const img = await readImage(c, 3 << 20)
   if ('error' in img) return c.json({ error: img.error }, 400)
   const uid = c.get('userId')
@@ -727,6 +753,7 @@ api.post('/groups/:gid/files', bodyLimit({ maxSize: 6 << 20, onError: c => c.jso
   const gid = Id.parse(c.req.param('gid'))
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
   if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
+  if (await uploadFull(c.get('userId'))) return c.json({ error: tooMany }, 429)
   const img = await readImage(c, 6 << 20)
   if ('error' in img) return c.json({ error: img.error }, 400)
   const name = `${crypto.randomUUID()}.${EXT[img.type]}`
@@ -744,21 +771,16 @@ api.get('/groups/:gid/files/:name', async c => {
 })
 
 // ---------- reading expenses: a sentence, a receipt photo, a payment screenshot ----------
-const reads = new Map<string, number[]>() // ponytail: per-process limiter; move to the DB if we run several instances
+const reads = limiter('ai-read', 3600_000, 40)
 /** One more AI read for this person this hour (receipts, screenshots, payment proof), or false at the limit. */
-function aiTurn(uid: string) {
-  const now = Date.now(), recent = (reads.get(uid) ?? []).filter(t => now - t < 3600_000)
-  if (recent.length >= 40) return false
-  reads.set(uid, [...recent, now])
-  return true
-}
+const aiTurn = async (uid: string) => !(await reads.over(uid))
 api.post('/ai/read', bodyLimit({ maxSize: 7 << 20, onError: c => c.json({ error: 'That photo is too large' }, 413) }), async c => {
   if (!aiReady()) return c.json({ error: 'Reading receipts isn’t set up yet' }, 503)
   const me = await db.user.findUnique({ where: { id: c.get('userId') }, select: { aiOffAt: true } })
   if (!me || me.aiOffAt) return c.json({ error: 'AI reading is off. Turn it on in Privacy and data.', code: 'ai-consent' }, 403)
   const b = ReadIn.parse(await c.req.json())
   const uid = c.get('userId')
-  if (!aiTurn(uid)) return c.json({ error: 'That’s a lot of scans for one hour. Try again a little later.' }, 429)
+  if (!(await aiTurn(uid))) return c.json({ error: 'That’s a lot of scans for one hour. Try again a little later.' }, 429)
   let members: string[] = []
   if (b.groupId) {
     if (!(await membership(b.groupId, uid))) return c.json(notFound, 404)
@@ -858,7 +880,7 @@ api.post('/invites/:code/join', async c => {
 })
 
 // ---------- "that's me": a waiting spot, confirmed by whoever added it ----------
-const asks = limiter(3600_000, 10)
+const asks = limiter('claim-ask', 3600_000, 10)
 
 api.post('/invites/:code/spots/:mid/ask', async c => {
   const uid = c.get('userId')
@@ -870,8 +892,7 @@ api.post('/invites/:code/spots/:mid/ask', async c => {
   const by = confirmerOf(g.members, m, g.createdById)
   if (!by) return c.json({ error: 'Nobody here can confirm that spot now. Join as yourself.' }, 409)
   if (liveClaim(m) && m.claimById !== uid) return c.json({ error: `Someone else has asked for ${m.name}’s spot. Ask ${first(by.name)} about it.` }, 409)
-  if (asks.full(uid)) return c.json({ error: 'Too many requests. Wait an hour, then try again.' }, 429)
-  asks.hit(uid)
+  if (await asks.over(uid)) return c.json({ error: 'Too many requests. Wait an hour, then try again.' }, 429)
   await db.$transaction(async tx => {
     await tx.member.updateMany({ where: { groupId: g.id, claimById: uid, id: { not: m.id } }, data: { claimById: null, claimAt: null } }) // one spot at a time
     await tx.member.update({ where: { id: m.id }, data: { claimById: uid, claimAt: new Date() } })
@@ -880,18 +901,20 @@ api.post('/invites/:code/spots/:mid/ask', async c => {
   return c.json({ ok: true, confirmBy: first(by.name) })
 })
 
-/** Requests waiting on me in this group: who's asking (their account's name and email) and for which spot. */
-api.get('/groups/:gid/claims', async c => {
-  const gid = Id.parse(c.req.param('gid')), uid = c.get('userId')
-  if (!(await membership(gid, uid))) return c.json(notFound, 404)
-  const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { createdById: true, members: true } })
-  const mine = g.members.filter(m => !m.userId && liveClaim(m) && confirmerOf(g.members, m, g.createdById)?.userId === uid)
+/** "That's me" requests waiting on me, in every group I'm in: who's asking (their account's name and email), for which spot. */
+api.get('/me/claims', async c => {
+  const uid = c.get('userId')
+  const groups = await db.group.findMany({
+    where: { members: { some: { userId: uid } }, AND: { members: { some: { userId: null, claimById: { not: null } } } } },
+    select: { id: true, createdById: true, members: true },
+  })
+  const mine = groups.flatMap(g => g.members.filter(m => !m.userId && liveClaim(m) && confirmerOf(g.members, m, g.createdById)?.userId === uid))
   const who = await db.user.findMany({ where: { id: { in: mine.map(m => m.claimById!) } }, select: { id: true, name: true, email: true } })
   return c.json({ claims: mine.flatMap(m => {
     const u = who.find(x => x.id === m.claimById)
     // Full contact only to whoever added them, as everywhere else.
     const own = m.addedById === uid
-    return u ? [{ id: m.id, name: m.name, phone: m.phone && (own ? m.phone : maskPhone(m.phone)), email: m.email && (own ? m.email : maskEmail(m.email)),
+    return u ? [{ id: m.id, groupId: m.groupId, name: m.name, phone: m.phone && (own ? m.phone : maskPhone(m.phone)), email: m.email && (own ? m.email : maskEmail(m.email)),
       by: { name: u.name, email: u.email }, at: m.claimAt!.toISOString() }] : []
   }) })
 })
@@ -1062,7 +1085,7 @@ api.put('/me/notify', async c => {
 
 /** Each member's balance in a group, in paise (what balances() in logic.ts computes, on the server). */
 const nets = async (gid: string) => new Map((await db.$queryRaw<{ memberId: string; net: number }[]>`
-  SELECT s."memberId", SUM(s."paid" - s."owed")::int AS net FROM "splittr"."expense_share" s JOIN "splittr"."expense" e ON e."id" = s."expenseId"
+  SELECT s."memberId", SUM(s."paid" - s."owed")::float8 AS net FROM "splittr"."expense_share" s JOIN "splittr"."expense" e ON e."id" = s."expenseId"
   WHERE e."groupId" = ${gid} AND e."deletedAt" IS NULL AND NOT e."rejected" GROUP BY s."memberId"`).map(r => [r.memberId, r.net]))
 
 const DAY = 864e5
@@ -1092,17 +1115,15 @@ api.post('/groups/:gid/remind', async c => {
 })
 
 // ---------- Ask Plico ----------
-const chats = new Map<string, number[]>() // ponytail: per-process limiter, like AI reading; move to the DB with several instances
+const chats = limiter('chat', 864e5, 150) // 150 a day, 30 in any hour
 api.post('/chat', bodyLimit({ maxSize: 8 << 20, onError: c => c.json({ error: 'That photo is too large' }, 413) }), async c => {
   if (!aiReady()) return c.json({ error: 'Chat isn’t set up yet' }, 503)
   const uid = c.get('userId')
   const me = await db.user.findUnique({ where: { id: uid }, select: { aiOffAt: true } })
   if (!me || me.aiOffAt) return c.json({ error: 'AI features are off. Turn them on in Privacy and data.', code: 'ai-consent' }, 403)
   const b = ChatIn.parse(await c.req.json())
-  const now = Date.now(), recent = (chats.get(uid) ?? []).filter(t => now - t < 864e5)
-  if (recent.filter(t => now - t < 3600_000).length >= 30 || recent.length >= 150)
+  if ((await chats.count(uid, 3600_000)) >= 30 || await chats.over(uid))
     return c.json({ error: 'That’s a lot of questions for now. Try again a little later.', code: 'limit' }, 429)
-  chats.set(uid, [...recent, now])
   return streamSSE(c, async s => {
     try {
       let outcome = 'answered'

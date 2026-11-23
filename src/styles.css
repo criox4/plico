@@ -1031,6 +1031,8 @@ li.person:has(> .avatar) { display: flex; align-items: center; gap: 12px; paddin
   .side-pill { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
   .side-head { display: flex; align-items: baseline; justify-content: space-between; margin: 22px 12px 6px; font: 650 .75rem/1 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
   .side-head .link { min-height: 0; font-size: .8125rem; letter-spacing: 0; text-transform: none; }
+  .side-head > a:first-child { color: inherit; text-decoration: none; }
+  .side-head > a:first-child:hover, .side-head > a.on { color: var(--ink); }
   .side-groups { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
   .side-group { font-weight: 550; color: var(--ink); }
   .side-tile { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px; font-size: .9375rem; }

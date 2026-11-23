@@ -35,27 +35,32 @@ async function readReceipt(image: string, names: string[], today: string) {
 
 /** Everything the tools may see: this person's groups, their people, live expenses and recent activity. */
 export async function loadWorld(uid: string, today: string): Promise<World> {
-  const user = await db.user.findUniqueOrThrow({ where: { id: uid }, select: { name: true, email: true } })
-  const groups = await db.group.findMany({
-    where: { members: { some: { userId: uid } } },
-    include: { members: { include: { user: { select: { email: true } } } }, expenses: { where: { deletedAt: null }, include: { shares: true } } },
-  })
-  // Deleted in the last 60 days, for restoring. Never in balances or answers otherwise.
-  const deleted = await db.expense.findMany({
-    where: { groupId: { in: groups.map(g => g.id) }, deletedAt: { gt: new Date(Date.now() - 60 * 864e5) } },
-    orderBy: { deletedAt: 'desc' }, take: 100, select: { id: true, groupId: true, title: true, amount: true, date: true, deletedAt: true, settle: true },
-  })
-  const events = await db.auditEvent.findMany({
-    where: { groupId: { in: groups.map(g => g.id) }, at: { gt: new Date(Date.now() - 90 * 864e5) } },
-    orderBy: { at: 'desc' }, take: 300, select: { groupId: true, kind: true, byName: true, via: true, at: true, after: true, before: true, effect: true },
-  })
+  const mine = { members: { some: { userId: uid } } }
+  // One round trip's wait, not four: nothing here depends on another query's answer.
+  const [user, groups, deleted, events] = await Promise.all([
+    db.user.findUniqueOrThrow({ where: { id: uid }, select: { name: true, email: true } }),
+    db.group.findMany({
+      where: mine,
+      include: { members: { include: { user: { select: { email: true } } } }, expenses: { where: { deletedAt: null }, include: { shares: true } } },
+    }),
+    // Deleted in the last 60 days, for restoring. Never in balances or answers otherwise.
+    db.expense.findMany({
+      where: { group: mine, deletedAt: { gt: new Date(Date.now() - 60 * 864e5) } },
+      orderBy: { deletedAt: 'desc' }, take: 100, select: { id: true, groupId: true, title: true, amount: true, date: true, deletedAt: true, settle: true },
+    }),
+    db.auditEvent.findMany({
+      where: { group: mine, at: { gt: new Date(Date.now() - 90 * 864e5) } },
+      orderBy: { at: 'desc' }, take: 300, select: { groupId: true, kind: true, byName: true, via: true, at: true, after: true, before: true, effect: true },
+    }),
+  ])
   return {
     me: { name: user.name, email: user.email }, today,
     groups: groups.map(g => ({
       id: g.id, name: g.name, kind: g.kind as World['groups'][number]['kind'], theme: g.theme as World['groups'][number]['theme'], track: g.track,
       meId: g.members.find(m => m.userId === uid)!.id,
       members: g.members.map(m => ({ id: m.id, name: m.name })),
-      people: g.members.map(m => ({ id: m.id, name: m.name, email: (m.user?.email ?? m.email)?.toLowerCase() ?? null, joined: !!m.userId })),
+      // Someone else's waiting person: their contact is masked in the app, so it never reaches the model or a card either.
+      people: g.members.map(m => ({ id: m.id, name: m.name, email: m.userId || m.addedById === uid ? (m.user?.email ?? m.email)?.toLowerCase() ?? null : null, joined: !!m.userId })),
       expenses: g.expenses.map(e => ({
         id: e.id, v: e.version, title: e.title, cat: e.cat, date: e.date, amount: e.amount, ...(e.settle && { settle: true as const }), ...(e.pending && { pending: true as const }), ...(e.rejected && { rejected: true as const }),
         paid: Object.fromEntries(e.shares.filter(s => s.paid).map(s => [s.memberId, s.paid])), owed: Object.fromEntries(e.shares.filter(s => s.owed).map(s => [s.memberId, s.owed])),

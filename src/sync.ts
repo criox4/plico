@@ -10,6 +10,7 @@ import { ME, enqueue, isVpa, normPhone, rebase, runRecurring, uid, type Expense,
 import type * as z from 'zod/mini'
 import { ConflictOut, GroupsOut, ProofIn, ProofOut, ReadOut, SavedOut, UnreadOut, type ExpenseInput, type Read, type ServerExpense, type ServerGroup, type Snap, type SnapFull } from './schema'
 export type { Read, ServerExpense }
+import { PushNotifications } from '@capacitor/push-notifications'
 import { blank, getState, onLocalChange, setRemote, update, wipe, type State } from './store'
 import { API, authClient, token } from './auth-client'
 
@@ -31,7 +32,11 @@ type Status = {
 
 // Unsynced work must survive the OS clearing WebView storage: on phones it's mirrored to native preferences
 // (SharedPreferences / UserDefaults), which aren't evicted, and restored at boot if the WebView copy is gone.
-const OKEY = 'splittr-outbox', IKEY = 'plico-issues', WKEY = 'plico-outbox-owner', CKEY = 'plico-cursor'
+/** Set when a sign-out couldn't reach the server; cleared once it has, or when someone signs in. */
+const OUT = 'plico-signout-pending'
+/** Starting a sign-in that leaves the page (Google on the web): it supersedes a sign-out still waiting. */
+export const signingIn = () => localStorage.removeItem(OUT)
+const OKEY = 'splittr-outbox', IKEY = 'plico-issues', WKEY = 'plico-outbox-owner', CKEY = 'plico-cursor', FKEY = 'plico-full-at'
 const native = Capacitor.isNativePlatform()
 const read = <T>(k: string, empty: T): T => { try { return JSON.parse(localStorage.getItem(k) ?? '') ?? empty } catch { return empty } }
 const keep = (k: string, v: unknown) => {
@@ -135,7 +140,7 @@ function queueNow() {
   clearTimeout(timer)
   timer = undefined
   const cur = getState()
-  if (!status.authed) { snap = cur; return }
+  if (!status.authed) return // snap stays: signing back in as the same person queues what changed meanwhile
   const ops = diff(snap, cur).map(op => {
     const eid = opIds(op.path)[2]
     return eid && byAi.delete(eid) ? { ...op, via: 'ai' as const } : op
@@ -273,10 +278,18 @@ export function toClient(sg: ServerGroup, userId: string): Group {
   }
 }
 
-export async function pull() {
+/** One pull at a time. Asked for again while one is on the wire (launch does this two or three times over): the
+ *  callers share a single follow-up pull, which starts after it, so what they get is never older than their ask. */
+let pulling: Promise<void> | null = null, next: Promise<void> | null = null
+export function pull(): Promise<void> {
+  if (!pulling) return (pulling = pullNow().finally(() => { pulling = null }))
+  return (next ??= pulling.then(() => { next = null; return pull() }))
+}
+async function pullNow(): Promise<void> {
   const user = getState().user
   if (outbox.length || !user || !status.authed) return
   const known = getState().groups.map(g => g.id)
+  const full = !cursor
   const q = cursor ? `?since=${encodeURIComponent(cursor)}&known=${known.join(',')}` : ''
   let res: Response
   try { res = await req('/api/groups' + q) } catch { return setStatus({ offline: true }) }
@@ -307,6 +320,7 @@ export async function pull() {
     d.friends = data.friends ?? []
   })
   setCursor(gap ? null : data.now)
+  if (full) localStorage.setItem(FKEY, String(Date.now()))
   snap = getState()
   setStatus({ offline: false, synced: true })
   void req('/api/me/activity?peek=1').then(r => (r.ok ? r.json() : null)).then(j => { const u = UnreadOut.safeParse(j); if (u.success) setStatus({ unread: u.data.unread }) }).catch(() => {})
@@ -450,7 +464,13 @@ const gates = (u: AuthUser) => ({ ageGroup: u.ageGroup ?? null, guardianEmail: u
 
 /** After sign-in/up: adopt the account's profile, upload anything made on this device before, then sync. */
 export async function signedIn(u: AuthUser) {
+  localStorage.removeItem(OUT) // a new sign-in supersedes a sign-out still waiting to reach the server
+  // First, so an outbox that only survived in native storage (the OS cleared the WebView's) is back before it's judged.
+  await restoreDurable()
   const local = getState()
+  // The same person, back after their session ended: an edit made in between (still in the debounce when the 401
+  // landed) is queued, not lost under the pull below.
+  if (local.user?.id === u.id) { for (const op of diff(snap, local)) outbox = enqueue(outbox, op, sending); saveOutbox() }
   const firstOnDevice = !local.user
   // Different account (or an outbox restored from native storage that belonged to someone else): don't leak data across.
   const owner = local.user?.id ?? localStorage.getItem(WKEY)?.replace(/"/g, '')
@@ -505,7 +525,12 @@ export async function signOut() {
   // Signed out first: the wipe below must never read as an edit to queue (a blank profile sent for the next account).
   clearTimeout(timer); timer = undefined
   status = { ...status, authed: false }
-  await authClient.signOut().catch(() => {})
+  // Offline or the server down: the session is still alive there. Remember to end it (startSync retries at the next
+  // launch) and, on a phone, keep the token it needs for that. A 4xx means the server heard and has nothing to end.
+  const held = token.get()
+  const out = await authClient.signOut().catch(() => null)
+  const failed = !out || (!!out.error && !((out.error.status ?? 0) >= 400 && (out.error.status ?? 0) < 500))
+  if (native) await PushNotifications.unregister().catch(() => {}) // no more pushes here, whatever the server knows
   token.clear()
   if ('caches' in window) await caches.delete('plico-share').catch(() => false)
   await wipe()
@@ -515,6 +540,7 @@ export async function signOut() {
   for (const k of Object.keys(localStorage)) if (!KEEP.has(k)) localStorage.removeItem(k)
   try { sessionStorage.clear() } catch { /* blocked */ }
   if (native) await Preferences.clear().catch(() => {})
+  if (failed) { localStorage.setItem(OUT, '1'); if (held) token.set(held) }
   location.hash = '#/'
   location.reload()
 }
@@ -524,7 +550,9 @@ export function startSync() {
   // The store hydrates from IndexedDB before this runs: start from what it loaded.
   snap = getState()
   status = { ...status, authed: !!getState().user }
-  setCursor(null) // a full pull at every launch: cheap insurance against anything a delta could have missed
+  // A full pull once a day, as insurance against anything a delta could have missed; launches in between only fetch
+  // what changed since the last pull, however much history the groups hold.
+  if (Date.now() - Number(localStorage.getItem(FKEY) ?? 0) > 864e5) setCursor(null)
   onLocalChange(() => { clearTimeout(timer); timer = setTimeout(queueNow, 400) })
   // The sign-in options and AI switch: asked at boot, and again on reconnecting or every 30s until an answer arrives,
   // so a launch on bad signal doesn't hide Ask Plico and Google sign-in for the whole session.
@@ -542,12 +570,22 @@ export function startSync() {
   setInterval(() => { if (document.visibilityState === 'visible') { void loadConfig(); void flush().then(pull) } }, 30_000)
   // Boot: learn the sign-in options and confirm the session, but never hold an offline user hostage (800ms cap).
   const config = loadConfig()
-  const session = authClient.getSession().then(async r => {
+  const session = (async () => {
+    // A sign-out that never reached the server: finish it before anything else, and until it has, don't resume
+    // the session it left behind (on the web its cookie would sign the same person straight back in).
+    if (localStorage.getItem(OUT)) {
+      const out = await authClient.signOut().catch(() => null)
+      if (!out || (out.error && !((out.error.status ?? 0) >= 400 && (out.error.status ?? 0) < 500))) return
+      localStorage.removeItem(OUT); token.clear()
+    }
+    const r = await authClient.getSession()
     const u = r.data?.user
-    if (u && !getState().user) return signedIn(u) // back from Google's redirect with a session cookie
+    // Back from Google's redirect with a session cookie. Also when it's a different account than the one this device
+    // last held (a shared browser, a second Google account): signedIn gives that one a clean slate.
+    if (u && getState().user?.id !== u.id) return signedIn(u)
     if (u) setRemote(d => { if (d.user) Object.assign(d.user, { emailVerified: u.emailVerified, image: u.image, ...gates(u as AuthUser) }) })
     if (r.data === null && !r.error && getState().user) expired() // the server says no session; a network error only means offline
-  }).catch(() => {})
+  })().catch(() => {})
   void Promise.race([Promise.all([config, session]), new Promise(r => setTimeout(r, 800))]).then(() => setStatus({ booting: false }))
   if (!status.authed) return
   // Catch up monthly repeats (deterministic ids, so two devices never duplicate), then sync.

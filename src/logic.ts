@@ -121,9 +121,10 @@ export function pairwise(g: Group, a: Id, b: Id): number {
 /** A settlement asks the payee to verify it unless the payee recorded it or can't (a guest without an account). It counts either way. */
 export const needsConfirm = (g: Group, to: Id) => to !== ME && !!g.members.find(m => m.id === to)?.joined
 
-/** A settlement's quiet status: how it was verified, or that it hasn't been yet ('' for plain or rejected ones). */
+/** A settlement's quiet status: how it was verified, or that it hasn't been yet ('' for plain or rejected ones).
+ * A receipt is a picture the payer sent: it can match, but only the payee can say the money arrived, so it never reads "Verified". */
 export const verifyLabel = (e: Expense) =>
-  e.rejected ? '' : e.verifiedBy === 'screenshot' ? 'Verified · screenshot' : e.verifiedBy ? 'Verified' : e.pending ? 'Not verified' : ''
+  e.rejected ? '' : e.verifiedBy === 'screenshot' ? 'Receipt matched' : e.verifiedBy ? 'Verified' : e.pending ? 'Not verified' : ''
 const CHECKS = { amount: 'amount', payee: 'recipient', time: 'time', fresh: 'transaction ID' } as const
 /** The receipt checks that failed, in words: "amount / time". '' when there were none or all passed. */
 export const missedChecks = (p?: Proof) => (p?.checks ? (Object.keys(CHECKS) as (keyof typeof CHECKS)[]).filter(k => !p.checks![k]).map(k => CHECKS[k]).join(' / ') : '')
@@ -160,14 +161,16 @@ export function simplify(bal: Record<Id, number>): Transfer[] {
   return out
 }
 
-/** Greedy largest-debtor → largest-creditor: at most n-1 payments. */
+/** Greedy largest-debtor → largest-creditor: at most n-1 payments. Equal amounts go by id, so the answer never
+ * depends on the order the balances came in. */
 export function greedy(bal: Record<Id, number>): Transfer[] {
   const cr = Object.entries(bal).filter(([, v]) => v > 0).map(([k, v]) => ({ k, v }))
   const dr = Object.entries(bal).filter(([, v]) => v < 0).map(([k, v]) => ({ k, v: -v }))
   const out: Transfer[] = []
+  const big = (a: { k: Id; v: number }, b: { k: Id; v: number }) => b.v - a.v || (a.k < b.k ? -1 : 1)
   while (cr.length && dr.length) {
-    cr.sort((a, b) => b.v - a.v)
-    dr.sort((a, b) => b.v - a.v)
+    cr.sort(big)
+    dr.sort(big)
     const amount = Math.min(cr[0].v, dr[0].v)
     out.push({ from: dr[0].k, to: cr[0].k, amount })
     cr[0].v -= amount
@@ -178,6 +181,27 @@ export function greedy(bal: Record<Id, number>): Transfer[] {
   return out
 }
 
+/** A group's settle-up plan: the one list of payments every screen (and Ask Plico) shows. Worked out on the server's
+ * member ids, so everyone in the group gets the same plan on their own phone, whichever way ties could have gone. */
+const plans = new Map<Id, { key: string; plan: Transfer[] }>()
+export function planOf(g: Group): Transfer[] {
+  const bal = balances(g), key = `${g.selfId ?? ''}|${JSON.stringify(bal)}`
+  const hit = plans.get(g.id)
+  if (hit?.key === key) return hit.plan
+  const self = g.selfId && g.selfId !== ME && !(g.selfId in bal) ? g.selfId : ME // on the phone I'm ME; on the server I'm selfId
+  const real = (k: Id) => (k === ME ? self : k), mine = (k: Id) => (k === self ? ME : k)
+  const plan = simplify(Object.fromEntries(Object.entries(bal).map(([k, v]) => [real(k), v])))
+    .map(t => ME in bal ? { ...t, from: mine(t.from), to: mine(t.to) } : t)
+  if (plans.size > 500) plans.clear()
+  plans.set(g.id, { key, plan })
+  return plan
+}
+/** What b pays a (positive) or a pays b (negative) in the group's settle-up plan. This is the balance between two
+ * people everywhere: settling what the group page asks for clears it on Friends and Home too. (pairwise() is the
+ * same question answered from the expenses themselves; Ask Plico uses it to explain where a balance came from.) */
+export const between = (g: Group, a: Id, b: Id) =>
+  planOf(g).reduce((n, t) => n + (t.from === b && t.to === a ? t.amount : t.from === a && t.to === b ? -t.amount : 0), 0)
+
 export function addMonth(date: string, day: number): string {
   const [y, m] = date.split('-').map(Number) // m is 1-based, so Date.UTC(y, m) is next month
   const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate()
@@ -187,8 +211,11 @@ export function addMonth(date: string, day: number): string {
 /** Materialise any monthly repeats that are due. Returns true if the group changed. */
 export function runRecurring(g: Group, now = today()): boolean {
   let changed = false
+  // Three years of catching up at most: a repeat dated long ago (a typo, or someone being a nuisance) can't flood the group.
+  const floor = `${String(+now.slice(0, 4) - 3).padStart(4, '0')}${now.slice(4)}`
   for (const e of [...g.expenses]) {
     while (e.repeat && e.repeat.next <= now) {
+      if (e.repeat.next < floor) { e.repeat.next = addMonth(e.repeat.next, e.repeat.day); changed = true; continue }
       // Everyone in the group now, including people who joined since; anyone set to 0 (left out, or left the group) stays out.
       const input = e.repeat.all ? Object.fromEntries(g.members.map(m => [m.id, e.input?.[m.id] ?? 1])) : e.input
       const owed = e.repeat.all ? allocate(e.amount, input!) : e.owed
@@ -221,7 +248,9 @@ export function decodeShare(p: string): Share | null {
   try {
     const bin = atob(p.replace(/-/g, '+').replace(/_/g, '/'))
     const s = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))))
-    return typeof s.a === 'number' && s.a > 0 && typeof s.t === 'string' ? s : null
+    // Anyone can write one of these links: only short plain strings and a storable amount get shown.
+    const str = (v: unknown, need = true) => (v === undefined ? !need : typeof v === 'string' && v.length <= 120)
+    return Number.isInteger(s.a) && s.a > 0 && s.a <= 2e9 && str(s.t) && !!s.t && str(s.g) && str(s.f) && (s.v === undefined || isVpa(s.v)) ? s : null
   } catch {
     return null
   }
@@ -283,7 +312,7 @@ export function parseSplitwise(text: string): Splitwise | { error: string } {
     const drift = net.reduce((a, b) => a + b, 0) // rounding: nets should sum to zero
     if (drift) { const k = net.indexOf(drift > 0 ? Math.max(...net) : Math.min(...net)); net[k] -= drift }
     const cat = (r[2] ?? '').trim()
-    rows.push({ date, title: (r[1] ?? '').trim() || 'Expense', cat, amount, net, settle: /^payment$/i.test(cat) })
+    rows.push({ date, title: (r[1] ?? '').trim().slice(0, 120) || 'Expense', cat, amount, net, settle: /^payment$/i.test(cat) })
   }
   return { people, rows, skipped }
 }
@@ -495,7 +524,7 @@ export function changes(a: Snap, b: Snap, name: (id: Id) => string): string[] {
   if (removed.length) out.push(`took ${list(removed.map(name))} out of the split`)
   if (!added.length && !removed.length && a.amount === b.amount && a.shares.some(x => x.owed !== (b.shares.find(y => y.memberId === x.memberId)?.owed ?? 0)))
     out.push('changed who owes how much')
-  if (a.settle && a.pending && !b.pending && !b.rejected) out.push(b.verifiedBy === 'screenshot' ? 'verified it from the UPI receipt' : 'confirmed the payment arrived')
+  if (a.settle && a.pending && !b.pending && !b.rejected) out.push(b.verifiedBy === 'screenshot' ? 'matched it to their UPI receipt' : 'confirmed the payment arrived')
   if (!a.rejected && b.rejected) out.push('said the payment hasn’t arrived')
   if ((a.receipt ?? null) !== (b.receipt ?? null)) out.push(b.receipt ? (a.receipt ? 'replaced the receipt' : 'added a receipt') : 'removed the receipt')
   if (!!a.repeatNext !== !!b.repeatNext) out.push(b.repeatNext ? 'made it repeat monthly' : 'stopped it repeating')
@@ -549,7 +578,7 @@ export const GENESIS = '0'.repeat(64)
 // ---------- crash reports ----------
 const EMAIL = /[\w.+-]+@[\w-]+(\.[\w-]+)*\.[a-z]{2,}\b/gi // ends in a letters-only domain: not "plico@0.1.0"
 // Paths whose next segment is private: an email or a secret token, in app routes (#/…) and API paths alike.
-const PRIVATE_PATH = /((?:#\/|\/api\/(?:public\/)?)(?:claim|join|invites|guardian|delete|f|add\/f|u|friends\/code)\/)[^/?#"\s\\]+/g
+const PRIVATE_PATH = /((?:#\/|\/api\/(?:public\/)?)(?:claim|join|invites|guardian|delete|f|add\/f|u|s|friends\/code)\/)[^/?#"\s\\]+/g
 const PHONE = /\+\d[\d ]{6,16}\d/g // +<country><number>, the form every stored and verified number takes
 /** A crash report (or a server log line) as it may leave: every email, phone number and token-bearing path segment removed. */
 export const scrub = <T>(x: T): T => JSON.parse(JSON.stringify(x).replace(PRIVATE_PATH, '$1[hidden]').replace(EMAIL, '[email]').replace(PHONE, '[phone]'))

@@ -16,7 +16,7 @@ if healthy; then
   echo "deployed $new"
 else
   echo "$new never became healthy; rolling back to $old" >&2
-  docker compose logs --tail 50 api >&2 || true
+  # No logs here: this output lands in the public Actions log. Read them on the host: docker compose logs --tail 50 api
   up "$old"
   exit 1
 fi

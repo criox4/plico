@@ -2,7 +2,7 @@
 // person: see friendsIn), with the balance between the two of you across every group; direct expenses live in a two-person group.
 import { useEffect, useState } from 'react'
 import { AnimatePresence } from 'motion/react'
-import { ME, findFriend, friendsIn, inr, normPhone, needsConfirm, pairwise, today, uid, type Friend, type Group, type Id } from './logic'
+import { ME, findFriend, friendsIn, inr, normPhone, needsConfirm, between, today, uid, type Friend, type Group, type Id } from './logic'
 import { update, type State } from './store'
 import { api, pull, syncNow } from './sync'
 import { Avatar, Denomination, LedgerRow, PUBLIC, Plico, Screen, SectionHead, Settle, TONES, count, go, groupTitle, useQr, wa, SegPill } from './ui'
@@ -22,8 +22,8 @@ export const friendBy = (s: State, k: string) => findFriend(friendsOf(s), k)
 /** How a friend shows under their name: their email, else their phone. */
 export const contactOf = (f: { email?: string; phone?: string }) => f.email ?? f.phone ?? ''
 export const friendPath = (f: Friend) => '/f/' + encodeURIComponent(f.key)
-/** Positive: they owe you. Across every group you share, from the expenses themselves. */
-export const friendBalance = (f: Friend) => f.spots.reduce((a, x) => a + pairwise(x.g, ME, x.id), 0)
+/** Positive: they owe you. Across every group you share, by each group's settle-up plan. */
+export const friendBalance = (f: Friend) => f.spots.reduce((a, x) => a + between(x.g, ME, x.id), 0)
 const owesLine = (n: number) => (n > 0 ? `owes you ${inr(n)}` : n < 0 ? `you owe ${inr(n)}` : 'settled up')
 
 /** Who POST /api/friends is about: their account once joined, else the email or phone they're invited by. */
@@ -128,8 +128,8 @@ export function useInviteLink(gid: Id, mid: Id, on = true) {
   useEffect(() => {
     if (!on) return
     let live = true
-    const get = (n: number): void => void api<{ link: string }>(`/api/groups/${gid}/members/${mid}/invite`, { method: 'POST', body: '{}' })
-      .then(r => { if (live) setLink(r.link) }, () => { if (live && n) setTimeout(() => get(n - 1), 1500) })
+    const get = (n: number): void => void api<{ link?: string }>(`/api/groups/${gid}/members/${mid}/invite`, { method: 'POST', body: '{}' })
+      .then(r => { if (live) setLink(r.link ?? '') }, () => { if (live && n) setTimeout(() => get(n - 1), 1500) })
     get(3)
     return () => { live = false }
   }, [gid, mid, on])
@@ -282,7 +282,7 @@ export function FriendPage({ s, k }: { s: State; k: string }) {
   const [err, setErr] = useState('')
   if (!f) return <Screen t={s.theme} back title="Friend"><p className="empty">Not found. They may have left your groups.</p></Screen>
   const n = friendBalance(f)
-  const parts = f.spots.map(x => ({ ...x, n: pairwise(x.g, ME, x.id) })).filter(x => x.n)
+  const parts = f.spots.map(x => ({ ...x, n: between(x.g, ME, x.id) })).filter(x => x.n)
   const addExpense = () => go(`/add/f/${encodeURIComponent(f.key)}`) // the ledger with them is made on save if it doesn't exist yet
   const nudge = `${TONES[s.tone](inr(n), s.me.name || 'me', 'Plico')}${s.me.upi ? `\nUPI: ${s.me.upi}` : ''}`
   const list = (f.direct?.expenses ?? []).map((e, i) => ({ e, i })).sort((a, b) => b.e.date.localeCompare(a.e.date) || b.i - a.i)
@@ -330,7 +330,7 @@ export function FriendSettle({ s, k }: { s: State; k: string }) {
     let left = paise
     const mine: { gid: Id; eid: Id }[] = [] // your payments the payee will be asked to check
     update(d => {
-      const all = f.spots.map(x => ({ g: d.groups.find(y => y.id === x.g.id)!, id: x.id })).filter(x => x.g).map(x => ({ ...x, n: pairwise(x.g, ME, x.id) }))
+      const all = f.spots.map(x => ({ g: d.groups.find(y => y.id === x.g.id)!, id: x.id })).filter(x => x.g).map(x => ({ ...x, n: between(x.g, ME, x.id) }))
       const spots = all.filter(x => (iPay ? x.n < 0 : x.n > 0)).sort((a, b) => Math.abs(b.n) - Math.abs(a.n))
       const pay = (g: Group, id: Id, amt: number) => {
         const eid = uid(), check = iPay && needsConfirm(g, id)
