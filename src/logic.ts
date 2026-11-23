@@ -221,7 +221,9 @@ export function decodeShare(p: string): Share | null {
   try {
     const bin = atob(p.replace(/-/g, '+').replace(/_/g, '/'))
     const s = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))))
-    return typeof s.a === 'number' && s.a > 0 && typeof s.t === 'string' ? s : null
+    // Anyone can write one of these links: only short plain strings and a storable amount get shown.
+    const str = (v: unknown, need = true) => (v === undefined ? !need : typeof v === 'string' && v.length <= 120)
+    return Number.isInteger(s.a) && s.a > 0 && s.a <= 2e9 && str(s.t) && !!s.t && str(s.g) && str(s.f) && (s.v === undefined || isVpa(s.v)) ? s : null
   } catch {
     return null
   }
@@ -283,7 +285,7 @@ export function parseSplitwise(text: string): Splitwise | { error: string } {
     const drift = net.reduce((a, b) => a + b, 0) // rounding: nets should sum to zero
     if (drift) { const k = net.indexOf(drift > 0 ? Math.max(...net) : Math.min(...net)); net[k] -= drift }
     const cat = (r[2] ?? '').trim()
-    rows.push({ date, title: (r[1] ?? '').trim() || 'Expense', cat, amount, net, settle: /^payment$/i.test(cat) })
+    rows.push({ date, title: (r[1] ?? '').trim().slice(0, 120) || 'Expense', cat, amount, net, settle: /^payment$/i.test(cat) })
   }
   return { people, rows, skipped }
 }
@@ -549,7 +551,7 @@ export const GENESIS = '0'.repeat(64)
 // ---------- crash reports ----------
 const EMAIL = /[\w.+-]+@[\w-]+(\.[\w-]+)*\.[a-z]{2,}\b/gi // ends in a letters-only domain: not "plico@0.1.0"
 // Paths whose next segment is private: an email or a secret token, in app routes (#/…) and API paths alike.
-const PRIVATE_PATH = /((?:#\/|\/api\/(?:public\/)?)(?:claim|join|invites|guardian|delete|f|add\/f|u|friends\/code)\/)[^/?#"\s\\]+/g
+const PRIVATE_PATH = /((?:#\/|\/api\/(?:public\/)?)(?:claim|join|invites|guardian|delete|f|add\/f|u|s|friends\/code)\/)[^/?#"\s\\]+/g
 const PHONE = /\+\d[\d ]{6,16}\d/g // +<country><number>, the form every stored and verified number takes
 /** A crash report (or a server log line) as it may leave: every email, phone number and token-bearing path segment removed. */
 export const scrub = <T>(x: T): T => JSON.parse(JSON.stringify(x).replace(PRIVATE_PATH, '$1[hidden]').replace(EMAIL, '[email]').replace(PHONE, '[phone]'))
