@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { Capacitor } from '@capacitor/core'
 import { inr, isVpa, type Kind, type Tone } from './logic'
 import { update, type State } from './store'
-import { api, isPhone, pull, refreshUser, signOut, signedIn, syncNow, uploadImage, useSync } from './sync'
+import { api, isPhone, pull, refreshUser, signOut, signedIn, signingIn, syncNow, uploadImage, useSync } from './sync'
 import { API, authClient, token } from './auth-client'
 import { ensureFonts, theme, themeVars, type ThemeId } from './themes'
 import { Icon, type IconName } from './icons'
@@ -129,6 +129,7 @@ const providerToken = (p: Provider, sync: { googleWebClientId: string | null; go
 async function socialSignIn(p: Provider, sync: { googleWebClientId: string | null; googleIosClientId: string | null }) {
   if (!Capacitor.isNativePlatform()) {
     // Leaves the page; the boot session check signs us in when Google sends us back.
+    signingIn()
     const r = await authClient.signIn.social({ provider: p, callbackURL: `${origin()}#/` })
     if (r.error) throw new Error(r.error.message)
     return
