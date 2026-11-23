@@ -544,7 +544,9 @@ export function startSync() {
   const config = loadConfig()
   const session = authClient.getSession().then(async r => {
     const u = r.data?.user
-    if (u && !getState().user) return signedIn(u) // back from Google's redirect with a session cookie
+    // Back from Google's redirect with a session cookie. Also when it's a different account than the one this device
+    // last held (a shared browser, a second Google account): signedIn gives that one a clean slate.
+    if (u && getState().user?.id !== u.id) return signedIn(u)
     if (u) setRemote(d => { if (d.user) Object.assign(d.user, { emailVerified: u.emailVerified, image: u.image, ...gates(u as AuthUser) }) })
     if (r.data === null && !r.error && getState().user) expired() // the server says no session; a network error only means offline
   }).catch(() => {})
