@@ -210,8 +210,11 @@ export function addMonth(date: string, day: number): string {
 /** Materialise any monthly repeats that are due. Returns true if the group changed. */
 export function runRecurring(g: Group, now = today()): boolean {
   let changed = false
+  // Three years of catching up at most: a repeat dated long ago (a typo, or someone being a nuisance) can't flood the group.
+  const floor = `${String(+now.slice(0, 4) - 3).padStart(4, '0')}${now.slice(4)}`
   for (const e of [...g.expenses]) {
     while (e.repeat && e.repeat.next <= now) {
+      if (e.repeat.next < floor) { e.repeat.next = addMonth(e.repeat.next, e.repeat.day); changed = true; continue }
       // Everyone in the group now, including people who joined since; anyone set to 0 (left out, or left the group) stays out.
       const input = e.repeat.all ? Object.fromEntries(g.members.map(m => [m.id, e.input?.[m.id] ?? 1])) : e.input
       const owed = e.repeat.all ? allocate(e.amount, input!) : e.owed
