@@ -10,11 +10,15 @@ import { isVpa } from '../src/logic.ts'
 import { THEMES } from '../src/themes.ts'
 import { IP_HEADER } from './ip.ts'
 
-// Web dev/preview, Capacitor iOS (capacitor://) and Android (https://localhost), plus the deployed web app.
-export const ORIGINS = ['http://localhost:5173', 'http://localhost:4173', 'capacitor://localhost', 'https://localhost',
+// Capacitor iOS (capacitor://) and Android (https://localhost), the deployed web app, and web dev/preview outside production
+// (in production those would let any page served on a visitor's own machine call the API as them).
+export const ORIGINS = ['capacitor://localhost', 'https://localhost',
+  ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173', 'http://localhost:4173']),
   ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL] : [])]
 
 const TONES = ['gentle', 'normal', 'shameless']
+const NAME_RULE = 'Names are 1 to 60 characters'
+const nameOk = (v: unknown) => typeof v === 'string' && !!v.trim() && v.length <= 60 && !/[\u0000-\u001f\u007f]/.test(v)
 
 // Google is optional: the button only appears (via /api/config) once credentials exist.
 // One Google Cloud project, one client id per platform: web first (used for the redirect flow), then native ids for ID-token sign-in.
@@ -97,12 +101,18 @@ export const auth = betterAuth({
     },
     user: {
       // Verified email (Google sign-up, or a clicked verification link): groups friends added this email to appear.
-      create: { after: async u => { if (u.emailVerified) await linkByEmail(u.id, u.email) } },
+      create: {
+        // A name goes into other people's groups, pushes and email subjects: keep it a name.
+        // Trimmed rather than refused: Google and Apple supply names too, and those sign-ups must not fail.
+        before: async u => ({ data: { ...u, name: String(u.name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 60) } }),
+        after: async u => { if (u.emailVerified) await linkByEmail(u.id, u.email) },
+      },
       // Profile fields are user input shown to others (UPI IDs end up in pay links): validate at the boundary.
       update: {
         before: async (data, ctx) => {
           // Someone editing their profile hears what's wrong; internal updates (sign-in) just skip the bad field's update.
           const no = (message: string) => { if (ctx?.path === '/update-user') throw new APIError('BAD_REQUEST', { message }); return false as const }
+          if (data.name !== undefined && !nameOk(data.name)) return no(NAME_RULE)
           if (data.upi && !isVpa(String(data.upi))) return no('That UPI ID doesn’t look right')
           if (data.upi2 && !isVpa(String(data.upi2))) return no('That backup UPI ID doesn’t look right')
           if (data.theme && !THEMES.some(t => t.id === data.theme)) return no('Unknown theme')
