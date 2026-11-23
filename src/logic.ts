@@ -121,9 +121,10 @@ export function pairwise(g: Group, a: Id, b: Id): number {
 /** A settlement asks the payee to verify it unless the payee recorded it or can't (a guest without an account). It counts either way. */
 export const needsConfirm = (g: Group, to: Id) => to !== ME && !!g.members.find(m => m.id === to)?.joined
 
-/** A settlement's quiet status: how it was verified, or that it hasn't been yet ('' for plain or rejected ones). */
+/** A settlement's quiet status: how it was verified, or that it hasn't been yet ('' for plain or rejected ones).
+ * A receipt is a picture the payer sent: it can match, but only the payee can say the money arrived, so it never reads "Verified". */
 export const verifyLabel = (e: Expense) =>
-  e.rejected ? '' : e.verifiedBy === 'screenshot' ? 'Verified · screenshot' : e.verifiedBy ? 'Verified' : e.pending ? 'Not verified' : ''
+  e.rejected ? '' : e.verifiedBy === 'screenshot' ? 'Receipt matched' : e.verifiedBy ? 'Verified' : e.pending ? 'Not verified' : ''
 const CHECKS = { amount: 'amount', payee: 'recipient', time: 'time', fresh: 'transaction ID' } as const
 /** The receipt checks that failed, in words: "amount / time". '' when there were none or all passed. */
 export const missedChecks = (p?: Proof) => (p?.checks ? (Object.keys(CHECKS) as (keyof typeof CHECKS)[]).filter(k => !p.checks![k]).map(k => CHECKS[k]).join(' / ') : '')
@@ -523,7 +524,7 @@ export function changes(a: Snap, b: Snap, name: (id: Id) => string): string[] {
   if (removed.length) out.push(`took ${list(removed.map(name))} out of the split`)
   if (!added.length && !removed.length && a.amount === b.amount && a.shares.some(x => x.owed !== (b.shares.find(y => y.memberId === x.memberId)?.owed ?? 0)))
     out.push('changed who owes how much')
-  if (a.settle && a.pending && !b.pending && !b.rejected) out.push(b.verifiedBy === 'screenshot' ? 'verified it from the UPI receipt' : 'confirmed the payment arrived')
+  if (a.settle && a.pending && !b.pending && !b.rejected) out.push(b.verifiedBy === 'screenshot' ? 'matched it to their UPI receipt' : 'confirmed the payment arrived')
   if (!a.rejected && b.rejected) out.push('said the payment hasn’t arrived')
   if ((a.receipt ?? null) !== (b.receipt ?? null)) out.push(b.receipt ? (a.receipt ? 'replaced the receipt' : 'added a receipt') : 'removed the receipt')
   if (!!a.repeatNext !== !!b.repeatNext) out.push(b.repeatNext ? 'made it repeat monthly' : 'stopped it repeating')

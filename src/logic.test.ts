@@ -325,7 +325,7 @@ assert.equal(normPhone('riya@x.com'), null)
   // Settle first, verify after: the label says how sure we are; the payee's list holds only unanswered payments to them.
   const e = { id: 'x', title: 'Settlement', cat: 'check', date: '2026-10-01', amount: 500, paid: { a: 500 }, owed: { [ME]: 500 }, settle: true as const }
   assert.equal(verifyLabel({ ...e, pending: true }), 'Not verified')
-  assert.equal(verifyLabel({ ...e, verifiedBy: 'screenshot' }), 'Verified · screenshot')
+  assert.equal(verifyLabel({ ...e, verifiedBy: 'screenshot' }), 'Receipt matched')
   assert.equal(verifyLabel({ ...e, verifiedBy: 'payee' }), 'Verified')
   assert.equal(verifyLabel({ ...e, pending: true, rejected: true }), '')
   assert.equal(missedChecks({ method: 'upi', checks: { amount: false, payee: true, time: false, fresh: true } }), 'amount / time')

@@ -1228,7 +1228,7 @@ export function ProofSheet({ gid, eid, payee, method: m0 = 'upi', onClose }: { g
     try {
       const r = await addProof(gid, eid, await body())
       const miss = missedChecks(r.proof)
-      setDone(r.verifiedBy ? 'Verified from your receipt.' : miss ? `Couldn’t match it (${miss}). ${payee} will be asked to check.` : `Saved. ${payee} will be asked to check.`)
+      setDone(r.verifiedBy ? 'Your receipt matches this payment.' : miss ? `Couldn’t match it (${miss}). ${payee} will be asked to check.` : `Saved. ${payee} will be asked to check.`)
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
   return (
