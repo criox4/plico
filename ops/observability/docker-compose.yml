@@ -54,7 +54,7 @@ services:
       GF_AUTH_PROXY_HEADER_PROPERTY: username
       GF_AUTH_PROXY_HEADERS: Email:Remote-Email Name:Remote-Name
       GF_AUTH_PROXY_AUTO_SIGN_UP: 'true'
-      GF_AUTH_PROXY_WHITELIST: ${GRAFANA_PROXY_IP}
+      GF_AUTH_PROXY_WHITELIST: ${GRAFANA_PROXY_IP:?set GRAFANA_PROXY_IP in .env (empty lets anyone sign in as admin with a Remote-User header)}
       GF_USERS_AUTO_ASSIGN_ORG_ROLE: Admin
       GF_USERS_ALLOW_SIGN_UP: 'false'
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
