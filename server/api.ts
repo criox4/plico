@@ -21,6 +21,10 @@ import { sharesError } from '../src/logic.ts'
 type Env = { Variables: { userId: string; userName: string; sessionId: string } }
 const maskPhone = (p: string) => '•••• ' + p.slice(-4)
 const maskEmail = (e: string) => { const [u, d] = e.split('@'); return `${u[0]}•••@${d}` }
+/** The email and phone in an object, masked (other keys untouched; absent ones stay absent). */
+const maskContact = <T extends { email?: unknown; phone?: unknown }>(o: T) => ({
+  ...o, ...(typeof o.email === 'string' && { email: maskEmail(o.email) }), ...(typeof o.phone === 'string' && { phone: maskPhone(o.phone) }),
+})
 
 /** Bad input is the caller's mistake (400), not ours (500). Both routers use it. */
 const onError = (e: Error, c: Context) => {
@@ -174,10 +178,12 @@ api.get('/me/export', async c => {
   const groups = await db.group.findMany({
     where: { members: { some: { userId: uid } } },
     select: { id: true, name: true, kind: true, theme: true, emoji: true, createdAt: true,
-      members: { select: { id: true, name: true, upi: true, upi2: true, email: true, phone: true, userId: true } },
+      members: { select: { id: true, name: true, upi: true, upi2: true, email: true, phone: true, userId: true, addedById: true } },
       expenses: { select: { id: true, title: true, cat: true, date: true, amount: true, settle: true, pending: true, rejected: true, verifiedBy: true, proof: true, receipt: true, createdAt: true, version: true, deletedAt: true, shares: { select: { memberId: true, paid: true, owed: true } } } } },
   })
   const history = await db.auditEvent.findMany({ where: { byId: uid }, orderBy: { at: 'asc' }, select: { groupId: true, seq: true, kind: true, expenseId: true, memberId: true, at: true, before: true, after: true, effect: true } })
+  // Someone else's waiting person stays masked here too, as in /groups.
+  for (const g of groups) g.members = g.members.map(m => (!m.userId && m.addedById !== uid ? { ...m, ...maskContact(m) } : m))
   const data = { exportedAt: new Date(), note: 'Amounts are in paise (₹1 = 100 paise). Photos are listed by file name; download them from the app. "history" lists the changes you made.', user, signIns: accounts, sessions, groups, history }
   return c.body(JSON.stringify(data, null, 2), 200, { 'content-type': 'application/json', 'content-disposition': 'attachment; filename="plico-export.json"' })
 })
@@ -429,7 +435,7 @@ api.put('/groups/:gid/members/:mid', async c => {
   if (!m) {
     await db.$transaction(async tx => {
       await tx.member.create({ data: { id: mid, groupId: gid, addedById: uid, ...data } })
-      await audit(tx, gid, { kind: 'member.invited', memberId: mid, ...by, after: { name: data.name, email, ...(phone && { phone }) } })
+      await audit(tx, gid, { kind: 'member.invited', memberId: mid, ...by, after: maskContact({ name: data.name, email, ...(phone && { phone }) }) })
     })
   } else {
     const diff = changed({ name: m.name, upi: m.upi, upi2: m.upi2, email: m.email, phone: m.phone }, data)
@@ -438,7 +444,8 @@ api.put('/groups/:gid/members/:mid', async c => {
     const retire = !m.userId && (email !== m.email || phone !== m.phone) ? { inviteToken: null, invitedAt: null } : {}
     await db.$transaction(async tx => {
       await tx.member.update({ where: { id: mid }, data: { ...data, ...retire } })
-      await audit(tx, gid, { kind: 'member.edited', memberId: mid, ...by, ...diff })
+      // Everyone in the group reads the log: a waiting person's contact goes in masked.
+      await audit(tx, gid, { kind: 'member.edited', memberId: mid, ...by, before: maskContact(diff.before), after: maskContact(diff.after) })
     })
   }
   // A new email: link now if that person already has a verified account, otherwise email an invite.
@@ -494,16 +501,22 @@ async function ensureToken(mid: string) {
 // Invite link for one person (WhatsApp for phones), and a throttled email resend.
 api.post('/groups/:gid/members/:mid/invite', async c => {
   const [gid, mid] = [Id.parse(c.req.param('gid')), Id.parse(c.req.param('mid'))]
-  if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
-  const m = await db.member.findUnique({ where: { id: mid } })
-  if (!m || m.groupId !== gid) return c.json(notFound, 404)
+  const uid = c.get('userId')
+  if (!(await membership(gid, uid))) return c.json(notFound, 404)
+  const g = await db.group.findUniqueOrThrow({ where: { id: gid }, select: { createdById: true, members: true } })
+  const m = g.members.find(x => x.id === mid)
+  if (!m) return c.json(notFound, 404)
   if (m.userId) return c.json({ error: 'Already joined' }, 409)
+  // The link hands the spot (its balance, its UPI IDs) to whoever opens it, and shows its email: only for whoever
+  // would confirm a "that's me" for it. Anyone else can still have the invite re-sent to the address on file.
+  const mine = confirmerOf(g.members, m, g.createdById)?.userId === uid
+  const link = async () => (mine ? { link: claimUrl(await ensureToken(mid)) } : {})
   const { email } = InviteResendIn.parse(await c.req.json().catch(() => ({})))
   if (email && m.email) {
     if (m.invitedAt && Date.now() - m.invitedAt.getTime() < 60_000) return c.json({ error: 'Invite just sent. Try again in a minute.' }, 429)
-    if (!(await inviteByEmail(gid, mid, m.email, { id: c.get('userId'), name: c.get('userName') }))) return c.json({ error: capped, link: claimUrl(await ensureToken(mid)) }, 429)
+    if (!(await inviteByEmail(gid, mid, m.email, { id: uid, name: c.get('userName') }))) return c.json({ error: capped, ...(await link()) }, 429)
   }
-  return c.json({ link: claimUrl(await ensureToken(mid)) })
+  return c.json(await link())
 })
 
 api.delete('/groups/:gid/members/:mid', async c => {
@@ -514,7 +527,7 @@ api.delete('/groups/:gid/members/:mid', async c => {
   if (m.userId || m._count.shares) return c.json({ error: 'People with expenses or an account can’t be removed' }, 409)
   await db.$transaction(async tx => {
     await tx.member.delete({ where: { id: mid } })
-    await audit(tx, gid, { kind: 'member.removed', memberId: mid, byId: c.get('userId'), byName: c.get('userName'), before: { name: m.name, email: m.email } })
+    await audit(tx, gid, { kind: 'member.removed', memberId: mid, byId: c.get('userId'), byName: c.get('userName'), before: { name: m.name, email: m.email && maskEmail(m.email) } })
   })
   return c.json({ ok: true })
 })
@@ -539,7 +552,7 @@ api.put('/groups/:gid/expenses/:eid', async c => {
   // verified one stays verified while it's the same payment.
   const payee = b.settle ? all.find(m => m.id === payeeId[0]) : undefined
   // Same payment as before: same amount, same payer, same payee. Changing who paid whom needs the new payee to confirm.
-  const samePay = existing && existing.amount === b.amount && existing.shares.find(s => s.paid > 0)?.memberId === payer[0] && existing.shares.find(s => s.owed > 0)?.memberId === payeeId[0]
+  const samePay = existing && existing.settle && existing.amount === b.amount && existing.shares.find(s => s.paid > 0)?.memberId === payer[0] && existing.shares.find(s => s.owed > 0)?.memberId === payeeId[0]
   const canConfirm = !payee?.userId || payee.userId === uid
   const pending = !!b.settle && (canConfirm ? !!b.pending : !(samePay && !existing.pending))
   // Only the payee can say it hasn't arrived: the one thing that stops a settlement counting.
@@ -623,6 +636,7 @@ api.post('/groups/:gid/expenses/:eid/proof', bodyLimit({ maxSize: 8 << 20, onErr
   let file = prev?.file, read: ReceiptRead | null = prev?.read ?? null
   if (b.image) {
     if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
+    if (uploadFull(uid)) return c.json({ error: tooMany }, 429)
     const buf = Buffer.from(b.image.slice(b.image.indexOf(',') + 1), 'base64'), type = imageType(buf)
     if (!type) return c.json({ error: 'That isn’t a photo we can use (JPEG, PNG or WebP)' }, 400)
     if (buf.length > 6 << 20) return c.json({ error: 'Images up to 6 MB' }, 400)
@@ -700,6 +714,10 @@ api.post('/groups/:gid/expenses/:eid/restore', async c => {
 
 // ---------- files: images only, sniffed, stored under our names ----------
 const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
+/** Photos one person can upload in an hour: storage isn't free, and nothing else caps it. */
+const uploads = limiter(3600_000, 60)
+const uploadFull = (uid: string) => { if (uploads.full(uid)) return true; uploads.hit(uid); return false }
+const tooMany = 'That’s a lot of photos for one hour. Try again a little later.'
 async function readImage(c: { req: { arrayBuffer: () => Promise<ArrayBuffer> } }, max: number) {
   const buf = Buffer.from(await c.req.arrayBuffer())
   if (!buf.length || buf.length > max) return { error: `Images up to ${max >> 20} MB` }
@@ -710,6 +728,7 @@ async function readImage(c: { req: { arrayBuffer: () => Promise<ArrayBuffer> } }
 // Profile picture: replaces the old upload, sets user.image.
 api.post('/me/avatar', bodyLimit({ maxSize: 3 << 20, onError: c => c.json({ error: 'Images up to 3 MB' }, 413) }), async c => {
   if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
+  if (uploadFull(c.get('userId'))) return c.json({ error: tooMany }, 429)
   const img = await readImage(c, 3 << 20)
   if ('error' in img) return c.json({ error: img.error }, 400)
   const uid = c.get('userId')
@@ -727,6 +746,7 @@ api.post('/groups/:gid/files', bodyLimit({ maxSize: 6 << 20, onError: c => c.jso
   const gid = Id.parse(c.req.param('gid'))
   if (!(await membership(gid, c.get('userId')))) return c.json(notFound, 404)
   if (!storageReady()) return c.json({ error: 'Photo uploads aren’t set up yet' }, 503)
+  if (uploadFull(c.get('userId'))) return c.json({ error: tooMany }, 429)
   const img = await readImage(c, 6 << 20)
   if ('error' in img) return c.json({ error: img.error }, 400)
   const name = `${crypto.randomUUID()}.${EXT[img.type]}`

@@ -128,8 +128,8 @@ export function useInviteLink(gid: Id, mid: Id, on = true) {
   useEffect(() => {
     if (!on) return
     let live = true
-    const get = (n: number): void => void api<{ link: string }>(`/api/groups/${gid}/members/${mid}/invite`, { method: 'POST', body: '{}' })
-      .then(r => { if (live) setLink(r.link) }, () => { if (live && n) setTimeout(() => get(n - 1), 1500) })
+    const get = (n: number): void => void api<{ link?: string }>(`/api/groups/${gid}/members/${mid}/invite`, { method: 'POST', body: '{}' })
+      .then(r => { if (live) setLink(r.link ?? '') }, () => { if (live && n) setTimeout(() => get(n - 1), 1500) })
     get(3)
     return () => { live = false }
   }, [gid, mid, on])
